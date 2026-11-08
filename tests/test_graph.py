@@ -31,7 +31,7 @@ class GraphTests(unittest.TestCase):
         class Model:
             def chat(self, messages, schema):
                 self_check = output[-1]
-                if "Waiting for the local model" not in self_check:
+                if "waiting for the local model" not in self_check:
                     raise AssertionError("Missing progress before model call")
                 raise ValueError("Local model timed out")
 
@@ -82,7 +82,7 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(read.call_count, 1)
         self.assertEqual(calls[-1][1]["properties"]["action"]["enum"], ["finish"])
-        self.assertTrue(any("read code.py:" in line for line in output))
+        self.assertTrue(any(": read code.py (read)" in line for line in output))
         self.assertIn("The value is 42. [code.py:1]", output)
 
     def test_model_ignoring_loop_recovery_stops_without_repeating_tools(self):

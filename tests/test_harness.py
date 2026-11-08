@@ -50,8 +50,8 @@ class RetryTests(TempWorkspace):
         correction = model.calls[1][-1]["content"]
         self.assertIn("unknown action 'shell'", correction)
         self.assertIn("No tool ran", correction)
-        self.assertTrue(any("[1/3] Invalid model reply" in line for line in output))
-        self.assertTrue(any("[2/3] Final answer:" in line for line in output))
+        self.assertTrue(any("Step 1 (max 3): invalid model reply" in line for line in output))
+        self.assertTrue(any("Step 2 (max 3): final answer" in line for line in output))
 
     def test_missing_fields_and_bad_json_are_described(self):
         model = ScriptedModel([dict(action="finish"), action("finish", content="Done.")])
@@ -190,7 +190,7 @@ class StreamingTests(TempWorkspace):
         output, streamed = [], []
         self.assertEqual(run(StreamingModel(), self.ws, "Explain", output=output.append, stream=streamed.append), 0)
         self.assertEqual("".join(streamed), "Streamed answer.\n")
-        self.assertEqual(sum("Final answer:" in line for line in output), 1)
+        self.assertEqual(sum("final answer" in line for line in output), 1)
         self.assertNotIn("Streamed answer.", output)
 
 
@@ -572,6 +572,22 @@ class TaskKindTests(TempWorkspace):
         self.assertEqual("".join(streamed), text + "\n")
         self.assertIn(LIMIT_NOTE, output)
         self.assertFalse(any("Every step is local." in line for line in output))
+
+    def test_streamed_answer_with_trailing_space_is_not_printed_twice(self):
+        # The real failure: the streamed answer ended with a space, the points were joined to the stripped text,
+        # and the whole answer was printed a second time.
+        (self.root / "worker.py").write_text("def review():\n    return 1\n")
+
+        class Model:
+            def chat(self, messages, schema, on_text=None):
+                on_text("It reviews rewrites. ")
+                return dict(action("finish", content="It reviews rewrites. "),
+                            points=[{"path": "worker.py", "symbol": "review", "text": "Returns 1."}])
+        output, streamed = [], []
+        run(Model(), self.ws, "What does the review function do?", output=output.append, stream=streamed.append)
+        self.assertEqual("".join(streamed), "It reviews rewrites. \n")
+        self.assertFalse(any("It reviews rewrites." in line for line in output))
+        self.assertIn("- worker.py:1-2 `review`: Returns 1.", output)
 
     def test_message_field_is_bounded_in_every_schema(self):
         from offline_agent.agent import SCHEMA, cited_schema

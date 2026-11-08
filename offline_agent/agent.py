@@ -177,6 +177,11 @@ def section_note(start, end, next_start, total):
             f"\"{end + 1}-{min(next_start - 1, end + end - start + 1)}\"")
 
 
+def step_label(step, max_steps):
+    """Progress label such as "Step 2 (max 12)": the limit is a ceiling, not the planned number of steps."""
+    return f"Step {step} (max {max_steps})"
+
+
 def page_note(start, end, total):
     """Header for a page of a file, naming the next range when lines remain."""
     remaining = (f"; {total - end} more lines, request content \"{end + 1}-{min(total, end + end - start + 1)}\""
@@ -474,7 +479,7 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
                              f"\nEvidence limited: {state.get('evidence_limited', False)}.\n" + evidence}]
                 if state.get("invalid_replies"):
                     messages.append(state["messages"][-1])  # Carry the correction into the rebuilt prompt.
-        output(f"\n[{step}/{max_steps}] Waiting for the local model (loading and prompt processing can take time)...")
+        output(f"\n{step_label(step, max_steps)}: waiting for the local model (loading and prompt processing can take time)...")
         started = time.monotonic()
         stopped = threading.Event()
         streamed = []
@@ -486,7 +491,7 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
         def on_text(chunk):
             if not streamed:
                 stopped.set()  # Keep progress lines from interleaving with the answer.
-                output(f"\n[{step}/{max_steps}] Final answer:")
+                output(f"\n{step_label(step, max_steps)}: final answer")
             streamed.append(chunk)
             write_stream(chunk)
 
@@ -529,7 +534,7 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
         if problem:
             if state.get("invalid_replies", 0):
                 raise ValueError(f"Model returned an invalid action twice in a row: {problem}")
-            output(f"\n[{steps}/{max_steps}] Invalid model reply ({problem}); asking the model to correct it.")
+            output(f"\n{step_label(steps, max_steps)}: invalid model reply ({problem}); asking the model to correct it.")
             return {"messages": state["messages"] + [{"role": "user", "content": CORRECTION.format(problem)}],
                     "reply": {"action": "retry", "path": "", "content": "", "message": ""},
                     "steps": steps, "invalid_replies": 1}
@@ -540,7 +545,7 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
         wants_change = kind == "change" and not state.get("changed") and not state.get("attempted")
         if reply["action"] == "finish" and wants_change and not state.get("nudged") and not finishing:
             # The model often writes the fix into its final answer instead of the file.
-            output(f"\n[{steps}/{max_steps}] The model finished without changing a file; asking it to make the change.")
+            output(f"\n{step_label(steps, max_steps)}: the model finished without changing a file; asking it to make the change.")
             return {"messages": state["messages"] + [{"role": "assistant", "content": json.dumps(reply)},
                                                      {"role": "user", "content": MUST_CHANGE}],
                     "reply": {"action": "retry", "path": "", "content": "", "message": ""},
@@ -555,9 +560,9 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
         shown = "".join(streamed)
         if reply["action"] == "finish":
             if not streamed:
-                output(f"\n[{steps}/{max_steps}] Final answer:")
+                output(f"\n{step_label(steps, max_steps)}: final answer")
         else:
-            output(f"\n[{steps}/{max_steps}] {reply['action']} {target}: {reply['message']}")
+            output(f"\n{step_label(steps, max_steps)}: {reply['action']} {target} ({reply['message']})")
         if repeated:
             output("Repeated action detected; skipping the duplicate tool call and requesting a final answer.")
         if reply["action"] == "finish":
@@ -579,9 +584,11 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
                     output(LIMIT_NOTE)
                     if answer[len(overview):].strip():
                         output(answer[len(overview):].lstrip("\n"))
-                elif not (cut and streamed) and shown != answer:
-                    # Cited points follow a streamed overview, so print only what was not shown.
-                    output(answer[len(shown):].lstrip("\n") if shown and answer.startswith(shown) else answer)
+                elif not (cut and streamed) and shown.strip() != answer.strip():
+                    # Cited points follow a streamed overview, so print only what was not shown. The overview is
+                    # stripped before the points are joined, so a trailing space must not make it look different.
+                    base = shown.rstrip()
+                    output(answer[len(base):].lstrip() if base and answer.startswith(base) else answer)
                 if capped and not streamed:
                     output(LIMIT_NOTE)
             for issue in issues:

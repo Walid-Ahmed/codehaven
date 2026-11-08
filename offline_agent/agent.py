@@ -201,6 +201,20 @@ def named_files(task, files):
             break
     return found
 REPEAT_NOTE = "[Answer stopped when it began repeating itself; only the text before the repetition is kept.]"
+LIMIT_NOTE = "[Answer reached its length limit; it ends at its last complete sentence.]"
+
+
+def trim_at_limit(text, limit):
+    """End an answer cut by its schema's maxLength at its last complete sentence. Returns (text, trimmed).
+
+    The cut lands mid-word, and Qwen often emits a stray Chinese token right at it.
+    """
+    if not isinstance(limit, int) or len(text) < limit:
+        return text, False
+    end = max(text.rfind(mark) for mark in (". ", ".\n", "? ", "?\n", "! ", "!\n", ".)", ".`"))
+    if end > 0:
+        return text[:end + 1].rstrip(), True
+    return text[:text.rstrip().rfind(" ")].rstrip() + " …" if " " in text.strip() else text, True
 CORRECTION = ("Your previous reply was invalid: {}. No tool ran. Reply again with one JSON object containing exactly "
               "action, path, content, and message as strings, where action is one of " + ", ".join(ACTIONS) + ".")
 
@@ -476,14 +490,18 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
             streamed.append(chunk)
             write_stream(chunk)
 
-        # Discovery answers may be withheld after checks, so they are never shown before validation.
-        live = stream is not None and not state.get("discovery", False)
+        # Discovery answers may be withheld after checks, so they are never shown before validation. A named-file
+        # overview is short and capped, so it is printed once complete: streamed text cannot be trimmed afterward.
+        live = stream is not None and not state.get("discovery", False) and not (question and cite_files)
         reporter = threading.Thread(target=progress, daemon=True)
         reporter.start()
-        cut, missing = False, []
+        cut, missing, capped, overview = False, [], False, ""
         try:
             try:
                 reply = model.chat(messages, schema, on_text=on_text) if live else model.chat(messages, schema)
+                if isinstance(reply, dict) and reply.get("action") == "finish" and isinstance(reply.get("content"), str):
+                    reply["content"], capped = trim_at_limit(reply["content"], schema["properties"]["content"].get("maxLength"))
+                    overview = reply["content"]
                 if question:
                     reply, missing = with_points(reply, workspace, state.get("search_evidence", []))
                 problem = reply_problem(reply)
@@ -556,9 +574,16 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
                     output(REPEAT_NOTE)
                 # Print unless already streamed; a streamed loop is followed by the note, not a second copy.
                 answer = reply["content"] or reply["message"]
-                if not (cut and streamed) and shown != answer:
+                if capped and streamed:
+                    # The unfinished sentence was already on screen; say it is dropped and show only the points after it.
+                    output(LIMIT_NOTE)
+                    if answer[len(overview):].strip():
+                        output(answer[len(overview):].lstrip("\n"))
+                elif not (cut and streamed) and shown != answer:
                     # Cited points follow a streamed overview, so print only what was not shown.
                     output(answer[len(shown):].lstrip("\n") if shown and answer.startswith(shown) else answer)
+                if capped and not streamed:
+                    output(LIMIT_NOTE)
             for issue in issues:
                 output("Answer check: " + issue)
             if issues:

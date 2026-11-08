@@ -320,17 +320,19 @@ class PreloadTests(TempWorkspace):
         class Model:
             def chat(self, messages, schema, on_text=None):
                 schemas.append(schema)
-                on_text("Creates the gateway app.")
+                if on_text:
+                    on_text("Creates the gateway app.")
                 return dict(reply)
         output, streamed = [], []
         status = run(Model(), self.ws, "explain gateway/main.py", output=output.append, stream=streamed.append)
         self.assertEqual(status, 0)  # Looked-up ranges are citations that the answer check verifies.
+        self.assertEqual(streamed, [])  # A capped overview is printed whole, never streamed and then cut.
         points = schemas[0]["properties"]["points"]
         self.assertIn("points", schemas[0]["required"])
         self.assertEqual(points["items"]["properties"]["path"]["enum"], ["gateway/main.py"])
         self.assertNotIn("edit", schemas[0]["properties"]["action"]["enum"])
-        # The streamed overview is not printed again; points follow it once each, with real line ranges.
-        self.assertIn("- gateway/main.py:1 `imports`: Imports FastAPI.\n- gateway/main.py:3 `app`: Creates the app.\n"
+        # The overview is printed once; points follow it once each, with real line ranges.
+        self.assertIn("Creates the gateway app.\n- gateway/main.py:1 `imports`: Imports FastAPI.\n- gateway/main.py:3 `app`: Creates the app.\n"
                       "- gateway/main.py:6-8 `/health`: Reports that the gateway is up.", output)
         self.assertEqual(sum("Creates the app." in line for line in output), 1)
 
@@ -539,6 +541,37 @@ class TaskKindTests(TempWorkspace):
         first = json.dumps(model.calls[0])
         self.assertIn("pricing.py:1 (defines it)", first)
         self.assertIn("pricing.py:6 (inside checkout_total)", first)
+
+    def test_answer_cut_by_its_length_limit_ends_at_its_last_full_sentence(self):
+        from offline_agent.agent import LIMIT_NOTE, OVERVIEW_CHARS, trim_at_limit
+        (self.root / "worker.py").write_text("def review():\n    return 1\n")
+        # The real failure: four sentences, cut mid-word at exactly 600 characters with a stray Chinese token.
+        overview = ("It reads the queue. " * 40)[:OVERVIEW_CHARS - 9] + " saving评估"
+        overview = overview[:OVERVIEW_CHARS]
+        model = ScriptedModel([dict(action("finish", content=overview),
+                                    points=[{"path": "worker.py", "symbol": "review", "text": "Returns 1."}])])
+        output = []
+        self.assertEqual(run(model, self.ws, "explain worker.py", output=output.append), 0)
+        printed = "\n".join(output)
+        self.assertNotIn("评估", printed)
+        self.assertIn("It reads the queue.\n- worker.py:1-2 `review`: Returns 1.", printed)
+        self.assertIn(LIMIT_NOTE, output)
+        self.assertEqual(trim_at_limit("Short answer", 600), ("Short answer", False))
+        self.assertEqual(trim_at_limit("no sentence end here at all", 10), ("no sentence end here at …", True))
+
+    def test_streamed_answer_at_its_limit_is_not_printed_twice(self):
+        from offline_agent.agent import FINAL_ANSWER_CHARS, LIMIT_NOTE
+        text = ("Every step is local. " * 200)[:FINAL_ANSWER_CHARS]
+
+        class Model:
+            def chat(self, messages, schema, on_text=None):
+                on_text(text)
+                return action("finish", content=text)
+        output, streamed = [], []
+        run(Model(), self.ws, "Explain the design", output=output.append, stream=streamed.append)
+        self.assertEqual("".join(streamed), text + "\n")
+        self.assertIn(LIMIT_NOTE, output)
+        self.assertFalse(any("Every step is local." in line for line in output))
 
     def test_message_field_is_bounded_in_every_schema(self):
         from offline_agent.agent import SCHEMA, cited_schema

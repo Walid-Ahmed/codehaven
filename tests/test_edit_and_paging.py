@@ -2,9 +2,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from offline_agent.agent import action_key, run
-from offline_agent.workspace import Workspace, apply_edits, line_range, symbol_lines
+from offline_agent.workspace import Workspace, apply_change, apply_edits, line_range, symbol_lines
 
 
 def action(kind, path="", content="", message="Working"):
@@ -93,9 +94,131 @@ class EditBlockTests(unittest.TestCase):
             with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
                 apply_edits("x = 1\nx = 1\n", blocks)
 
+    def test_prose_fences_and_marker_variants_around_blocks_are_ignored(self):
+        blocks = "Here is the fix:\n```\n<<<<<<<SEARCH\nx = 1\n=====\nx = 2\n>>>>>>>\n```\nDone."
+        self.assertEqual(apply_edits("x = 1\ny = 2\n", blocks), "x = 2\ny = 2\n")
+
+    def test_lost_indentation_is_restored_when_one_place_matches(self):
+        text = "def f():\n    if a:\n        return 1\n    return 2\n"
+        self.assertEqual(apply_edits(text, block("if a:\n    return 1", "if b:\n    return 3")),
+                         "def f():\n    if b:\n        return 3\n    return 2\n")
+
+    def test_failed_match_points_at_the_closest_text(self):
+        with self.assertRaisesRegex(ValueError, r"matches 0 times.*at line 2, to copy exactly:\n    return a \+ b"):
+            apply_edits("def add(a, b):\n    return a + b\n", block("return a+b;", "return 0"))
+
     def test_later_failure_applies_nothing(self):
         with self.assertRaises(ValueError):
             apply_edits("a\nb\n", block("a", "A") + "\n" + block("missing", "B"))
+
+
+STORE = ('from config import MAX_ITEMS\n\n\nclass Store:\n    def __init__(self):\n        self.items = {}\n\n'
+         '    def low_stock(self, threshold=3):\n        """Return items at or below the threshold."""\n'
+         '        return [item for item in self.items.values() if item.quantity < threshold]\n\n'
+         '    def size(self):\n        return len(self.items)\n')
+
+
+class FragmentTests(unittest.TestCase):
+    def test_new_version_of_part_of_a_file_keeps_the_rest(self):
+        # The exact reply shape that failed 11 times running before fragments were accepted.
+        fragment = ('class Store:\n    def __init__(self):\n        self.items = {}\n\n'
+                    '    def low_stock(self, threshold=3):\n        """Return items at or below the threshold."""\n'
+                    '        return [item for item in self.items.values() if item.quantity <= threshold]')
+        self.assertEqual(apply_change(STORE, fragment), STORE.replace("quantity < threshold", "quantity <= threshold"))
+
+    def test_inserted_lines_and_lost_indentation(self):
+        fragment = 'def low_stock(self, threshold=3):\n    """Return items at or below the threshold."""\n    # Inclusive.\n' \
+                   '    return [item for item in self.items.values() if item.quantity < threshold]'
+        result = apply_change(STORE, fragment)
+        self.assertIn('        # Inclusive.\n        return [item', result)
+        self.assertIn("    def size(self):", result)
+
+    def test_single_changed_line_finds_the_one_closest_line(self):
+        text = "".join(f'    ("SKU-{n:04}", "Widget {n}", {(n * 7 % 90) + 10}.25),\n' for n in range(1, 600))
+        result = apply_change(text, '("SKU-0042", "Widget 42", 19.99),')
+        self.assertIn('    ("SKU-0042", "Widget 42", 19.99),\n', result)
+        self.assertEqual(sum(a != b for a, b in zip(text.splitlines(), result.splitlines())), 1)
+
+    def test_ambiguous_unrelated_placeholder_and_destructive_fragments_are_refused(self):
+        repeated = "a = 1\nb = 2\n\nc = 3\na = 1\nb = 2\n"
+        long_file = "start = 1\n" + "".join(f"keep_{n} = {n}\n" for n in range(30)) + "end = 2\n"
+        for text, fragment, message in ((repeated, "a = 1\nb = 2\nz = 9", "several places"),
+                                        (STORE, "import totally\nprint(totally.different())", "does not match"),
+                                        (STORE, "class Store:\n    # ... rest of the class ...\n    pass", "placeholder"),
+                                        (long_file, "start = 1\nend = 2", "would remove 30 lines"),
+                                        (STORE, "   ", "needs SEARCH/REPLACE")):
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                apply_change(text, fragment)
+
+    def test_change_is_not_put_over_a_similar_line_when_it_belongs_elsewhere(self):
+        # A real failure: the model wrote the changed row beside the table's last row, and that row was overwritten.
+        rows = [f'    ("Regional Day {n}", "2027-01-{n:02}"),' for n in range(1, 20)]
+        rows[5] = '    ("Founders Day", "2027-02-11"),'
+        text = "HOLIDAYS = [\n" + "\n".join(rows) + '\n    ("Harvest Night", "2027-10-09"),\n]\n'
+        fragment = '    ("Founders Day", "2027-03-15"),\n    ("Harvest Night", "2027-10-09"),\n]'
+        with self.assertRaisesRegex(ValueError, r"belongs at line 7"):
+            apply_change(text, fragment)
+        # A row sharing the new date and the common word must not be mistaken for the right place.
+        text = text.replace('"Regional Day 2", "2027-01-02"', '"Regional Day 2", "2027-03-15"')
+        with self.assertRaisesRegex(ValueError, r"belongs at line 7"):
+            apply_change(text, fragment)
+        text = text.replace('"Regional Day 2", "2027-03-15"', '"Regional Day 2", "2027-01-02"')
+        result = apply_change(text, '    ("Founders Day", "2027-03-15"),')
+        self.assertEqual(result, text.replace("2027-02-11", "2027-03-15"))
+
+    def test_windows_line_endings_are_kept(self):
+        self.assertEqual(apply_change("a = 1\r\nb = 2\r\nc = 3\r\n", "a = 1\nb = 5"), "a = 1\r\nb = 5\r\nc = 3\r\n")
+
+
+class WriteSafetyTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.ws = Workspace(self.root)
+        self.big = "".join(f"line_{n} = {n}\n" for n in range(60))
+        (self.root / "big.py").write_text(self.big)
+
+    def attempt(self, content, task="Update big.py"):
+        output = []
+        model = ScriptedModel([action("write", "big.py", content), action("finish", content="Finished.")])
+        run(model, self.ws, task, apply=True, confirm=lambda _: True, output=output.append)
+        return "\n".join(output), model
+
+    def test_write_that_would_lose_most_of_a_file_is_refused(self):
+        output, model = self.attempt("totally = 'different'\n")
+        self.assertEqual((self.root / "big.py").read_text(), self.big)
+        self.assertIn("would remove 59 of its 60 lines", model.calls[1][-1]["content"])
+        self.assertNotIn("+++ big.py", output)
+
+    def test_write_with_a_placeholder_is_refused(self):
+        self.attempt("line_0 = 0\n# ... rest of the file ...\n" + "other = 1\n" * 40)
+        self.assertEqual((self.root / "big.py").read_text(), self.big)
+
+    def test_user_may_ask_for_a_rewrite(self):
+        self.attempt("short = 1\n", task="Rewrite big.py from scratch")
+        self.assertEqual((self.root / "big.py").read_text(), "short = 1\n")
+
+    def test_write_of_only_part_of_a_file_keeps_the_rest(self):
+        self.attempt("line_29 = 29\nline_30 = 'new'\nline_31 = 31\n")
+        self.assertEqual((self.root / "big.py").read_text(), self.big.replace("line_30 = 30", "line_30 = 'new'"))
+
+    def test_writes_keep_bytes_and_permissions_and_leave_no_temporary_file(self):
+        target = self.root / "run.sh"
+        target.write_bytes(b"echo a\r\n")
+        target.chmod(0o755)
+        before = self.ws.read("run.sh")
+        self.ws.write("run.sh", "echo b\r\n", before)
+        self.assertEqual(target.read_bytes(), b"echo b\r\n")
+        self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+        self.assertEqual([p.name for p in self.root.iterdir() if p.name.startswith(".codehaven")], [])
+
+    def test_failed_replace_leaves_the_file_untouched(self):
+        before = self.ws.read("big.py")
+        with patch("offline_agent.workspace.os.replace", side_effect=OSError("disk full")), self.assertRaises(OSError):
+            self.ws.write("big.py", "x = 1\n", before)
+        self.assertEqual((self.root / "big.py").read_text(), self.big)
+        self.assertEqual([p.name for p in self.root.iterdir() if p.name.startswith(".codehaven")], [])
 
 
 class AgentToolTests(unittest.TestCase):

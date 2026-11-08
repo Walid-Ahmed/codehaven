@@ -35,15 +35,15 @@ Acceptance criteria: preview mode never writes; declined writes never apply; con
 
 Implemented a typed in-memory StateGraph with model, read, write, and limit nodes. Conditional edges dispatch validated actions and stop at finish or the model-action limit. The existing workspace restrictions and per-file confirmation remain. LangGraph and LangSmith are installed during setup, with tracing explicitly disabled during runs. There is no hosted graph service, checkpoint persistence, or automatic retry. Inference remains restricted to local `qwen2.5-coder:7b`.
 
-## Next: reliable project editing
+## Next
 
-Prioritize after trying v0.1 on small real repositories:
+Shipped since this list was first written: exclusions (v0.6), context budgeting and malformed-reply recovery, patch edits with stale-content checks, atomic writes, and a local benchmark (v0.8). Prioritized from what the v0.8 evals showed:
 
-- Exclusion support shipped in v0.6; further Git configuration integration remains optional.
-- Add context budgeting and recovery from malformed model output (literal content search shipped in v0.2.2).
-- Add multi-file proposals, atomic writes, backups, and rollback.
-- Add smaller patch edits with stale-content checks.
-- Benchmark `qwen2.5-coder:7b` on representative coding tasks and document tested hardware.
+- Make edits more stable. Results still vary as prompts change: `fix-low-stock` passed two runs and failed a third when the model looped past the token limit, then swapped the two sides of its SEARCH/REPLACE block.
+- Catch inserted lines placed next to the right spot instead of in it. Docstrings and comments are the remaining common edit failure, and they pass every current check. A CLI smoke test also showed the model adding a stray duplicate of the line it changed. The diff shows these before you confirm, so read it rather than trusting the summary.
+- Run the tests automatically after an edit where Docker is available, so a wrong change fails the task. The evals currently decline test runs.
+- Evaluate on real repositories. Both eval repositories are small, and the tasks are short and mostly touch one file.
+- Add backups or rollback for multi-file changes.
 
 ## Version 0.2.1: approved unittest execution
 
@@ -178,3 +178,32 @@ sandbox containers remained after validation. The local image was prepared with
 pytest 9.2.0. Package installation, dependency checks, compilation, and whitespace
 checks passed. CI adds a separate Linux Docker integration job; its result is
 separate from this local validation.
+
+## Version 0.8: reliable edits and evidence from real runs
+
+Reading full transcripts of the local model changed the priorities. The model usually wrote a correct change but not in the requested SEARCH/REPLACE format, so it failed the parser repeatedly. Added:
+
+- Edits that are simply the new version of some lines, merged into the file with checks for ambiguous, unrelated, misplaced, or destructive changes.
+- Whole-file write guards, atomic writes, and byte-exact line endings.
+- Read-only question tasks, and symbol-based citations for every question.
+- Automatic search for code names in the task, with enclosing functions in results.
+- File previews showing the start, the end, and the lines a task names.
+- Word stems, camelCase splitting, and constant values in retrieval.
+- Loop detection across a whole task, a length limit on the `message` field, and a reminder for change tasks that end without a change.
+- Warnings when another Ollama client forces model reloads.
+- Eval reports with run logs, raw replies, changed files, and reload counts.
+
+Validation on November 7, 2026, on an Apple M4 with 24 GB, using `qwen2.5-coder:7b` with no other Ollama client running:
+
+| Task set | Before (Nov 1) | v0.8 |
+|---|---|---|
+| `evals/tasks.json`, the set tuned against | 7/12, mean 5.58 steps | 10/12, mean 1.83 steps |
+| `evals/bookings_tasks.json`, tasks 1-8, seen during tuning | not run | 7/8 |
+| `evals/bookings_tasks.json`, tasks 9-14, seen during tuning | not run | 5/6 |
+| `evals/bookings_tasks.json`, tasks 15-20, written after the last code change and never tuned against | not run | 6/6 |
+
+Tasks 1-8 scored 4/8 on their first run, and tasks 9-14 scored 4/6, before later fixes. Those first scores are the fairer measure of how the earlier code handled tasks it had not seen. The last six tasks are a small sample on a small repository and include no multi-file change, so 6/6 does not establish general reliability.
+
+Timing: the 12 main tasks took 513 seconds. The Nov 1 run took 3,013 seconds, but it is not known whether another Ollama client was active then, so that gap cannot all be credited to these changes. With a competing client, steps measured 35-113 seconds of model loading each.
+
+Remaining failures in the final run: `fix-low-stock` (see Next), `slugify-docstring` and `f-comment` (a correct line in the wrong place, reported as success, so these answer checks do not catch it), and `h-holiday-date` (the placement check refused the change correctly, but the model resent it unchanged).

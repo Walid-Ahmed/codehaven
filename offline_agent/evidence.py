@@ -35,6 +35,8 @@ def retain(previous, matches):
                 "snippet": match.get("text", "")[:64]}
         if "end_line" in match:
             item["end_line"] = match["end_line"]
+        if match.get("in"):
+            item["in"] = match["in"]
         old = next((old for old in records if (old["path"], old["line"]) == (item["path"], item["line"])), None)
         if old is not None:
             if "end_line" in item:
@@ -68,8 +70,12 @@ def mentions(line, path):
     return re.search(rf"(?<![\w./-])(?:repo/)?{path}(?![\w/-]|\.\w)", line) is not None
 
 
-def check_answer(answer, evidence, *, discovery=False):
-    """Flag detectable gaps, not a semantic proof of truth."""
+def check_answer(answer, evidence, *, discovery=False, require_citation=True):
+    """Flag detectable gaps, not a semantic proof of truth.
+
+    require_citation is for answers about the code. A report that a change was made needs no line citations,
+    and flagging those made every such report look unverified.
+    """
     issues = []
     repeated = Counter(line.strip() for line in answer.splitlines() if len(line.strip()) >= 40)
     if any(count >= 3 for count in repeated.values()):
@@ -89,7 +95,7 @@ def check_answer(answer, evidence, *, discovery=False):
             valid.add(path)
         else:
             issues.append(f"Citation not supported by retained evidence: {path}:{start}-{end}.")
-    if evidence and not valid:
+    if require_citation and evidence and not valid:
         issues.append("Repository claims require path:line citations supported by observed evidence.")
     if discovery:
         missing = services - valid

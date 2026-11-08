@@ -74,6 +74,10 @@ def main(argv=None):
         model = Ollama(endpoint=args.endpoint, max_output_tokens=args.max_output_tokens,
                        prompt_budget=args.prompt_budget)
         model.check_model()
+        others = model.other_loaded_models()
+        if others:
+            print("Warning: Ollama also has " + ", ".join(others) + " loaded. If both models do not fit in memory, Ollama "
+                  "reloads them in turn, which can add a minute or more to every step. Check with `ollama ps`.")
         if args.doctor:
             print(f"Local Ollama is ready: {MODEL}")
             return 0

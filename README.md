@@ -4,7 +4,7 @@
 
 ![CodeHaven: working locally, with offline coding, privacy, and no API fees.](docs/assets/codehaven-working-preview.png)
 
-Version 0.7.0 — a small command-line coding agent that uses only the installed local `qwen2.5-coder:7b` Ollama model. Ask it to inspect a project, explain code, or propose file changes. No cloud inference, automatic downloads, or tracing. LangGraph orchestrates the workflow locally; model requests go directly to Ollama. At runtime nothing leaves your device.
+Version 0.8.0 — a small command-line coding agent that uses only the installed local `qwen2.5-coder:7b` Ollama model. Ask it to inspect a project, explain code, or propose file changes. No cloud inference, automatic downloads, or tracing. LangGraph orchestrates the workflow locally; model requests go directly to Ollama. At runtime nothing leaves your device.
 
 ## Quick start
 
@@ -79,16 +79,23 @@ If the model returns invalid JSON, an unknown action, missing fields, or a reply
 
 Small models at temperature 0 sometimes repeat the same sentences until they hit the token limit. Replies are always streamed from Ollama, so a final answer that keeps repeating a phrase is stopped as soon as the loop is detected. The text before the repetition is kept as the answer, marked with a note. Forced final answers are also capped at 3,000 characters. The repeat penalty is left unchanged on purpose, because edits must copy file text exactly.
 
+Identical actions are caught anywhere in a task, not only back to back, so alternating lookups and repeated failed edits stop early instead of using every step. An action may be repeated after a file changes, or after compaction has removed its earlier result.
+
 Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/python/langgraph/graph-api). Remote tracing is not supported. Every run is wrapped in [`tracing_context(enabled=False)`](https://docs.langchain.com/langsmith/trace-without-env-vars), so `LANGSMITH_TRACING`, `LANGCHAIN_TRACING_V2`, or an API key in your environment cannot turn uploads on. No tracing client is ever created. For timing and token details, use the local `Ollama metrics:` line printed after each model call.
 
-## What v0.7 does
+## What v0.8 does
 
 - Lists up to 1,000 visible project files and lets the model read selected UTF-8 files.
 - Uses structured JSON actions to read, search file contents, retrieve references, edit part of a file, propose a complete file, run tests, or finish.
 - Reads long files in pages. Content such as `120-180` asks for a line range. A read that would not fit in half the prompt budget returns whole lines up to that size and names the next range to request, so evidence is never silently truncated.
-- Preloads up to two files that your task names, such as `explain chapter-06/gateway/app/main.py`. The model starts with the file's lines instead of spending steps finding and reading it, and those lines count as evidence for citations. A plain file name like `store.py` counts only if exactly one file has that name. Hidden and excluded files are never preloaded. Questions get line numbers to cite. Change requests get plain text, so SEARCH blocks stay exact.
-- Explaining a named file uses a stricter answer format: a short overview plus up to 10 points. Each point names a part of the code: a function, class, `Class.method`, variable, route such as `/health`, or `imports`. CodeHaven finds that part's real lines in the file and prints `path:start-end` from it, because small models describe code well but make up line numbers. Python files are parsed, never run; other files use the first line that mentions the name. A name that isn't in the file is shown as not found and flagged, and citations are checked against the lines the model actually saw. The format also stops the long, padded answers that small models drift into. Edits are not offered in this mode.
-- Edits existing files with exact SEARCH/REPLACE blocks, so changing a few lines of a large file costs a few output tokens instead of a full rewrite. Each SEARCH text must match exactly once. Otherwise nothing changes and the model is told why. Edits use the same diff preview and per-file confirmation as writes.
+- Preloads up to two files that your task names, such as `explain chapter-06/gateway/app/main.py`. The model starts with the file's lines instead of spending steps finding and reading it, and those lines count as evidence for citations. A file too long to fit shows its start, its end, and the lines around any code-like name in the task, such as `SKU-0042`, because the answer is often not on the first page. A plain file name like `store.py` counts only if exactly one file has that name. Hidden and excluded files are never preloaded. Questions get line numbers to cite. Change requests get plain text, so SEARCH blocks stay exact.
+- Questions are read-only: when a task clearly only asks something, `edit` and `write` are not offered, so "Which function calls X?" cannot turn into a code change. Tasks that are unclear keep every tool.
+- Answers to questions use a stricter format: an answer plus up to 10 points. Explaining a named file limits the overview to a short paragraph. Each point names a part of the code: a function, class, `Class.method`, variable, route such as `/health`, or `imports`. CodeHaven finds that part's real lines in the file and prints `path:start-end` from it, because small models describe code well but make up line numbers. Python files are parsed, never run; other files use the first line that mentions the name. A name that isn't in the file is shown as not found and flagged, and citations are checked against the lines the model actually saw. The format also stops the long, padded answers that small models drift into. A range is narrowed to the lines the model actually saw.
+- Edits existing files with SEARCH/REPLACE blocks, so changing a few lines of a large file costs a few output tokens instead of a full rewrite. Each SEARCH text must match exactly once, though prose around the blocks and lost indentation are tolerated. A SEARCH text that matches nothing gets an error showing the closest lines in the file.
+- Also accepts an edit that is simply the new version of some lines, because that is what the local model tends to write. Lines shared with the file locate the region, and the rest of the file is untouched. The change is refused if the place is ambiguous, the content has little in common with the file, or it would remove much more than it shows. All edits use the same diff preview and per-file confirmation as writes.
+- Refuses a whole-file `write` that would lose code: one containing a placeholder such as `# ... rest of the file ...`, or one removing more than half of a file of 20 or more lines, unless the task asks for that. A `write` holding only part of a file updates that part. Writes replace the file atomically, so a crash or full disk cannot leave it half-written, and they keep the file's permissions and line endings.
+- A change task that ends without a change gets one reminder, and is then reported as unverified with exit code 2. A report that a change was made does not need line citations.
+- Search results name the enclosing function or class of each match and mark definitions, so "who calls this?" is answered by the result itself.
 - Runs unittest or pytest in isolated Docker containers after approval, with networking disabled, read-only project snapshots, a 30-second timeout, and bounded output.
 - Shows unified diffs before edits, with confirmation for each write.
 - Parses proposed `.py` and `.pyi` content with `ast.parse` before showing a diff. The parser never runs the code. A change that introduces a syntax error is neither previewed nor written. Instead, the model gets the error line so it can fix the change. Files that were already broken are not blocked.
@@ -133,6 +140,8 @@ If `orders.py` imports a helper from `pricing.py`, retrieval can include the pri
 
 Retrieval prefers complete parsed functions, methods, classes, and supported TS declarations when they fit. Results mark `symbol_complete: true` for full symbols or `false` when falling back to a partial excerpt. It considers different files before repeatedly selecting chunks from one file, reserves space for dependencies, and skips candidates that cannot fit instead of ending retrieval immediately.
 
+Identifiers are split at underscores and camelCase, so `applyDiscount` and `apply_discount` both match "apply discount". The bundled LangGraph notes are left out of results when a question does not mention LangGraph and the project has matches of its own.
+
 Up to four keyword matches and four dependency passages share a configurable UTF-8 JSON budget (CLI default 4,000 bytes). For example:
 
 ```sh
@@ -144,11 +153,15 @@ offline-agent --workspace /path/to/repo --retrieval-budget 8000 \
 
 ## Local inference speed
 
+**Check this first if every step takes a minute or more.** Ollama unloads a model when another one needs the memory. If another program is using a different model at the same time and both do not fit, Ollama swaps them on every request, and most of each step goes to reloading. This has been measured at 35–113 seconds of loading per step on a 24 GB machine. CodeHaven warns at startup when another model is loaded, and warns during a run when a later step had to reload. Check with `ollama ps`, and stop the other program for much faster runs.
+
+Model requests wait up to 10 minutes for a response, so a slow reload does not fail the task.
+
 CodeHaven sends a task-ranked sample of at most 40 paths / 2,000 bytes instead of
 the entire file list. Ollama requests keep the model loaded for 30 minutes and
 preserve the conversation prefix until compaction is necessary, allowing server
-prompt-cache reuse when available. There is no persistent application cache or
-cross-task conversation memory. Another client or model unloading can prevent reuse.
+prompt-cache reuse when available. There is no persistent application cache, and only
+`--interactive` sessions carry recent answers between tasks. Another client or model unloading can prevent reuse.
 
 `--prompt-budget` bounds message content plus a small per-message allowance
 (default 12,000 UTF-8 bytes). Older evidence is omitted when necessary; oversized
@@ -170,7 +183,7 @@ Small tasks with the defaults should require less prompt processing, but perform
 still depends on hardware, context, and Ollama. No fixed speed improvement is guaranteed.
 
 Progress lines show the actual action and target alongside the model's narration.
-An identical consecutive read/search/retrieve request is skipped and triggers one
+An identical repeated action is skipped and triggers one
 finish-only recovery call, within the action limit. If the model ignores recovery,
 the run stops with exit code 2. A step-limit exit also means the task is incomplete;
 intermediate tool narration is not a final answer. This guard catches repeated
@@ -210,7 +223,7 @@ Discovery summaries use a short dedicated prompt and a bounded response schema.
 Checks also flag repeated substantial lines and test/stub paths listed under a
 conflicting recognized heading. If a discovery summary fails checks, it is withheld
 and replaced with the classified source inventory plus the specific warnings.
-The raw model reply remains in run state (and opted-in content traces); the source
+The raw model reply remains in run state; the source
 inventory does not silently turn a rejected model summary into a verified answer.
 
 After each model response, CodeHaven shows the timing fields Ollama supplies:
@@ -278,8 +291,14 @@ python3 -m offline_agent.evaluation
 python3 -m offline_agent.evaluation --only fix-low-stock --only last-product
 ```
 
-[evals/tasks.json](evals/tasks.json) holds 12 tasks over the small [sample repository](evals/sample_repo): questions, a paged read of a 600-line file, entry-point discovery, a bug fix, a one-line change in a large file, and a new file. Each task runs on a fresh temporary copy, with writes auto-confirmed inside that copy and test runs declined. Regex checks score each answer or resulting file. The run prints a table of pass/fail, exit code, steps, tokens, and time, and writes the full report to `evals/results/latest.json`, which Git ignores. Like normal use, evaluation talks only to loopback Ollama. Compare reports before and after a change. Results vary between runs, so look at trends rather than one pass or fail. A live model smoke test is separate: run `--doctor`, then ask it to create a function in a disposable project, confirm its diff, and test the result.
+To check that a change is not fitted to those tasks, also run the [second set](evals/bookings_tasks.json) over a [different small repository](evals/bookings_repo). Results are recorded in [the plan](docs/PLAN.md#version-08-reliable-edits-and-evidence-from-real-runs):
+
+```sh
+python3 -m offline_agent.evaluation --tasks evals/bookings_tasks.json --repo evals/bookings_repo
+```
+
+[evals/tasks.json](evals/tasks.json) holds 12 tasks over the small [sample repository](evals/sample_repo): questions, a paged read of a 600-line file, entry-point discovery, a bug fix, a one-line change in a large file, and a new file. Each task runs on a fresh temporary copy, with writes auto-confirmed inside that copy and test runs declined. Regex checks score each answer or resulting file. The run prints a table of pass/fail, exit code, steps, tokens, and time, and writes the full report, including each task's run log and changed files, to `evals/results/latest.json`, which Git ignores. A task also fails if it changes a file it does not concern. The summary separately counts tasks that also passed CodeHaven's own answer checks (exit code 0), and warns if model reloads made the timings unrepresentative. Like normal use, evaluation talks only to loopback Ollama. Compare reports before and after a change. Results vary between runs, so look at trends rather than one pass or fail. A live model smoke test is separate: run `--doctor`, then ask it to create a function in a disposable project, confirm its diff, and test the result.
 
 See [the implementation plan and roadmap](docs/PLAN.md) for architecture, acceptance criteria, and next steps. API integration follows [Ollama chat](https://docs.ollama.com/api/chat) and [structured outputs](https://docs.ollama.com/capabilities/structured-outputs).
 
-Historical v0.1 validation is recorded in [the plan](docs/PLAN.md). Current inference is restricted to `qwen2.5-coder:7b`. Automated tests use fake model responses and a loopback HTTP fixture, so they do not establish coding quality on larger projects.
+Historical v0.1 validation is recorded in [the plan](docs/PLAN.md). Current inference is restricted to `qwen2.5-coder:7b`. Automated tests use fake model responses and a loopback HTTP fixture, so they do not establish coding quality. The local evals measure the real model, but only on short tasks over two small repositories, so they do not establish coding quality on larger projects either.

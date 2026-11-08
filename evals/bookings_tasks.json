@@ -1,0 +1,22 @@
+[
+  {"id": "h-js-caller", "task": "Which function calls applyCoupon?", "checks": {"answer": ["totalPrice"]}},
+  {"id": "h-max-guests", "task": "What happens when a room is booked for more guests than allowed, and what is the limit?", "checks": {"answer": ["ValueError", "\\b4\\b"]}},
+  {"id": "h-last-holiday", "task": "What is the last holiday listed in bookings/holidays.py?", "checks": {"answer": ["Harvest Lantern Night"]}},
+  {"id": "h-guest-test", "task": "Which test checks the guest limit?", "checks": {"answer": ["test_guest_limit_is_enforced"]}},
+  {"id": "h-fix-maintenance", "apply": true, "task": "Fix Room.is_available in bookings/rooms.py so rooms under maintenance are never available, as its docstring says.", "checks": {"files": {"bookings/rooms.py": ["def is_available[\\s\\S]*under_maintenance[\\s\\S]*def book\\(self, night, guests\\):", "night not in self\\.booked_nights"]}}},
+  {"id": "h-holiday-date", "apply": true, "task": "In bookings/holidays.py, change the date of Founders Day to 2027-03-15. Change nothing else.", "checks": {"files": {"bookings/holidays.py": ["\\(\"Founders Day\", \"2027-03-15\"\\)", "Harvest Lantern Night", "Regional Day 450"]}}},
+  {"id": "h-rename-fee", "apply": true, "task": "Rename calc_fee to compute_fee everywhere in bookings/fees.py.", "checks": {"files": {"bookings/fees.py": ["def compute_fee\\(amount\\):", "\\{compute_fee\\(amount\\)\\}"]}}},
+  {"id": "h-create-error", "apply": true, "task": "Create bookings/errors.py defining class RoomUnavailable(Exception) with a short docstring.", "checks": {"files": {"bookings/errors.py": ["class RoomUnavailable\\(Exception\\):"]}}},
+  {"id": "f-fee-rate", "task": "What is the service fee rate, and in which file is it defined?", "checks": {"answer": ["0\\.05", "fees\\.py"]}},
+  {"id": "f-tax", "task": "What tax rate does totalPrice apply?", "checks": {"answer": ["0\\.1|10\\s*%"]}},
+  {"id": "f-fee-callers", "task": "Which functions call calc_fee?", "checks": {"answer": ["book", "describe_fee"]}},
+  {"id": "f-set-rate", "apply": true, "task": "Change SERVICE_RATE in bookings/fees.py to 0.07.", "checks": {"files": {"bookings/fees.py": ["^SERVICE_RATE = 0\\.07$", "def calc_fee\\(amount\\):", "def describe_fee\\(amount\\):"]}}},
+  {"id": "f-comment", "apply": true, "task": "Add a one-line comment above the TAX constant in web/cart.js.", "checks": {"files": {"web/cart.js": ["//.*\\nconst TAX = 0\\.1;", "export function applyCoupon", "export function totalPrice"]}}},
+  {"id": "f-rename-var", "apply": true, "task": "Rename the variable subtotal to net in the totalPrice function in web/cart.js.", "checks": {"files": {"web/cart.js": ["const net = items\\.reduce", "applyCoupon\\(net, coupon\\)", "export function applyCoupon"]}}},
+  {"id": "g-guest-limit-name", "task": "What constant sets the maximum number of guests, and what is its value?", "checks": {"answer": ["MAX_GUESTS", "\\b4\\b"]}},
+  {"id": "g-coupon", "task": "What does applyCoupon do with the coupon SAVE10?", "checks": {"answer": ["0\\.9|10\\s*%"]}},
+  {"id": "g-booked-error", "task": "Which exception does Room.book raise when the room is already taken?", "checks": {"answer": ["LookupError"]}},
+  {"id": "g-guest-limit-set", "apply": true, "task": "Change MAX_GUESTS in bookings/rooms.py to 6.", "checks": {"files": {"bookings/rooms.py": ["^MAX_GUESTS = 6$", "class Room:", "def book\\(self, night, guests\\):"]}}},
+  {"id": "g-regional-date", "apply": true, "task": "In bookings/holidays.py, change the date of Regional Day 200 to 2027-12-25. Change nothing else.", "checks": {"files": {"bookings/holidays.py": ["\\(\"Regional Day 200\", \"2027-12-25\"\\)", "Founders Day", "Regional Day 201", "Harvest Lantern Night"]}}},
+  {"id": "g-new-helper", "apply": true, "task": "Create bookings/format.py with a function format_room(number) that returns the string Room followed by the number.", "checks": {"files": {"bookings/format.py": ["def format_room\\(number\\):"]}}}
+]

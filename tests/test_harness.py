@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from offline_agent.agent import ANSWER_FROM_PRELOAD, FINAL_ANSWER_CHARS, FINISH_NOW, REPEAT_NOTE, Session, run
+from offline_agent.agent import ANSWER_FROM_PRELOAD, FINAL_ANSWER_CHARS, FINISH_NOW, REPEAT_NOTE, Session, run, task_kind
 from offline_agent.cli import interactive, main, write_stream
 from offline_agent.model import (MODEL, FinishContent, InvalidReply, Ollama, RepeatedAnswer, RepetitionGuard,
                                  compact_messages)
@@ -361,7 +361,7 @@ class PreloadTests(TempWorkspace):
 
     def test_change_requests_preload_plain_text_for_exact_search_blocks(self):
         self.put("calc.py", "def add(a, b):\n    return a + b\n")
-        model = ScriptedModel([action("finish", content="Done.")])
+        model = ScriptedModel([action("finish", content="Done."), action("finish", content="Done.")])
         run(model, self.ws, "Fix add in calc.py", output=lambda _: None)
         preload = model.calls[0][-1]["content"]
         self.assertIn("Lines 1-2 of 2:\ndef add(a, b):\n    return a + b\n", preload)
@@ -378,6 +378,26 @@ class PreloadTests(TempWorkspace):
         model = ScriptedModel([action("finish", content="Done.")])
         run(model, self.ws, "explain .env", output=lambda _: None)
         self.assertNotIn("SECRET", json.dumps(model.calls[0]))
+
+    def test_large_file_shows_its_end_and_the_lines_the_task_names(self):
+        self.put("catalog.py", "".join(f"row_{n} = {n}\n" for n in range(1, 1001)))
+        model = ScriptedModel([action("finish", content="Done.")])
+        output = []
+        run(model, self.ws, "What is row_500 in catalog.py, and what is the last row?", output=output.append)
+        preload = model.calls[0][-1]["content"]
+        self.assertIn(" 500| row_500 = 500", preload)
+        self.assertIn("1000| row_1000 = 1000", preload)
+        self.assertIn("  1| row_1 = 1".strip(), preload)
+        self.assertLess(len(preload.encode()), 7000)
+        self.assertTrue(any(line.startswith("Preloaded catalog.py (lines 1-") and " and " in line for line in output))
+
+    def test_change_request_shows_the_named_part_of_a_large_file_as_plain_text(self):
+        self.put("catalog.py", "".join(f'("SKU-{n:04}", "Widget {n}", 1.5),\n' for n in range(1, 601)))
+        model = ScriptedModel([action("finish", content="Done."), action("finish", content="Done.")])
+        run(model, self.ws, "In catalog.py, change the price of SKU-0400 to 2.5", output=lambda _: None)
+        preload = model.calls[0][-1]["content"]
+        self.assertIn('("SKU-0400", "Widget 400", 1.5),', preload)
+        self.assertNotIn("| (", preload)
 
     def test_large_named_file_is_paged_and_names_the_next_range(self):
         self.put("big.py", "".join(f"value_{n} = {n}\n" for n in range(1, 1001)))
@@ -477,3 +497,147 @@ class SessionTests(TempWorkspace):
         session = Session(ScriptedModel([]), self.ws)
         session.turns = [(f"q{n}", "a" * 5000) for n in range(Session.TURNS)]
         self.assertLess(len(session.history().encode()), Session.TURNS * 1600)
+
+
+class TaskKindTests(TempWorkspace):
+    def test_tasks_are_classified_conservatively(self):
+        for task, kind in (("Which function calls apply_discount?", "question"), ("Explain inventory/store.py", "question"),
+                           ("Find all FastAPI entry points. Do not modify files.", "question"),
+                           ("What does fix_order do?", "question"), ("How do I add a route?", "other"),
+                           ("Fix the bug in store.py", "change"), ("Can you fix the bug?", "change"),
+                           ("Please make retries configurable", "change"), ("Find and fix the bug", "other"),
+                           ("Run the tests", "other"), ("Task", "other")):
+            with self.subTest(task=task):
+                self.assertEqual(task_kind(task), kind)
+
+    def test_question_cannot_edit_files(self):
+        (self.root / "pricing.py").write_text("def apply_discount(p):\n    return p\n")
+        model = ScriptedModel([action("edit", "pricing.py", "x = 1\n"), action("finish", content="Nobody calls it.")])
+        schemas = []
+        chat = model.chat
+        model.chat = lambda messages, schema: (schemas.append(schema), chat(messages, schema))[1]
+        output = []
+        run(model, self.ws, "Which function calls apply_discount?", apply=True, confirm=lambda _: True, output=output.append)
+        self.assertNotIn("edit", schemas[0]["properties"]["action"]["enum"])
+        self.assertIn("points", schemas[0]["required"])
+        self.assertIn("only asks a question", model.calls[1][-1]["content"])
+        self.assertEqual((self.root / "pricing.py").read_text(), "def apply_discount(p):\n    return p\n")
+
+    def test_answers_to_any_question_can_cite_by_symbol(self):
+        (self.root / "pricing.py").write_text("def apply_discount(p):\n    return p\n\n\ndef total(p):\n    return apply_discount(p)\n")
+        model = ScriptedModel([action("read", "pricing.py"),
+                               dict(action("finish", content="total calls it."),
+                                    points=[{"path": "pricing.py", "symbol": "total", "text": "Calls apply_discount."}])])
+        output = []
+        self.assertEqual(run(model, self.ws, "Which function calls apply_discount?", output=output.append), 0)
+        self.assertIn("total calls it.\n- pricing.py:5-6 `total`: Calls apply_discount.", output)
+
+    def test_names_in_a_question_are_searched_before_the_model_is_asked(self):
+        (self.root / "pricing.py").write_text("def apply_discount(p):\n    return p\n\n\ndef checkout_total(p):\n    return apply_discount(p)\n")
+        model = ScriptedModel([action("finish", content="checkout_total calls it. [pricing.py:6]")])
+        self.assertEqual(run(model, self.ws, "Which function calls apply_discount?", output=lambda _: None), 0)
+        first = json.dumps(model.calls[0])
+        self.assertIn("pricing.py:1 (defines it)", first)
+        self.assertIn("pricing.py:6 (inside checkout_total)", first)
+
+    def test_message_field_is_bounded_in_every_schema(self):
+        from offline_agent.agent import SCHEMA, cited_schema
+        for schema in (SCHEMA, cited_schema(), cited_schema(["a.py"])):
+            self.assertEqual(schema["properties"]["message"]["maxLength"], 160)
+
+    def test_model_is_told_when_every_named_file_is_done(self):
+        (self.root / "calc.py").write_text("x = 1\n")
+        fix = "<<<<<<< SEARCH\nx = 1\n=======\nx = 2\n>>>>>>> REPLACE"
+        model = ScriptedModel([action("edit", "calc.py", fix), action("finish", content="Done.")])
+        self.assertEqual(run(model, self.ws, "Fix calc.py", apply=True, confirm=lambda _: True, output=lambda _: None), 0)
+        self.assertIn("File written. Every file the task names is now done.", model.calls[1][-1]["content"])
+
+    def test_citing_the_function_around_a_search_match_points_at_the_match(self):
+        (self.root / "cart.js").write_text("function total(p) {\n\n\n  return discount(p);\n}\n")
+        model = ScriptedModel([dict(action("finish", content="total calls it."),
+                                    points=[{"path": "cart.js", "symbol": "total", "text": "Calls discount."}])])
+        output = []
+        self.assertEqual(run(model, self.ws, "Which function calls discount_v2 or discount(?", output=output.append), 2)
+        (self.root / "cart.js").write_text("function total(p) {\n\n\n  return apply_rate(p);\n}\n")
+        model = ScriptedModel([dict(action("finish", content="total calls it."),
+                                    points=[{"path": "cart.js", "symbol": "total", "text": "Calls it."}])])
+        output = []
+        self.assertEqual(run(model, self.ws, "Which function calls apply_rate?", output=output.append), 0)
+        self.assertIn("total calls it.\n- cart.js:4 `total`: Calls it.", output)
+
+    def test_write_may_remove_lines_when_the_task_says_so(self):
+        (self.root / "calc.py").write_text("# Old header\nx = 1\ny = 2\nz = 3\n")
+        model = ScriptedModel([action("write", "calc.py", "x = 1\ny = 2\nz = 3\n"), action("finish", content="Removed.")])
+        run(model, self.ws, "Remove the header comment from calc.py", apply=True, confirm=lambda _: True, output=lambda _: None)
+        self.assertEqual((self.root / "calc.py").read_text(), "x = 1\ny = 2\nz = 3\n")
+
+    def test_ollama_repeat_abort_gets_one_correction(self):
+        model = ScriptedModel([InvalidReply("the reply kept repeating the same text"), action("finish", content="Short.")])
+        self.assertEqual(run(model, self.ws, "Explain", output=lambda _: None), 0)
+        self.assertIn("kept repeating", model.calls[1][-1]["content"])
+
+    def test_change_task_finished_without_a_change_is_nudged_once_then_flagged(self):
+        (self.root / "calc.py").write_text("x = 1\n")
+        model = ScriptedModel([action("finish", content="x = 2"), action("finish", content="x = 2")])
+        output = []
+        self.assertEqual(run(model, self.ws, "Fix calc.py", apply=True, confirm=lambda _: True, output=output.append), 2)
+        self.assertIn("without changing any file", model.calls[1][-1]["content"])
+        self.assertIn("Answer check: The task asks for a change, but no file was changed.", output)
+
+    def test_change_report_needs_no_line_citation(self):
+        (self.root / "calc.py").write_text("x = 1\n")
+        model = ScriptedModel([action("read", "calc.py"), action("write", "new.py", "y = 2\n"), action("finish", content="Created new.py.")])
+        self.assertEqual(run(model, self.ws, "Create new.py", apply=True, confirm=lambda _: True, output=lambda _: None), 0)
+
+
+class LoopTests(TempWorkspace):
+    def test_alternating_lookups_are_caught(self):
+        for name in ("a.py", "b.py"):
+            (self.root / name).write_text("x = 1\n")
+        model = ScriptedModel([action("read", "a.py"), action("read", "b.py"), action("read", "a.py"), action("finish", content="Done.")])
+        with patch.object(self.ws, "read", wraps=self.ws.read) as read:
+            run(model, self.ws, "Summarize things", output=lambda _: None)
+        self.assertEqual(read.call_count, 2)
+        self.assertEqual(len(model.calls), 4)
+
+    def test_repeated_failed_edit_stops_instead_of_using_every_step(self):
+        (self.root / "calc.py").write_text("x = 1\n")
+        bad = action("edit", "calc.py", "<<<<<<< SEARCH\nzzz\n=======\ny\n>>>>>>> REPLACE")
+        model = ScriptedModel([bad, bad, action("finish", content="Could not edit.")])
+        output = []
+        self.assertEqual(run(model, self.ws, "Fix calc.py", apply=True, confirm=lambda _: True, output=output.append), 2)
+        self.assertEqual(len(model.calls), 3)
+
+    def test_same_read_is_allowed_after_a_write(self):
+        (self.root / "calc.py").write_text("x = 1\n")
+        fix = "<<<<<<< SEARCH\nx = 1\n=======\nx = 2\n>>>>>>> REPLACE"
+        model = ScriptedModel([action("read", "calc.py"), action("edit", "calc.py", fix), action("read", "calc.py"),
+                               action("finish", content="Now x = 2.")])
+        self.assertEqual(run(model, self.ws, "Fix calc.py", apply=True, confirm=lambda _: True, output=lambda _: None), 0)
+        self.assertIn("x = 2", model.calls[3][-1]["content"])
+
+    def test_read_may_be_repeated_once_its_result_was_compacted(self):
+        (self.root / "big.py").write_text("x = 1\n" * 900)
+        (self.root / "other.py").write_text("y = 2\n" * 900)
+        model = ScriptedModel([action("read", "big.py"), action("read", "other.py"), action("read", "big.py"), action("finish", content="Done.")])
+        model.prompt_budget = 8000
+        with patch.object(self.ws, "read", wraps=self.ws.read) as read:
+            run(model, self.ws, "Summarize things", output=lambda _: None)
+        self.assertEqual(read.call_count, 3)
+
+
+class ReloadWarningTests(TempWorkspace):
+    def test_reload_after_the_first_step_warns_once(self):
+        class Reloading(ScriptedModel):
+            last_metrics = {"load_seconds": 60.0, "total_seconds": 70.0}
+        (self.root / "a.py").write_text("x = 1\n")
+        model = Reloading([action("read", "a.py"), action("read", "a.py", "1-1"), action("finish", content="Done.")])
+        output = []
+        run(model, self.ws, "Summarize things", output=output.append)
+        self.assertEqual(sum(line.startswith("Warning: Ollama reloaded") for line in output), 1)
+
+    def test_doctor_names_other_loaded_models(self):
+        with patch("offline_agent.cli.Ollama") as ollama, contextlib.redirect_stdout(io.StringIO()) as printed:
+            ollama.return_value.other_loaded_models.return_value = ["qwen2.5:14b"]
+            self.assertEqual(main(["--doctor"]), 0)
+        self.assertIn("qwen2.5:14b", printed.getvalue())

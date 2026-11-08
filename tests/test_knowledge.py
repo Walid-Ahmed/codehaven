@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from offline_agent.agent import run
-from offline_agent.knowledge import KnowledgeBase, chunks
+from offline_agent.knowledge import KnowledgeBase, chunks, tokens
 from offline_agent.workspace import Workspace
 
 
@@ -63,15 +63,34 @@ class KnowledgeTests(unittest.TestCase):
         self.assertEqual("".join(t for _, _, t in pieces), "x" * 5000)
 
     def test_bounded_results_and_index_document_limit(self):
-        for i in range(205):
+        for i in range(25):
             self.put(f"doc{i:03}.md", "needle " + "漢" * 1500)
-        result = KnowledgeBase(self.root).retrieve("needle")
+        with patch("offline_agent.knowledge.MAX_DOCUMENTS", 20):
+            result = KnowledgeBase(self.root).retrieve("needle")
         decoded = json.loads(result)
         self.assertLessEqual(len(decoded["results"]), 4)
         self.assertLessEqual(len(result.encode()), 16000)
         self.assertTrue(decoded["results_limited"])
         self.assertTrue(decoded["index_limited"])
-        self.assertEqual(decoded["documents"], 200)
+        self.assertEqual(decoded["documents"], 20)
+
+    def test_camel_case_and_snake_case_names_match_plain_words(self):
+        self.assertEqual(tokens("applyDiscount apply_discount HTTPServer"), ["apply", "discount", "apply", "discount", "httpserver"])
+
+    def test_word_endings_do_not_stop_a_match(self):
+        self.put("repo/test_store.py", "def test_restock_increases_quantity():\n    assert True\n")
+        self.put("repo/other.py", "def unrelated():\n    return 1\n")
+        result = json.loads(KnowledgeBase(workspace=self.root / "repo").retrieve("Which test checks restocking?"))["results"]
+        self.assertEqual(result[0]["source"], "repo/test_store.py")
+        self.assertEqual(tokens("pricing price"), ["pric", "pric"])
+
+    def test_bundled_notes_do_not_crowd_out_project_code(self):
+        self.put("repo/pricing.py", "def apply_discount(price):\n    return price\n")
+        kb = KnowledgeBase(workspace=self.root / "repo")
+        sources = [row["source"] for row in json.loads(kb.retrieve("Which function calls apply_discount?"))["results"]]
+        self.assertEqual(sources, ["repo/pricing.py"])
+        sources = [row["source"] for row in json.loads(kb.retrieve("How do LangGraph conditional edges work?"))["results"]]
+        self.assertTrue(any(source.startswith("builtin/") for source in sources))
 
     def test_deleted_reference_not_in_next_index(self):
         self.put("policy.txt", "uniquepolicytoken")

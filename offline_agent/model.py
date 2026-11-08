@@ -194,7 +194,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Ollama:
-    def __init__(self, model=MODEL, endpoint="http://127.0.0.1:11434", timeout=180,
+    # Waiting on a local model is normal: loading plus prompt processing alone can take minutes on a busy machine.
+    def __init__(self, model=MODEL, endpoint="http://127.0.0.1:11434", timeout=600,
                  max_output_tokens=1024, prompt_budget=12_000):
         if not 256 <= max_output_tokens <= 8192:
             raise ValueError("--max-output-tokens must be between 256 and 8192")
@@ -203,6 +204,7 @@ class Ollama:
         self.max_output_tokens = max_output_tokens
         self.prompt_budget = prompt_budget
         self.last_metrics = {}
+        self.last_raw = ""
         url = urllib.parse.urlsplit(endpoint)
         try:
             local = ipaddress.ip_address(url.hostname).is_loopback
@@ -263,6 +265,11 @@ class Ollama:
                     if not isinstance(chunk, dict):
                         raise ValueError("Model server returned a non-object response")
                     if chunk.get("error"):
+                        # Ollama itself stopped a looping reply; that is a bad reply, not a broken server.
+                        if "repeat" in str(chunk["error"]).lower():
+                            self.last_raw = "".join(pieces)
+                            raise InvalidReply("the reply kept repeating the same text, so generation was stopped; "
+                                               "reply briefly and state each point only once")
                         raise ValueError(f"Local Ollama error: {chunk['error']}")
                     piece = (chunk.get("message") or {}).get("content") or ""
                     if piece:
@@ -271,6 +278,7 @@ class Ollama:
                     if chunk.get("done"):
                         final = chunk
                         break
+            self.last_raw = "".join(pieces)
         except (urllib.error.URLError, TimeoutError) as exc:
             raise ValueError(f"Local Ollama request failed: {exc}. Start Ollama and check the installed model.") from exc
         return {**final, "message": {"content": "".join(pieces)}}
@@ -284,10 +292,19 @@ class Ollama:
         if info.get("remote_host") or info.get("remote_model"):
             raise ValueError("Remote-backed models are disabled")
 
+    def other_loaded_models(self):
+        """Other models Ollama holds in memory: competing for memory makes it reload ours on every step."""
+        try:
+            running = self.request("/api/ps").get("models", [])
+        except ValueError:
+            return []
+        return sorted({m.get("name") for m in running if isinstance(m, dict) and m.get("name") not in (None, self.model)})
+
     def chat(self, messages, schema, on_text=None):
         """Return one JSON action. Always streams from Ollama so a looping answer can be stopped early;
         with on_text, the finish answer is also shown as it is generated."""
         self.last_metrics = {}
+        self.last_raw = ""
         payload = {"model": self.model, "messages": compact_messages(messages, self.prompt_budget),
                    "stream": True, "format": schema,
                    "keep_alive": "30m",

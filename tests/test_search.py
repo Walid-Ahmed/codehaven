@@ -129,3 +129,30 @@ class SearchTests(unittest.TestCase):
 
         run(Model(), self.ws, "Find", output=lambda _: None)
         self.assertIn("Tool error", calls[1][-1]["content"])
+
+
+class EnclosingPartTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.ws = Workspace(self.root)
+
+    def matches(self, query):
+        return json.loads(self.ws.search(query))["matches"]
+
+    def test_python_matches_name_the_enclosing_function_and_mark_definitions(self):
+        (self.root / "pricing.py").write_text("LIMIT = apply_discount\n\n\ndef apply_discount(p):\n    return p\n\n\n"
+                                              "class Cart:\n    def total(self, p):\n        return apply_discount(p)\n")
+        found = self.matches("apply_discount")
+        self.assertNotIn("in", found[0])
+        self.assertEqual((found[1]["in"], found[1]["defines"]), ("apply_discount", True))
+        self.assertEqual(found[2]["in"], "Cart.total")
+        self.assertNotIn("defines", found[2])
+
+    def test_other_languages_and_broken_python_use_the_nearest_definition(self):
+        (self.root / "cart.js").write_text("function total(p) {\n  return discount(p);\n}\n")
+        (self.root / "broken.py").write_text("def go(:\n    discount()\n")
+        by_path = {match["path"]: match for match in self.matches("discount(")}
+        self.assertEqual(by_path["cart.js"]["in"], "total")
+        self.assertEqual(by_path["broken.py"]["in"], "go")

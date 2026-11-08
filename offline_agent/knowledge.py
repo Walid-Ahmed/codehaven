@@ -19,11 +19,22 @@ CODE_EXTENSIONS = EXTENSIONS | JS_EXTENSIONS | {
     ".ini", ".cfg", ".xml", ".graphql", ".gql", ".proto", ".r", ".lua",
     ".ex", ".exs", ".erl", ".hs", ".clj", ".dart",
 }
+MAX_DOCUMENTS = 1000  # The same bound as Workspace.files, so a mid-sized repository is indexed in full.
+BUNDLED_TOPICS = {"stategraph", "checkpoint", "checkpoints", "checkpointer", "interrupt", "interrupts"}
 CODE_NAMES = {"Dockerfile", "Makefile", "CMakeLists.txt", "Justfile", "Gemfile"}
 
 
+def stem(word):
+    """Reduce simple English endings, so "restocking" finds restock and "pricing" finds price."""
+    if len(word) > 4 and word.isascii():
+        word = re.sub(r"(?:ing|ed|es|(?<!s)s)$", "", word)
+        word = word[:-1] if len(word) > 3 and word.endswith("e") else word
+    return word
+
+
 def tokens(text):
-    return re.findall(r"[^\W_]+", text.lower(), flags=re.UNICODE)
+    """Lowercase word stems, split at underscores and camelCase, so applyDiscount and apply_discount match "apply discount"."""
+    return [stem(word) for word in re.findall(r"[^\W_]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text).lower(), flags=re.UNICODE)]
 
 
 def chunks(text):
@@ -107,7 +118,7 @@ class KnowledgeBase:
                         continue
                 if identity in seen:
                     continue
-                if self.documents >= 200 or len(self.entries) >= 4000:
+                if self.documents >= MAX_DOCUMENTS or len(self.entries) >= 8000:
                     self.limited = True
                     break
                 try:
@@ -130,7 +141,7 @@ class KnowledgeBase:
                     counts = Counter(tokens(passage))
                     if not counts:
                         continue
-                    if len(self.entries) >= 4000:
+                    if len(self.entries) >= 8000:
                         self.limited = True
                         break
                     self.entries.append({"source": f"{label}/{name}", "start_line": start,
@@ -175,8 +186,25 @@ class KnowledgeBase:
         if not choices:
             return None
         _, _, span, text = max(choices, key=lambda row: row[:2])
-        return dict(entry, start_line=span["start"], end_line=span["end"], text=text,
-                    symbol=span["name"], symbol_complete=True)
+        expanded = dict(entry, start_line=span["start"], end_line=span["end"], text=text,
+                        symbol=span["name"], symbol_complete=True)
+        constants = self._constants(lines, text)
+        if constants:
+            expanded["constants"] = constants
+        return expanded
+
+    @staticmethod
+    def _constants(lines, text):
+        """Values of the file's module constants a symbol uses, since the answer is often the value, not the name."""
+        found = []
+        for name in dict.fromkeys(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", text)):
+            definition = re.compile(rf"(?:export\s+)?(?:const\s+|let\s+|var\s+)?{name}\s*(?::[^=]+)?=(?!=)")
+            number = next((number for number, line in enumerate(lines, 1) if definition.match(line) and len(line) <= 160), None)
+            if number and lines[number - 1] not in text:
+                found.append({"name": name, "line": number, "text": lines[number - 1].strip()})
+            if len(found) >= 3:
+                break
+        return found
 
     def retrieve(self, query):
         if not isinstance(query, str) or not query.strip() or len(query) > 1000:
@@ -196,6 +224,9 @@ class KnowledgeBase:
                 score += inverse * frequency * 2.2 / norm
             if score > 0:
                 scored.append((score, entry))
+        # The bundled notes only cover LangGraph, so they must not crowd out the project on other questions.
+        if "langgraph" not in terms and not terms & BUNDLED_TOPICS and any(not e["source"].startswith("builtin/") for _, e in scored):
+            scored = [pair for pair in scored if not pair[1]["source"].startswith("builtin/")]
         scored.sort(key=lambda pair: (-pair[0], pair[1]["source"], pair[1]["start_line"]))
         # Give different files a chance before adding further passages from one file.
         diverse, repeated, seen_sources = [], [], set()
@@ -224,7 +255,7 @@ class KnowledgeBase:
                 if identity in identities:
                     return "duplicate"
                 passage = {key: variant[key] for key in ("source", "start_line", "end_line", "text")}
-                passage.update({key: variant[key] for key in ("symbol", "symbol_complete") if key in variant})
+                passage.update({key: variant[key] for key in ("symbol", "symbol_complete", "constants") if key in variant})
                 passage.update(metadata)
                 result["results"].append(passage)
                 if len(json.dumps(result, ensure_ascii=False).encode()) <= limit - 128:

@@ -5,7 +5,8 @@ Usage: python -m offline_agent.evaluation [--only ID] [--output PATH]
 Each task runs on a fresh temporary copy of the sample repository, with writes auto-confirmed
 inside that copy and test runs declined. The model is reached only through loopback Ollama,
 so evaluation is as offline as normal use. Results record pass/fail, exit code, steps, tokens,
-and time, so prompt or tool changes can be compared run to run.
+time, reloads, changed files, and each task's run log, so a failure can be explained and
+prompt or tool changes can be compared run to run.
 """
 import argparse
 import json
@@ -23,6 +24,9 @@ from .model import MODEL, Ollama
 from .workspace import Workspace
 
 EVALS = Path(__file__).resolve().parents[1] / "evals"
+RETRIEVAL_BUDGET = 4000  # The CLI default, so evaluation measures what users actually run.
+RELOAD_SECONDS = 5
+RAW_REPLY_CHARS = 4000  # Raw replies show what a rejected action actually said.
 
 
 class Metered:
@@ -32,19 +36,23 @@ class Metered:
         self.model = model
         self.prompt_budget = getattr(model, "prompt_budget", 12_000)
         self.last_metrics = {}
-        self.calls = self.prompt_tokens = self.generated_tokens = 0
+        self.calls = self.prompt_tokens = self.generated_tokens = self.reloads = 0
         self.model_seconds = 0.0
+        self.replies = []
 
     def chat(self, messages, schema):
         self.calls += 1
         try:
             return self.model.chat(messages, schema)
         finally:
+            self.replies.append(str(getattr(self.model, "last_raw", ""))[:RAW_REPLY_CHARS])
             metrics = getattr(self.model, "last_metrics", None)
             self.last_metrics = metrics if isinstance(metrics, dict) else {}
             self.prompt_tokens += self.last_metrics.get("prompt_tokens") or 0
             self.generated_tokens += self.last_metrics.get("generated_tokens") or 0
             self.model_seconds += self.last_metrics.get("total_seconds") or 0
+            if self.calls > 1 and (self.last_metrics.get("load_seconds") or 0) >= RELOAD_SECONDS:
+                self.reloads += 1
 
 
 def load_tasks(path):
@@ -80,6 +88,15 @@ def score(task, answer, root):
     return failures
 
 
+def changed_files(before, after):
+    """Relative paths whose content differs between two directory trees."""
+    def tree(root):
+        return {path.relative_to(root).as_posix(): path.read_bytes() for path in Path(root).rglob("*")
+                if path.is_file() and "__pycache__" not in path.parts}
+    old, new = tree(before), tree(after)
+    return sorted(name for name in old.keys() | new.keys() if old.get(name) != new.get(name))
+
+
 def evaluate_task(task, model, repo):
     with tempfile.TemporaryDirectory(prefix="codehaven-eval-") as temporary:
         root = Path(temporary) / "repo"
@@ -91,7 +108,7 @@ def evaluate_task(task, model, repo):
         try:
             state = run_state(metered, workspace, task["task"], apply=task.get("apply", False),
                               max_steps=task.get("max_steps", 12),
-                              knowledge=KnowledgeBase(None, workspace=workspace),
+                              knowledge=KnowledgeBase(None, workspace=workspace, context_budget=RETRIEVAL_BUDGET),
                               confirm=lambda _path: True, confirm_tests=lambda: False, output=log.append)
             exit_code, steps = state["exit_code"], state["steps"]
             reply = state.get("reply") or {}
@@ -99,8 +116,12 @@ def evaluate_task(task, model, repo):
                 answer = reply.get("content") or reply.get("message") or ""
         except ValueError as exc:
             exit_code, steps, error = 1, metered.calls, str(exc)
+        changed = changed_files(repo, root)
         failures = ([f"error: {error}"] if error else []) + score(task, answer, root)
-    return {"id": task["id"], "passed": not failures, "exit_code": exit_code, "steps": steps,
+        expected = set(task["checks"].get("files", {}))
+        failures += [f"{name} changed but the task does not concern it" for name in changed if name not in expected]
+    return {"id": task["id"], "passed": not failures, "exit_code": exit_code, "steps": steps, "changed": changed,
+            "reloads": metered.reloads, "log": [str(line) for line in log], "replies": metered.replies,
             "prompt_tokens": metered.prompt_tokens, "generated_tokens": metered.generated_tokens,
             "model_seconds": round(metered.model_seconds, 2), "seconds": round(time.monotonic() - started, 2),
             "failures": failures, "answer": answer[:2000]}
@@ -109,6 +130,7 @@ def evaluate_task(task, model, repo):
 def summarize(results):
     count = len(results)
     return {"tasks": count, "passed": sum(r["passed"] for r in results),
+            "verified": sum(r["exit_code"] == 0 for r in results), "reloads": sum(r.get("reloads", 0) for r in results),
             "mean_steps": round(sum(r["steps"] for r in results) / count, 2) if count else 0,
             "prompt_tokens": sum(r["prompt_tokens"] for r in results),
             "generated_tokens": sum(r["generated_tokens"] for r in results),
@@ -157,6 +179,9 @@ def main(argv=None):
             raise ValueError(f"Sample repository not found: {args.repo}")
         model = Ollama(endpoint=args.endpoint, max_output_tokens=args.max_output_tokens, prompt_budget=args.prompt_budget)
         model.check_model()
+        others = model.other_loaded_models()
+        if others:
+            print("Warning: Ollama also has " + ", ".join(others) + " loaded, so timings may not be representative.")
         started = datetime.now(timezone.utc).isoformat(timespec="seconds")
         results = evaluate(tasks, model, args.repo, output=lambda line: print(line, flush=True))
     except (ValueError, OSError) as exc:
@@ -167,7 +192,8 @@ def main(argv=None):
         return 130
     summary = summarize(results)
     print("\n" + table(results))
-    print(f"\nPassed {summary['passed']}/{summary['tasks']}; mean steps {summary['mean_steps']}; "
+    print(f"\nPassed {summary['passed']}/{summary['tasks']}; {summary['verified']} also passed CodeHaven's own answer checks; "
+          f"mean steps {summary['mean_steps']}; "
           f"tokens {summary['prompt_tokens']:,} prompt / {summary['generated_tokens']:,} generated; {summary['seconds']}s")
     report = {"model": MODEL, "started": started, "tasks_file": args.tasks,
               "settings": {"max_output_tokens": args.max_output_tokens, "prompt_budget": args.prompt_budget},
@@ -176,6 +202,9 @@ def main(argv=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"Results written to {output}")
+    if summary["reloads"]:
+        print(f"Warning: the model was reloaded {summary['reloads']} times between steps, so these timings are not "
+              "representative. Something else was competing for Ollama's memory.")
     return 0 if summary["passed"] == summary["tasks"] else 1
 
 

@@ -27,6 +27,9 @@ class OfflineModel:
     def check_model(self):
         pass
 
+    def other_loaded_models(self):
+        return []
+
     def chat(self, messages, schema, on_text=None):
         self.observed.append((get_tracing_context()["enabled"], tracing_is_enabled()))
         return dict(action="finish", path="", content="Done", message="Done")

@@ -27,6 +27,9 @@ class ScriptedModel:
     def check_model(self):
         pass
 
+    def other_loaded_models(self):
+        return []
+
     def chat(self, messages, schema):
         self.last_metrics = {"prompt_tokens": 100, "generated_tokens": 10, "total_seconds": 0.5}
         return next(self.replies)
@@ -47,6 +50,11 @@ class EvaluationTests(unittest.TestCase):
             with self.subTest(task=task["id"]):
                 self.assertTrue(score(task, "", REPO), "each task must fail before the agent acts")
 
+    def test_second_task_set_is_valid_and_fails_before_the_agent_acts(self):
+        for task in load_tasks(EVALS / "bookings_tasks.json"):
+            with self.subTest(task=task["id"]):
+                self.assertTrue(score(task, "", EVALS / "bookings_repo"), "each task must fail before the agent acts")
+
     def test_correct_answer_passes_and_records_metrics(self):
         model = ScriptedModel([action("read", "inventory/store.py"),
                                action("finish", content="It raises KeyError. [inventory/store.py:18-20]")])
@@ -63,6 +71,25 @@ class EvaluationTests(unittest.TestCase):
         result = evaluate_task(TASKS["fix-low-stock"], model, REPO)
         self.assertTrue(result["passed"], result["failures"])
         self.assertIn("item.quantity < threshold", (REPO / "inventory/store.py").read_text())
+
+    def test_changing_a_file_the_task_does_not_concern_fails(self):
+        fix = ("<<<<<<< SEARCH\n        return [item for item in self.items.values() if item.quantity < threshold]\n"
+               "=======\n        return [item for item in self.items.values() if item.quantity <= threshold]\n"
+               ">>>>>>> REPLACE")
+        model = ScriptedModel([action("edit", "inventory/store.py", fix), action("write", "extra.py", "x = 1\n"),
+                               action("finish", content="Fixed.")])
+        result = evaluate_task(TASKS["fix-low-stock"], model, REPO)
+        self.assertEqual(result["changed"], ["extra.py", "inventory/store.py"])
+        self.assertEqual(result["failures"], ["extra.py changed but the task does not concern it"])
+
+    def test_reloads_between_steps_are_counted(self):
+        class Reloading(ScriptedModel):
+            def chat(self, messages, schema):
+                reply = super().chat(messages, schema)
+                self.last_metrics["load_seconds"] = 50
+                return reply
+        model = Reloading([action("read", "inventory/store.py"), action("finish", content="KeyError [inventory/store.py:18-20]")])
+        self.assertEqual(evaluate_task(TASKS["remove-missing"], model, REPO)["reloads"], 1)  # The first load is expected.
 
     def test_wrong_answer_and_errors_fail(self):
         result = evaluate_task(TASKS["tax-rate"], ScriptedModel([action("finish", content="It is 0.08.")]), REPO)
@@ -81,6 +108,7 @@ class EvaluationTests(unittest.TestCase):
             report = json.loads(output.read_text())
         self.assertEqual(report["summary"]["passed"], 1)
         self.assertEqual(report["results"][0]["id"], "remove-missing")
+        self.assertTrue(report["results"][0]["log"])  # Kept so a failed task can be diagnosed afterward.
         self.assertIn("Passed 1/1", printed.getvalue())
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             main(["--only", "no-such-task"])

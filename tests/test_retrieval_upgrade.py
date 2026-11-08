@@ -92,6 +92,16 @@ class RetrievalBudgetTests(unittest.TestCase):
         results = json.loads(KnowledgeBase(workspace=self.root).retrieve('uniqueworkflow'))['results']
         self.assertEqual({r['symbol'] for r in results if r['kind'] == 'dependency'}, {'first', 'second'})
 
+    def test_symbols_carry_the_values_of_constants_they_use(self):
+        self.put('rooms.py', 'MAX_GUESTS = 4\n' + '# gap\n' * 40 + 'def uniqueworkflow(guests):\n    return guests > MAX_GUESTS\n')
+        row = json.loads(KnowledgeBase(workspace=self.root).retrieve('uniqueworkflow'))['results'][0]
+        self.assertEqual(row['constants'], [{'name': 'MAX_GUESTS', 'line': 1, 'text': 'MAX_GUESTS = 4'}])
+
+    def test_javascript_constants_are_found_too(self):
+        self.put('cart.js', 'const TAX = 0.1;\n\nexport function uniqueworkflow(p) {\n  return p * (1 + TAX);\n}\n')
+        row = json.loads(KnowledgeBase(workspace=self.root).retrieve('uniqueworkflow'))['results'][0]
+        self.assertEqual(row['constants'], [{'name': 'TAX', 'line': 1, 'text': 'const TAX = 0.1;'}])
+
     def test_oversized_function_falls_back_and_preserves_budget(self):
         self.put('code.py', 'def uniqueworkflow():\n' + '    value = 123456789\n' * 900)
         kb = KnowledgeBase(workspace=self.root, context_budget=2000)

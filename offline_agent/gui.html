@@ -35,8 +35,18 @@ code, pre { font-family: var(--mono); font-size: 13px; }
 
 .app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
 .sidebar { border-right: 1px solid var(--line); background: var(--panel); padding: 18px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
-.brand h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
-.brand p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.logo { width: 46px; height: 46px; flex: none; }
+.brand h1 { font-size: 21px; margin: 0; letter-spacing: -.02em; line-height: 1.1; }
+.brand .slogan { margin: 3px 0 0; color: var(--accent); font-size: 13px; font-weight: 600; }
+.offline-card { display: flex; gap: 10px; align-items: flex-start; background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.45; }
+.offline-card svg { width: 20px; height: 20px; flex: none; margin-top: 1px; color: var(--accent); }
+.offline-card strong { display: block; color: var(--text); font-size: 13px; }
+.offline-card span { color: var(--muted); }
+select { width: 100%; font: inherit; color: inherit; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 8px 10px; }
+select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.pill.offline { display: inline-flex; align-items: center; gap: 6px; }
+.pill.offline::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
 .row { display: flex; gap: 8px; margin-top: 8px; }
 .row button { flex: 1; }
@@ -123,8 +133,21 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
-      <h1>CodeHaven</h1>
-      <p>Your code. Your machine. No API fees.</p>
+      <svg class="logo" viewBox="0 0 48 48" role="img" aria-label="CodeHaven logo">
+        <path d="M24 3.5 41.5 10v13.6c0 10.4-7.3 18.6-17.5 21.4C13.8 42.2 6.5 34 6.5 23.6V10Z" fill="var(--accent)"/>
+        <path d="M24 8.6 37 13.4v10.2c0 7.8-5.3 14-13 16.5-7.7-2.5-13-8.7-13-16.5V13.4Z" fill="none" stroke="var(--accent-text)" stroke-opacity=".35" stroke-width="1.2"/>
+        <path d="m18.5 18.5-5.5 5.5 5.5 5.5M29.5 18.5l5.5 5.5-5.5 5.5M26.2 16.5l-4.4 15" fill="none" stroke="var(--accent-text)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div>
+        <h1>CodeHaven</h1>
+        <p class="slogan">Understands your code. Works offline.</p>
+      </div>
+    </div>
+    <div class="offline-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 3l18 18"/><path d="M8.5 8.6A5 5 0 0 0 6.6 12 4 4 0 0 0 7 20h10.5M20.4 17.6A3.5 3.5 0 0 0 17.5 12h-.6a6 6 0 0 0-7-5.8"/>
+      </svg>
+      <div><strong>Offline by design</strong><span>Your code never leaves this computer. No internet, no API fees, and CodeHaven never changes your files.</span></div>
     </div>
     <div class="section">
       <h2>Repository</h2>
@@ -135,6 +158,11 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
       </div>
       <div class="index-status" id="index-status">Choose a folder, then index it to start chatting.</div>
     </div>
+    <div class="section">
+      <h2>Model</h2>
+      <select id="model" aria-label="Local model"><option>Loading…</option></select>
+      <div class="index-status" id="model-status">Models installed in Ollama on this computer.</div>
+    </div>
     <div class="section recent" id="recent-section" hidden>
       <h2>Recent</h2>
       <div id="recent"></div>
@@ -143,7 +171,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
       <h2>Chat</h2>
       <button id="new-chat" disabled>New chat</button>
     </div>
-    <div class="privacy">Runs on this computer with <span id="model-name">a local model</span>. Nothing is sent to the internet. Chat is read-only: CodeHaven never changes your files here.</div>
+    <div class="privacy">Runs on this computer with <span id="model-name">a local model</span>. Nothing is sent to the internet. CodeHaven only reads your code: it never changes, creates, or deletes files.</div>
   </aside>
 
   <main class="main">
@@ -151,6 +179,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
       <div class="repo empty" id="repo-label">No repository indexed</div>
       <div class="spacer"></div>
       <span class="pill" id="index-pill" hidden></span>
+      <span class="pill offline" title="CodeHaven runs only on this computer and never connects to the internet">Offline</span>
     </div>
     <div class="messages" id="messages">
       <div class="messages-inner" id="messages-inner">
@@ -358,6 +387,40 @@ document.addEventListener("click", (event) => {
   showCitation(link.dataset.path.replace(/^repo\//, ""), Number(link.dataset.start), Number(link.dataset.end));
 });
 
+// ---- Model picker: models installed in Ollama on this computer; cloud and embedding models are not offered.
+async function loadModels() {
+  try {
+    const data = await api("/api/models");
+    const select = $("model");
+    const models = data.models.length ? data.models : [{name: data.current}];
+    select.replaceChildren(...models.map((model) => {
+      const option = document.createElement("option");
+      option.value = model.name;
+      option.textContent = model.name + (model.parameters ? ` · ${model.parameters}` : "") + (model.name === data.default ? " · default" : "");
+      return option;
+    }));
+    select.value = data.current;
+    $("model-name").textContent = data.current;
+    $("model-status").textContent = data.current === data.default
+      ? "The default model, used for all of CodeHaven's tests."
+      : `Not the tested default (${data.default}), so answers may differ. The first answer after switching is slower while the model loads.`;
+  } catch (error) {
+    $("model-status").textContent = error.message;
+  }
+}
+$("model").addEventListener("change", async () => {
+  const name = $("model").value;
+  busy = true; updateComposer();
+  $("model-status").textContent = `Checking ${name}…`;
+  try {
+    await api("/api/model", {method: "POST", body: JSON.stringify({name})});
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    busy = false; updateComposer(); loadModels();
+  }
+});
+
 // ---- Chat.
 function clearChat() {
   $("messages-inner").replaceChildren($("empty"));
@@ -377,6 +440,7 @@ function updateComposer() {
   $("send").disabled = !ready || !$("question").value.trim();
   $("question").placeholder = !indexed ? "Index a repository first" : busy ? "CodeHaven is working…" : "Ask about this repository";
   $("new-chat").disabled = !indexed || busy;
+  $("model").disabled = busy;
   $("index").disabled = busy;
   for (const button of $("suggestions").querySelectorAll("button")) button.disabled = !ready;
 }
@@ -480,6 +544,7 @@ $("new-chat").addEventListener("click", async () => {
 for (const button of $("suggestions").querySelectorAll("button")) button.addEventListener("click", () => ask(button.dataset.q));
 
 showRecent();
+loadModels();
 // A reloaded page shows no earlier messages, so the server forgets them too: follow-ups never use hidden context.
 api("/api/status").then((summary) => {
   setIndexed(summary);

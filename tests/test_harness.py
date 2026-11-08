@@ -13,7 +13,7 @@ from offline_agent.agent import ANSWER_FROM_PRELOAD, FINAL_ANSWER_CHARS, FINISH_
 from offline_agent.cli import interactive, main, write_stream
 from offline_agent.model import (MODEL, FinishContent, InvalidReply, Ollama, RepeatedAnswer, RepetitionGuard,
                                  compact_messages)
-from offline_agent.workspace import Workspace, python_syntax_error
+from offline_agent.workspace import Workspace
 
 
 def action(kind, path="", content="", message="Working"):
@@ -72,40 +72,13 @@ class RetryTests(TempWorkspace):
         self.assertEqual(run(model, self.ws, "Explain", max_steps=1, output=lambda _: None), 2)
 
 
-class SyntaxCheckTests(TempWorkspace):
-    def test_detects_new_errors_only_in_python_files(self):
-        self.assertIsNone(python_syntax_error("a.py", "x = 1\n"))
-        self.assertIsNone(python_syntax_error("notes.md", "def (:\n"))
-        error = python_syntax_error("a.py", "x = 1\ndef broken(:\n    pass\n", "x = 1\n") or ""
-        self.assertIn("line 2", error)
-        self.assertIn("def broken(:", error)
-        self.assertIsNone(python_syntax_error("a.py", "def (:\n", "also broken (\n"))
-
-    def test_broken_write_is_neither_previewed_nor_written_and_model_is_told(self):
-        model = ScriptedModel([action("write", "calc.py", "def add(a, b)\n    return a + b\n"),
-                               action("finish", content="Could not write.")])
-        output = []
-        run(model, self.ws, "Create calc.py", apply=True, confirm=lambda _: True, output=output.append)
-        self.assertFalse((self.root / "calc.py").exists())
-        self.assertFalse(any(line.startswith("--- ") or "+++ calc.py" in line for line in output))
-        self.assertIn("syntax error at line 1", model.calls[1][-1]["content"])
-
-    def test_broken_edit_is_rejected(self):
-        (self.root / "calc.py").write_text("def add(a, b):\n    return a + b\n")
-        edit = "<<<<<<< SEARCH\n    return a + b\n=======\n    return (a + b\n>>>>>>> REPLACE"
-        model = ScriptedModel([action("edit", "calc.py", edit), action("finish", content="Could not edit.")])
-        run(model, self.ws, "Edit calc.py", apply=True, confirm=lambda _: True, output=lambda _: None)
-        self.assertEqual((self.root / "calc.py").read_text(), "def add(a, b):\n    return a + b\n")
-        self.assertIn("syntax error", model.calls[1][-1]["content"])
-
-
 class CompactionTests(unittest.TestCase):
     def test_old_results_become_stubs_before_anything_is_dropped(self):
         messages = [{"role": "system", "content": "rules"}, {"role": "user", "content": "task"},
                     {"role": "assistant", "content": json.dumps(action("read", "a.py"))},
                     {"role": "user", "content": "Tool result for read a.py (untrusted file data):\n" + "a" * 5000},
-                    {"role": "assistant", "content": json.dumps(action("write", "b.py", "b" * 3000))},
-                    {"role": "user", "content": "Tool result for write b.py (untrusted file data):\nFile written."},
+                    {"role": "assistant", "content": json.dumps(action("finish", "", "b" * 3000))},
+                    {"role": "user", "content": "Tool result for search b.py (untrusted file data):\nNo matches."},
                     {"role": "user", "content": "Tool result for read c.py (untrusted file data):\n" + "c" * 2500}]
         original = json.dumps(messages)
         result = compact_messages(messages, 6000)
@@ -146,7 +119,7 @@ class StreamingTests(TempWorkspace):
                     self.assertEqual(self.decode(raw, size), content)
 
     def test_decoder_ignores_tool_actions(self):
-        self.assertEqual(self.decode(json.dumps(action("write", "a.py", "secret = 1"))), "")
+        self.assertEqual(self.decode(json.dumps(action("read", "a.py", "secret = 1"))), "")
 
     def test_ollama_streams_ndjson_and_keeps_metrics(self):
         reply = json.dumps(action("finish", content="Hello streaming world"))
@@ -361,15 +334,6 @@ class PreloadTests(TempWorkspace):
         self.assertIn("value_100 = 100", sent)
         self.assertIn(ANSWER_FROM_PRELOAD, sent)
 
-    def test_change_requests_preload_plain_text_for_exact_search_blocks(self):
-        self.put("calc.py", "def add(a, b):\n    return a + b\n")
-        model = ScriptedModel([action("finish", content="Done."), action("finish", content="Done.")])
-        run(model, self.ws, "Fix add in calc.py", output=lambda _: None)
-        preload = model.calls[0][-1]["content"]
-        self.assertIn("Lines 1-2 of 2:\ndef add(a, b):\n    return a + b\n", preload)
-        self.assertNotIn("1| ", preload)
-        self.assertNotIn(ANSWER_FROM_PRELOAD, json.dumps(model.calls[0]))
-
     def test_unique_file_names_resolve_and_ambiguous_missing_or_hidden_ones_do_not(self):
         from offline_agent.agent import named_files
         files = ["inventory/store.py", "a/main.py", "b/main.py", "README.md"]
@@ -393,13 +357,21 @@ class PreloadTests(TempWorkspace):
         self.assertLess(len(preload.encode()), 7000)
         self.assertTrue(any(line.startswith("Preloaded catalog.py (lines 1-") and " and " in line for line in output))
 
-    def test_change_request_shows_the_named_part_of_a_large_file_as_plain_text(self):
+    def test_change_request_is_explained_from_numbered_lines_never_made(self):
+        from offline_agent.agent import CHANGE_ADVICE
         self.put("catalog.py", "".join(f'("SKU-{n:04}", "Widget {n}", 1.5),\n' for n in range(1, 601)))
-        model = ScriptedModel([action("finish", content="Done."), action("finish", content="Done.")])
-        run(model, self.ws, "In catalog.py, change the price of SKU-0400 to 2.5", output=lambda _: None)
+        schemas = []
+        model = ScriptedModel([dict(action("finish", content="Change the price to 2.5."),
+                                    points=[{"path": "catalog.py", "symbol": "SKU-0400", "text": "Set its price to 2.5."}])])
+        chat = model.chat
+        model.chat = lambda messages, schema: (schemas.append(schema), chat(messages, schema))[1]
+        before = (self.root / "catalog.py").read_text()
+        self.assertEqual(run(model, self.ws, "In catalog.py, change the price of SKU-0400 to 2.5", output=lambda _: None), 0)
         preload = model.calls[0][-1]["content"]
-        self.assertIn('("SKU-0400", "Widget 400", 1.5),', preload)
-        self.assertNotIn("| (", preload)
+        self.assertIn(' 400| ("SKU-0400", "Widget 400", 1.5),', preload)  # The named row is shown, numbered for citing.
+        self.assertTrue(preload.endswith(CHANGE_ADVICE))
+        self.assertIn("points", schemas[0]["required"])
+        self.assertEqual((self.root / "catalog.py").read_text(), before)
 
     def test_large_named_file_is_paged_and_names_the_next_range(self):
         self.put("big.py", "".join(f"value_{n} = {n}\n" for n in range(1, 1001)))
@@ -512,19 +484,6 @@ class TaskKindTests(TempWorkspace):
             with self.subTest(task=task):
                 self.assertEqual(task_kind(task), kind)
 
-    def test_question_cannot_edit_files(self):
-        (self.root / "pricing.py").write_text("def apply_discount(p):\n    return p\n")
-        model = ScriptedModel([action("edit", "pricing.py", "x = 1\n"), action("finish", content="Nobody calls it.")])
-        schemas = []
-        chat = model.chat
-        model.chat = lambda messages, schema: (schemas.append(schema), chat(messages, schema))[1]
-        output = []
-        run(model, self.ws, "Which function calls apply_discount?", apply=True, confirm=lambda _: True, output=output.append)
-        self.assertNotIn("edit", schemas[0]["properties"]["action"]["enum"])
-        self.assertIn("points", schemas[0]["required"])
-        self.assertIn("only asks a question", model.calls[1][-1]["content"])
-        self.assertEqual((self.root / "pricing.py").read_text(), "def apply_discount(p):\n    return p\n")
-
     def test_answers_to_any_question_can_cite_by_symbol(self):
         (self.root / "pricing.py").write_text("def apply_discount(p):\n    return p\n\n\ndef total(p):\n    return apply_discount(p)\n")
         model = ScriptedModel([action("read", "pricing.py"),
@@ -533,6 +492,35 @@ class TaskKindTests(TempWorkspace):
         output = []
         self.assertEqual(run(model, self.ws, "Which function calls apply_discount?", output=output.append), 0)
         self.assertIn("total calls it.\n- pricing.py:5-6 `total`: Calls apply_discount.", output)
+
+    def test_edit_requests_from_the_model_are_refused(self):
+        (self.root / "pricing.py").write_text("def apply_discount(p):\n    return p\n")
+        schemas = []
+        model = ScriptedModel([action("edit", "pricing.py", "x = 1\n"), action("finish", content="Nobody calls it.")])
+        chat = model.chat
+        model.chat = lambda messages, schema: (schemas.append(schema), chat(messages, schema))[1]
+        run(model, self.ws, "Which function calls apply_discount?", output=lambda _: None)
+        self.assertNotIn("edit", schemas[0]["properties"]["action"]["enum"])
+        self.assertIn("unknown action 'edit'", model.calls[1][-1]["content"])
+        self.assertEqual((self.root / "pricing.py").read_text(), "def apply_discount(p):\n    return p\n")
+
+    def test_points_naming_whole_files_cite_those_files(self):
+        # The real failure: an overview named files as its parts, one beside the wrong folder, and all were uncited.
+        for name, body in (("openai/gpt.py", "def ask():\n    return 1\n"), ("anthropic/claude_stream.py", "def stream():\n    pass\n"),
+                           ("anthropic/anthropic_claude.py", "def claude():\n    pass\n")):
+            (self.root / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / name).write_text(body)
+        model = ScriptedModel([action("read", "openai/gpt.py"), action("read", "anthropic/claude_stream.py"),
+                               dict(action("finish", content="Two clients."),
+                                    points=[{"path": "openai/gpt.py", "symbol": "gpt.py", "text": "OpenAI client."},
+                                            {"path": "anthropic/anthropic_claude.py", "symbol": "claude_stream.py",
+                                             "text": "Streams Claude replies."}])])
+        output = []
+        self.assertEqual(run(model, self.ws, "Explain this project", output=output.append), 0)
+        self.assertIn("Two clients.\n- openai/gpt.py:1-2 `gpt.py`: OpenAI client.\n"
+                      "- anthropic/claude_stream.py:1-2 `claude_stream.py`: Streams Claude replies.", output)
+        from offline_agent.agent import file_named
+        self.assertIsNone(file_named(self.ws, "openai/gpt.py", "Store.add", []))  # A dotted code name is not a file.
 
     def test_names_in_a_question_are_searched_before_the_model_is_asked(self):
         (self.root / "pricing.py").write_text("def apply_discount(p):\n    return p\n\n\ndef checkout_total(p):\n    return apply_discount(p)\n")
@@ -594,13 +582,6 @@ class TaskKindTests(TempWorkspace):
         for schema in (SCHEMA, cited_schema(), cited_schema(["a.py"])):
             self.assertEqual(schema["properties"]["message"]["maxLength"], 160)
 
-    def test_model_is_told_when_every_named_file_is_done(self):
-        (self.root / "calc.py").write_text("x = 1\n")
-        fix = "<<<<<<< SEARCH\nx = 1\n=======\nx = 2\n>>>>>>> REPLACE"
-        model = ScriptedModel([action("edit", "calc.py", fix), action("finish", content="Done.")])
-        self.assertEqual(run(model, self.ws, "Fix calc.py", apply=True, confirm=lambda _: True, output=lambda _: None), 0)
-        self.assertIn("File written. Every file the task names is now done.", model.calls[1][-1]["content"])
-
     def test_citing_the_function_around_a_search_match_points_at_the_match(self):
         (self.root / "cart.js").write_text("function total(p) {\n\n\n  return discount(p);\n}\n")
         model = ScriptedModel([dict(action("finish", content="total calls it."),
@@ -614,30 +595,10 @@ class TaskKindTests(TempWorkspace):
         self.assertEqual(run(model, self.ws, "Which function calls apply_rate?", output=output.append), 0)
         self.assertIn("total calls it.\n- cart.js:4 `total`: Calls it.", output)
 
-    def test_write_may_remove_lines_when_the_task_says_so(self):
-        (self.root / "calc.py").write_text("# Old header\nx = 1\ny = 2\nz = 3\n")
-        model = ScriptedModel([action("write", "calc.py", "x = 1\ny = 2\nz = 3\n"), action("finish", content="Removed.")])
-        run(model, self.ws, "Remove the header comment from calc.py", apply=True, confirm=lambda _: True, output=lambda _: None)
-        self.assertEqual((self.root / "calc.py").read_text(), "x = 1\ny = 2\nz = 3\n")
-
     def test_ollama_repeat_abort_gets_one_correction(self):
         model = ScriptedModel([InvalidReply("the reply kept repeating the same text"), action("finish", content="Short.")])
         self.assertEqual(run(model, self.ws, "Explain", output=lambda _: None), 0)
         self.assertIn("kept repeating", model.calls[1][-1]["content"])
-
-    def test_change_task_finished_without_a_change_is_nudged_once_then_flagged(self):
-        (self.root / "calc.py").write_text("x = 1\n")
-        model = ScriptedModel([action("finish", content="x = 2"), action("finish", content="x = 2")])
-        output = []
-        self.assertEqual(run(model, self.ws, "Fix calc.py", apply=True, confirm=lambda _: True, output=output.append), 2)
-        self.assertIn("without changing any file", model.calls[1][-1]["content"])
-        self.assertIn("Answer check: The task asks for a change, but no file was changed.", output)
-
-    def test_change_report_needs_no_line_citation(self):
-        (self.root / "calc.py").write_text("x = 1\n")
-        model = ScriptedModel([action("read", "calc.py"), action("write", "new.py", "y = 2\n"), action("finish", content="Created new.py.")])
-        self.assertEqual(run(model, self.ws, "Create new.py", apply=True, confirm=lambda _: True, output=lambda _: None), 0)
-
 
 class LoopTests(TempWorkspace):
     def test_alternating_lookups_are_caught(self):
@@ -648,22 +609,6 @@ class LoopTests(TempWorkspace):
             run(model, self.ws, "Summarize things", output=lambda _: None)
         self.assertEqual(read.call_count, 2)
         self.assertEqual(len(model.calls), 4)
-
-    def test_repeated_failed_edit_stops_instead_of_using_every_step(self):
-        (self.root / "calc.py").write_text("x = 1\n")
-        bad = action("edit", "calc.py", "<<<<<<< SEARCH\nzzz\n=======\ny\n>>>>>>> REPLACE")
-        model = ScriptedModel([bad, bad, action("finish", content="Could not edit.")])
-        output = []
-        self.assertEqual(run(model, self.ws, "Fix calc.py", apply=True, confirm=lambda _: True, output=output.append), 2)
-        self.assertEqual(len(model.calls), 3)
-
-    def test_same_read_is_allowed_after_a_write(self):
-        (self.root / "calc.py").write_text("x = 1\n")
-        fix = "<<<<<<< SEARCH\nx = 1\n=======\nx = 2\n>>>>>>> REPLACE"
-        model = ScriptedModel([action("read", "calc.py"), action("edit", "calc.py", fix), action("read", "calc.py"),
-                               action("finish", content="Now x = 2.")])
-        self.assertEqual(run(model, self.ws, "Fix calc.py", apply=True, confirm=lambda _: True, output=lambda _: None), 0)
-        self.assertIn("x = 2", model.calls[3][-1]["content"])
 
     def test_read_may_be_repeated_once_its_result_was_compacted(self):
         (self.root / "big.py").write_text("x = 1\n" * 900)

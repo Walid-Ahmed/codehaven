@@ -136,8 +136,7 @@ class GraphTests(unittest.TestCase):
             def chat(self, messages, schema):
                 return action("write", "new.py", "answer = 42\n")
 
-        self.assertEqual(run(Model(), self.ws, "Task", max_steps=1, apply=True,
-                             confirm=lambda _: True, output=lambda _: None), 2)
+        self.assertEqual(run(Model(), self.ws, "Task", max_steps=1, output=lambda _: None), 2)
         self.assertFalse((Path(self.temp.name) / "new.py").exists())
 
     def test_four_step_inspection_reserves_last_call_for_answer(self):
@@ -183,5 +182,6 @@ class GraphTests(unittest.TestCase):
     def test_cli_doctor_uses_fixed_model(self):
         with patch("offline_agent.cli.Ollama") as model, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main(["--doctor"]), 0)
-        model.assert_called_once_with(endpoint="http://127.0.0.1:11434", max_output_tokens=1024, prompt_budget=12000)
+        model.assert_called_once_with(model="qwen2.5-coder:7b", endpoint="http://127.0.0.1:11434", max_output_tokens=1024,
+                                      prompt_budget=12000)
         model.return_value.check_model.assert_called_once_with()

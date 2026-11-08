@@ -3,7 +3,7 @@
 The server listens on 127.0.0.1 only and serves one self-contained page: no scripts, styles, or fonts come
 from the internet, and the page's Content-Security-Policy forbids loading any. Every request must carry the
 secret token from the link the server prints, and a Host header naming this machine, so other websites open
-in the same browser cannot use the server to read files. Chat is read-only: proposed edits are previews.
+in the same browser cannot use the server to read files. Like the rest of CodeHaven, it never changes files.
 """
 import json
 import os
@@ -74,12 +74,33 @@ class App:
         finally:
             self.release()
 
+    def model_name(self):
+        return getattr(self.model, "model", MODEL)
+
+    def models(self):
+        """Installed local chat models for the picker, and which one is in use."""
+        try:
+            found = self.model.local_models() if hasattr(self.model, "local_models") else []
+        except ValueError:
+            found = []
+        return {"models": found, "current": self.model_name(), "default": MODEL}
+
+    def use_model(self, name):
+        if not hasattr(self.model, "use"):
+            raise ValueError("This model cannot be changed.")
+        self.claim()
+        try:
+            self.model.use(name)
+            return self.models()
+        finally:
+            self.release()
+
     def summary(self):
         workspace, knowledge = self.workspace, self.knowledge
         if workspace is None or knowledge is None:
-            return {"model": MODEL, "repository": None}
+            return {"model": self.model_name(), "repository": None}
         counts = knowledge.documents_by_source
-        return {"model": MODEL, "repository": str(workspace.root), "files": counts["repo"],
+        return {"model": self.model_name(), "repository": str(workspace.root), "files": counts["repo"],
                 "references": counts["user"], "chunks": len(knowledge.entries), "limited": knowledge.limited}
 
     def reset(self):
@@ -225,6 +246,8 @@ def make_handler(app, token, port_holder):
                     self.send(200, page.encode(), "text/html")
                 elif url.path == "/api/status":
                     self.send(200, app.summary())
+                elif url.path == "/api/models":
+                    self.send(200, app.models())
                 elif url.path == "/api/dirs":
                     self.send(200, directories(query.get("path", [""])[0]))
                 elif url.path == "/api/file":
@@ -243,6 +266,8 @@ def make_handler(app, token, port_holder):
                 data = self.body()
                 if url.path == "/api/open":
                     self.send(200, app.open(str(data.get("path", "")), data.get("excludes") or ()))
+                elif url.path == "/api/model":
+                    self.send(200, app.use_model(str(data.get("name", ""))))
                 elif url.path == "/api/reset":
                     app.reset()
                     self.send(200, {"ok": True})

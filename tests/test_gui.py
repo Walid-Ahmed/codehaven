@@ -183,7 +183,40 @@ class GuiServerTests(unittest.TestCase):
         self.assertEqual((status, data["path"]), (200, str(self.repo.resolve())))
 
 
+class ModelPickerTests(unittest.TestCase):
+    def test_picker_lists_models_and_switches_between_questions(self):
+        class Pickable(ScriptedModel):
+            model = "qwen2.5-coder:7b"
+
+            def local_models(self):
+                return [{"name": "qwen2.5-coder:7b"}, {"name": "qwen2.5:14b"}]
+
+            def use(self, name):
+                if name not in ("qwen2.5-coder:7b", "qwen2.5:14b"):
+                    raise ValueError(f"Model {name!r} is not installed.")
+                self.model = name
+        app = App(Pickable([]))
+        self.assertEqual(app.models()["current"], "qwen2.5-coder:7b")
+        self.assertEqual([m["name"] for m in app.models()["models"]], ["qwen2.5-coder:7b", "qwen2.5:14b"])
+        self.assertEqual(app.use_model("qwen2.5:14b")["current"], "qwen2.5:14b")
+        with self.assertRaisesRegex(ValueError, "not installed"):
+            app.use_model("missing:latest")
+        self.assertEqual(app.summary()["model"], "qwen2.5:14b")
+        self.assertFalse(app.busy)
+
+
 class GuiCliTests(unittest.TestCase):
+    def test_gui_starts_with_another_local_model_when_the_default_is_missing(self):
+        with patch("offline_agent.cli.Ollama") as ollama, patch("offline_agent.gui.serve", return_value=0), \
+             contextlib.redirect_stdout(io.StringIO()) as printed:
+            client = ollama.return_value
+            client.check_model.side_effect = ValueError("not installed")
+            client.local_models.return_value = [{"name": "llama3:latest"}]
+            client.other_loaded_models.return_value = []
+            self.assertEqual(main(["--gui", "--no-browser"]), 0)
+        client.use.assert_called_once_with("llama3:latest")
+        self.assertIn("starting with llama3:latest", printed.getvalue())
+
     def test_gui_flag_starts_the_server_without_a_task(self):
         with patch("offline_agent.cli.Ollama"), patch("offline_agent.gui.serve", return_value=0) as serve, \
              contextlib.redirect_stdout(io.StringIO()):

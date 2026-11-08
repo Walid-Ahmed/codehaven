@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "offline-free-coding-agent"
-version = "0.8.0"
-description = "CodeHaven: Your code. Your machine. No API fees."
+version = "0.9.0"
+description = "CodeHaven: a read-only, offline assistant for understanding code. Your code. Your machine. No API fees."
 requires-python = ">=3.10"
 dependencies = ["langgraph>=1.0,<2", "langsmith>=0.3,<1",
     "tree-sitter>=0.25,<0.26", "tree-sitter-javascript>=0.23,<0.26",

@@ -38,8 +38,7 @@ class ExclusionTests(unittest.TestCase):
         self.assertEqual([r['source'] for r in json.loads(kb.retrieve('uniqueexcludedtoken'))['results']], ['repo/keep.py'])
         for name in ('private/secret.py', 'generated/code.py', 'skip.py', 'debug.log'):
             with self.subTest(name=name):
-                for operation in (lambda: ws.read(name), lambda: ws.search('token', name),
-                                  lambda: ws.propose(name, 'replacement')):
+                for operation in (lambda: ws.read(name), lambda: ws.search('token', name)):
                     with self.assertRaises(ValueError):
                         operation()
 

@@ -2,6 +2,7 @@ import json
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -40,37 +41,22 @@ class WorkspaceTests(unittest.TestCase):
             self.ws.read("link/example.py")
         self.assertEqual(self.ws.files(), [])
 
-    def test_preview_and_confirmed_write(self):
-        replies = [action("write", "hello.py", "print('hello')\n"), action("finish")]
-        run(FakeModel(replies), self.ws, "Create hello", output=lambda _: None)
-        self.assertFalse((self.root / "hello.py").exists())
-        run(FakeModel(replies), self.ws, "Create hello", apply=True,
-            confirm=lambda _: True, output=lambda _: None)
-        self.assertEqual(self.ws.read("hello.py"), "print('hello')\n")
-
-    def test_decline_write(self):
-        run(FakeModel([action("write", "x", "text"), action("finish")]), self.ws,
-            "task", apply=True, confirm=lambda _: False, output=lambda _: None)
-        self.assertFalse((self.root / "x").exists())
-
-    def test_stale_preview(self):
-        (self.root / "x").write_text("original")
-        before, _ = self.ws.propose("x", "new")
-        (self.root / "x").write_text("user edit")
-        with self.assertRaises(ValueError):
-            self.ws.write("x", "new", before)
-        self.assertEqual(self.ws.read("x"), "user edit")
-
-    def test_size_binary_and_hardlink(self):
+    def test_size_and_binary_limits(self):
         (self.root / "big").write_bytes(b"x" * 64001)
         (self.root / "binary").write_bytes(b"\0")
         for name in ["big", "binary"]:
             with self.assertRaises(ValueError):
                 self.ws.read(name)
-        (self.root / "x").write_text("text")
-        (self.root / "y").hardlink_to(self.root / "x")
-        with self.assertRaises(ValueError):
-            self.ws.propose("y", "edit")
+
+    def test_codehaven_cannot_write_files(self):
+        # Read-only by design: a model asking to write or edit gets a correction, and no file appears.
+        self.assertFalse(hasattr(self.ws, "write") or hasattr(self.ws, "propose"))
+        output = []
+        model = FakeModel([action("write", "hello.py", "print('hello')\n"), action("edit", "hello.py", "x"), action("finish")])
+        with self.assertRaisesRegex(ValueError, "unknown action 'edit'"):
+            run(model, self.ws, "Create hello.py", output=output.append)
+        self.assertFalse((self.root / "hello.py").exists())
+        self.assertTrue(any("unknown action 'write'" in line for line in output))
 
     def test_step_limit_and_invalid_action(self):
         self.assertEqual(run(FakeModel([action("read", "missing")]), self.ws,
@@ -89,11 +75,41 @@ class TransportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Ollama("model:cloud")
 
-    def test_only_selected_model_supported(self):
-        self.assertEqual(Ollama().model, "qwen2.5-coder:7b")
-        for name in ["other", "qwen2.5-coder:14b", "qwen2.5-coder:latest"]:
+    def test_any_local_model_name_but_never_a_cloud_one(self):
+        self.assertEqual(Ollama().model, "qwen2.5-coder:7b")  # The tested default.
+        self.assertEqual(Ollama("qwen2.5:14b").model, "qwen2.5:14b")
+        for name in ["gpt-oss:120b-cloud", "qwen3-coder:cloud", "", "bad name", "x" * 201]:
             with self.subTest(model=name), self.assertRaises(ValueError):
                 Ollama(name)
+
+    def test_model_list_shows_local_chat_models_default_first(self):
+        tags = {"models": [
+            {"name": "qwen2.5:14b", "capabilities": ["completion"], "details": {"parameter_size": "14.8B", "family": "qwen2"}},
+            {"name": "embeddinggemma:latest", "capabilities": ["embedding"], "details": {}},
+            {"name": "gpt-oss:120b-cloud", "capabilities": ["completion"], "details": {}},
+            {"name": "remote:latest", "remote_host": "https://ollama.com", "details": {}},
+            {"name": "qwen2.5-coder:7b", "capabilities": ["completion"], "details": {"parameter_size": "7.6B"}, "size": 4},
+            {"name": "llama3:latest", "details": {}}]}
+        with patch.object(Ollama, "request", return_value=tags):
+            names = [m["name"] for m in Ollama().local_models()]
+        self.assertEqual(names, ["qwen2.5-coder:7b", "llama3:latest", "qwen2.5:14b"])
+
+    def test_switching_to_a_model_that_cannot_chat_keeps_the_current_one(self):
+        client = Ollama()
+        tags = {"models": [{"name": "embeddinggemma:latest"}, {"name": "qwen2.5:14b"}]}
+        def request(path, payload=None):
+            if path == "/api/tags":
+                return tags
+            return {"capabilities": ["embedding"]} if payload["model"].startswith("embedding") else {"capabilities": ["completion"]}
+        with patch.object(client, "request", side_effect=request):
+            with self.assertRaisesRegex(ValueError, "cannot chat"):
+                client.use("embeddinggemma:latest")
+            self.assertEqual(client.model, "qwen2.5-coder:7b")
+            client.use("qwen2.5:14b")
+            self.assertEqual(client.model, "qwen2.5:14b")
+            with self.assertRaises(ValueError):
+                client.use("missing:latest")
+            self.assertEqual(client.model, "qwen2.5:14b")
 
     def test_real_http_contract(self):
         calls = []

@@ -1,7 +1,7 @@
 # File exclusions
 
 One local exclusion policy is used by file listing, literal search, repository RAG,
-reference indexing, dependency analysis, and direct file reads/proposed writes.
+reference indexing, dependency analysis, and direct file reads. CodeHaven never writes files.
 An excluded path cannot be retrieved by giving the model its exact name. No Git
 executable, Git repository, network service, or model call is needed for filtering.
 
@@ -83,7 +83,7 @@ indexing operation rather than silently exposing files. Rule files are read as
 configuration, not added to model context as hidden documents.
 
 Policies are cached for a workspace instance. Restart a task after externally
-editing ignore files. RAG rebuilds its policies/index after approved writes,
+editing ignore files. RAG rebuilds its policies/index for each task,
 preserving CLI exclusions. Already retrieved conversation text is not erased by a
 later rule change. Filtering alone is not an OS security boundary. Test execution now uses a filtered,
 read-only snapshot inside Docker with networking disabled; see [isolated tests](ISOLATED_TESTS.md).

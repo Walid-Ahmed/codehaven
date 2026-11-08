@@ -72,27 +72,6 @@ class RepositoryRagTests(unittest.TestCase):
         kb.refresh()
         self.assertEqual(json.loads(kb.retrieve("newrepopattern"))["results"], [])
 
-    def test_approved_write_refreshes_repository_retrieval(self):
-        self.put("code.py", "oldrepopattern")
-        kb = KnowledgeBase(workspace=self.root)
-        calls = []
-
-        class Model:
-            def chat(self, messages, schema):
-                calls.append(messages)
-                replies = [
-                    {"action": "write", "path": "code.py", "content": "newrepopattern", "message": "Edit"},
-                    {"action": "retrieve", "path": "", "content": "newrepopattern", "message": "Retrieve"},
-                    {"action": "finish", "path": "", "content": "", "message": "Done"},
-                ]
-                return replies[len(calls) - 1]
-
-        run(Model(), self.workspace, "Modify code", knowledge=kb, apply=True,
-            confirm=lambda _: True, output=lambda _: None)
-        self.assertIn("repo/code.py", calls[2][-1]["content"])
-        self.assertIn("newrepopattern", calls[2][-1]["content"])
-        self.assertNotIn("oldrepopattern", calls[2][-1]["content"])
-
     def test_cli_automatically_indexes_workspace(self):
         self.put("src/code.py", "uniquerepositoryterm")
         with patch("offline_agent.cli.Ollama"), patch("offline_agent.cli.run", return_value=0) as agent:

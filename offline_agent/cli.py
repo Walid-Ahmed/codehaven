@@ -43,7 +43,9 @@ def interactive(session, first_task=None, prompt=input):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=f"CodeHaven — Your code. Your machine. No API fees. Powered by local {MODEL}")
+    parser = argparse.ArgumentParser(description=f"CodeHaven — Your code. Your machine. No API fees. A read-only assistant for "
+                                                 f"understanding code with a local model ({MODEL} by default). "
+                                                 "It never changes your files.")
     parser.add_argument("task", nargs="?", help="Coding task in plain English")
     parser.add_argument("--workspace", help="Project folder; defaults to the current folder (with --gui, none)")
     parser.add_argument("--exclude", action="append", default=[], metavar="PATTERN",
@@ -59,7 +61,7 @@ def main(argv=None):
     parser.add_argument("--test-image", default=DEFAULT_IMAGE, help="Prepared local Docker image for isolated tests")
     parser.add_argument("--test-docker-socket", help="Absolute local Unix Docker socket; remote daemons are unsupported")
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
-    parser.add_argument("--apply", action="store_true", help="Allow writing after per-file confirmation")
+    parser.add_argument("--model", default=MODEL, help=f"Installed local Ollama model (default {MODEL}, the tested one)")
     parser.add_argument("--max-steps", type=int, default=12, choices=range(1, 31), metavar="1..30")
     parser.add_argument("--doctor", action="store_true", help="Check local server and installed model")
     parser.add_argument("-i", "--interactive", action="store_true",
@@ -76,15 +78,23 @@ def main(argv=None):
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
     try:
-        model = Ollama(endpoint=args.endpoint, max_output_tokens=args.max_output_tokens,
+        model = Ollama(model=args.model, endpoint=args.endpoint, max_output_tokens=args.max_output_tokens,
                        prompt_budget=args.prompt_budget)
-        model.check_model()
+        try:
+            model.check_model()
+        except ValueError:
+            # The GUI can start with another installed model, which the page lets the user change.
+            available = [m["name"] for m in model.local_models()] if args.gui else []
+            if not available:
+                raise
+            model.use(available[0])
+            print(f"{args.model} is not available; starting with {available[0]}. Choose another model in the page.")
         others = model.other_loaded_models()
         if others:
             print("Warning: Ollama also has " + ", ".join(others) + " loaded. If both models do not fit in memory, Ollama "
                   "reloads them in turn, which can add a minute or more to every step. Check with `ollama ps`.")
         if args.doctor:
-            print(f"Local Ollama is ready: {MODEL}")
+            print(f"Local Ollama is ready: {model.model}")
             return 0
         if args.gui:
             from .gui import serve
@@ -102,12 +112,11 @@ def main(argv=None):
         if knowledge.excluded_reference_roots:
             print("Reference directory excluded by workspace rules; it was not indexed. "
                   "Use a permitted directory or an external reference library.")
-        print(f"Workspace: {workspace.root}\nFile edits: {'confirm each write' if args.apply else 'preview only'}")
-        options = dict(apply=args.apply, max_steps=args.max_steps, knowledge=knowledge,
+        print(f"Workspace: {workspace.root}\nRead-only: CodeHaven never changes your files.")
+        options = dict(max_steps=args.max_steps, knowledge=knowledge,
                        output=partial(print, flush=True), stream=None if args.no_stream else write_stream,
                        test_options={"runner": args.test_runner, "image": args.test_image,
                                      "docker_socket": args.test_docker_socket},
-                       confirm=lambda path: input(f"Write {path}? [y/N] ").strip().lower() == "y",
                        confirm_tests=lambda: input(
                            f"Run {args.test_runner} in Docker with network disabled and project read-only? [y/N] "
                        ).strip().lower() == "y")

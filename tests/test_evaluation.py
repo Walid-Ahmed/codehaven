@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,21 +40,19 @@ class EvaluationTests(unittest.TestCase):
     def test_task_file_is_valid_and_sample_repo_has_planted_facts(self):
         self.assertGreaterEqual(len(TASKS), 10)
         store = (REPO / "inventory/store.py").read_text()
-        self.assertIn("item.quantity < threshold", store)  # The bug fix-low-stock asks the agent to repair.
+        self.assertIn("item.quantity < threshold", store)  # The bug low-stock-bug asks the agent to explain.
         self.assertIn("raise KeyError", store)
         catalog = (REPO / "inventory/catalog.py").read_text()
         self.assertGreater(len(catalog.encode()), 12_000)  # Large enough that reading it needs paging.
         self.assertTrue(catalog.rstrip().endswith('("SKU-0600", "Titanium Spork", 42.0),\n]'))
-        self.assertNotIn("def slugify(text):\n    \"\"\"", (REPO / "utils/text.py").read_text())
-        self.assertFalse((REPO / "inventory/errors.py").exists())
         for task in TASKS.values():
             with self.subTest(task=task["id"]):
-                self.assertTrue(score(task, "", REPO), "each task must fail before the agent acts")
+                self.assertTrue(score(task, ""), "each task must fail before the agent acts")
 
     def test_second_task_set_is_valid_and_fails_before_the_agent_acts(self):
         for task in load_tasks(EVALS / "bookings_tasks.json"):
             with self.subTest(task=task["id"]):
-                self.assertTrue(score(task, "", EVALS / "bookings_repo"), "each task must fail before the agent acts")
+                self.assertTrue(score(task, ""), "each task must fail before the agent acts")
 
     def test_correct_answer_passes_and_records_metrics(self):
         model = ScriptedModel([action("read", "inventory/store.py"),
@@ -63,24 +62,22 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual((result["exit_code"], result["steps"]), (0, 2))
         self.assertEqual((result["prompt_tokens"], result["generated_tokens"]), (200, 20))
 
-    def test_edit_task_is_scored_on_a_copy_of_the_repo(self):
-        fix = ("<<<<<<< SEARCH\n        return [item for item in self.items.values() if item.quantity < threshold]\n"
-               "=======\n        return [item for item in self.items.values() if item.quantity <= threshold]\n"
-               ">>>>>>> REPLACE")
-        model = ScriptedModel([action("edit", "inventory/store.py", fix), action("finish", content="Fixed.")])
-        result = evaluate_task(TASKS["fix-low-stock"], model, REPO)
-        self.assertTrue(result["passed"], result["failures"])
-        self.assertIn("item.quantity < threshold", (REPO / "inventory/store.py").read_text())
+    def test_any_changed_file_fails_a_task(self):
+        from offline_agent.evaluation import changed_files
+        with tempfile.TemporaryDirectory() as temporary:
+            copy = Path(temporary, "repo")
+            shutil.copytree(REPO, copy)
+            self.assertEqual(changed_files(REPO, copy), [])
+            (copy / "config.py").write_text("changed = True\n")
+            (copy / "extra.py").write_text("x = 1\n")
+            self.assertEqual(changed_files(REPO, copy), ["config.py", "extra.py"])
 
-    def test_changing_a_file_the_task_does_not_concern_fails(self):
-        fix = ("<<<<<<< SEARCH\n        return [item for item in self.items.values() if item.quantity < threshold]\n"
-               "=======\n        return [item for item in self.items.values() if item.quantity <= threshold]\n"
-               ">>>>>>> REPLACE")
-        model = ScriptedModel([action("edit", "inventory/store.py", fix), action("write", "extra.py", "x = 1\n"),
-                               action("finish", content="Fixed.")])
-        result = evaluate_task(TASKS["fix-low-stock"], model, REPO)
-        self.assertEqual(result["changed"], ["extra.py", "inventory/store.py"])
-        self.assertEqual(result["failures"], ["extra.py changed but the task does not concern it"])
+    def test_task_files_cannot_ask_for_file_changes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary, "tasks.json")
+            path.write_text(json.dumps([{"id": "x", "task": "Fix it", "checks": {"files": {"a.py": ["y"]}}}]))
+            with self.assertRaisesRegex(ValueError, "never changes files"):
+                load_tasks(path)
 
     def test_reloads_between_steps_are_counted(self):
         class Reloading(ScriptedModel):

@@ -2,8 +2,8 @@
 
 Usage: python -m offline_agent.evaluation [--only ID] [--output PATH]
 
-Each task runs on a fresh temporary copy of the sample repository, with writes auto-confirmed
-inside that copy and test runs declined. The model is reached only through loopback Ollama,
+Each task runs on a fresh temporary copy of the sample repository, with test runs declined.
+CodeHaven is read-only, so a task that leaves any file changed fails. The model is reached only through loopback Ollama,
 so evaluation is as offline as normal use. Results record pass/fail, exit code, steps, tokens,
 time, reloads, changed files, and each task's run log, so a failure can be explained and
 prompt or tool changes can be compared run to run.
@@ -67,25 +67,16 @@ def load_tasks(path):
             raise ValueError(f"Duplicate task id: {task['id']}")
         seen.add(task["id"])
         checks = task.get("checks")
-        if not isinstance(checks, dict) or not (checks.get("answer") or checks.get("files")):
-            raise ValueError(f"Task {task['id']} needs answer or files checks")
-        for pattern in checks.get("answer", []) + [p for ps in checks.get("files", {}).values() for p in ps]:
+        if not isinstance(checks, dict) or not checks.get("answer") or set(checks) != {"answer"}:
+            raise ValueError(f"Task {task['id']} needs answer checks, and only those: CodeHaven never changes files")
+        for pattern in checks["answer"]:
             re.compile(pattern)
     return tasks
 
 
-def score(task, answer, root):
-    """Return failed checks: answer regexes (case-insensitive) and file regexes after the run."""
-    failures = [f"answer lacks /{pattern}/" for pattern in task["checks"].get("answer", [])
-                if not re.search(pattern, answer, re.I | re.S)]
-    for name, patterns in task["checks"].get("files", {}).items():
-        path = Path(root, name)
-        if not path.is_file():
-            failures.append(f"{name} missing")
-            continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        failures += [f"{name} lacks /{pattern}/" for pattern in patterns if not re.search(pattern, text, re.M)]
-    return failures
+def score(task, answer):
+    """Return the answer regexes (case-insensitive) that the answer fails."""
+    return [f"answer lacks /{pattern}/" for pattern in task["checks"]["answer"] if not re.search(pattern, answer, re.I | re.S)]
 
 
 def changed_files(before, after):
@@ -106,10 +97,9 @@ def evaluate_task(task, model, repo):
         started = time.monotonic()
         answer, error = "", None
         try:
-            state = run_state(metered, workspace, task["task"], apply=task.get("apply", False),
-                              max_steps=task.get("max_steps", 12),
+            state = run_state(metered, workspace, task["task"], max_steps=task.get("max_steps", 12),
                               knowledge=KnowledgeBase(None, workspace=workspace, context_budget=RETRIEVAL_BUDGET),
-                              confirm=lambda _path: True, confirm_tests=lambda: False, output=log.append)
+                              confirm_tests=lambda: False, output=log.append)
             exit_code, steps = state["exit_code"], state["steps"]
             reply = state.get("reply") or {}
             if reply.get("action") == "finish":
@@ -117,9 +107,8 @@ def evaluate_task(task, model, repo):
         except ValueError as exc:
             exit_code, steps, error = 1, metered.calls, str(exc)
         changed = changed_files(repo, root)
-        failures = ([f"error: {error}"] if error else []) + score(task, answer, root)
-        expected = set(task["checks"].get("files", {}))
-        failures += [f"{name} changed but the task does not concern it" for name in changed if name not in expected]
+        failures = ([f"error: {error}"] if error else []) + score(task, answer)
+        failures += [f"{name} changed, but CodeHaven must never change files" for name in changed]
     return {"id": task["id"], "passed": not failures, "exit_code": exit_code, "steps": steps, "changed": changed,
             "reloads": metered.reloads, "log": [str(line) for line in log], "replies": metered.replies,
             "prompt_tokens": metered.prompt_tokens, "generated_tokens": metered.generated_tokens,
@@ -159,12 +148,13 @@ def evaluate(tasks, model, repo, output=print):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=f"Score local {MODEL} on fixed CodeHaven tasks (offline)")
+    parser = argparse.ArgumentParser(description="Score a local model on fixed CodeHaven tasks (offline)")
     parser.add_argument("--tasks", default=str(EVALS / "tasks.json"))
     parser.add_argument("--repo", default=str(EVALS / "sample_repo"))
     parser.add_argument("--only", action="append", default=[], metavar="ID", help="Run only this task id; repeatable")
     parser.add_argument("--output", default=str(EVALS / "results" / "latest.json"))
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
+    parser.add_argument("--model", default=MODEL, help="Installed local Ollama model to score (default: the tested one)")
     parser.add_argument("--max-output-tokens", type=int, default=1024)
     parser.add_argument("--prompt-budget", type=int, default=12000)
     args = parser.parse_args(argv)
@@ -177,7 +167,7 @@ def main(argv=None):
             tasks = [task for task in tasks if task["id"] in args.only]
         if not Path(args.repo).is_dir():
             raise ValueError(f"Sample repository not found: {args.repo}")
-        model = Ollama(endpoint=args.endpoint, max_output_tokens=args.max_output_tokens, prompt_budget=args.prompt_budget)
+        model = Ollama(model=args.model, endpoint=args.endpoint, max_output_tokens=args.max_output_tokens, prompt_budget=args.prompt_budget)
         model.check_model()
         others = model.other_loaded_models()
         if others:
@@ -195,7 +185,7 @@ def main(argv=None):
     print(f"\nPassed {summary['passed']}/{summary['tasks']}; {summary['verified']} also passed CodeHaven's own answer checks; "
           f"mean steps {summary['mean_steps']}; "
           f"tokens {summary['prompt_tokens']:,} prompt / {summary['generated_tokens']:,} generated; {summary['seconds']}s")
-    report = {"model": MODEL, "started": started, "tasks_file": args.tasks,
+    report = {"model": args.model, "started": started, "tasks_file": args.tasks,
               "settings": {"max_output_tokens": args.max_output_tokens, "prompt_budget": args.prompt_budget},
               "summary": summary, "results": results}
     output = Path(args.output)

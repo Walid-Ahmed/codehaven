@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1400" height="880" viewBox="0 0 1400 880" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
-  <title>How CodeHaven works: agent loop, tools, local RAG, and safety checks</title>
+  <title>How CodeHaven works: a read-only agent loop, tools, local RAG, and answer checks</title>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
@@ -51,7 +51,7 @@
   <!-- RAG panel -->
   <rect x="40" y="430" width="260" height="310" rx="12" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
   <text x="58" y="457" class="h">Local RAG index</text>
-  <text x="58" y="477" class="s">built at start, refreshed after writes</text>
+  <text x="58" y="477" class="s">built at start, refreshed between questions</text>
   <rect x="58" y="490" width="224" height="28" rx="14" fill="#ffffff" stroke="#14b8a6"/>
   <text x="170" y="509" class="t" text-anchor="middle">Your repository code</text>
   <rect x="58" y="524" width="224" height="28" rx="14" fill="#ffffff" stroke="#14b8a6"/>
@@ -78,7 +78,7 @@
 
   <path d="M680,270 V296" class="flow" marker-end="url(#arrow)"/>
   <rect x="450" y="300" width="460" height="36" rx="18" fill="#ffffff" stroke="#9ca3af"/>
-  <text x="680" y="323" class="t" text-anchor="middle">action = read · search · retrieve · edit · write · run_tests</text>
+  <text x="680" y="323" class="t" text-anchor="middle">action = read · search · retrieve · run_tests</text>
   <path d="M680,336 V361" class="flow" marker-end="url(#arrow)"/>
 
   <!-- Tools -->
@@ -95,12 +95,12 @@
   <text x="815" y="428" class="tool" text-anchor="middle">read</text>
   <text x="815" y="452" class="s" text-anchor="middle">file or line range</text>
 
-  <rect x="385" y="487" width="160" height="72" rx="10" fill="#ffffff" stroke="#3b82f6"/>
-  <text x="465" y="515" class="tool" text-anchor="middle">edit</text>
-  <text x="465" y="539" class="s" text-anchor="middle">SEARCH/REPLACE blocks</text>
-  <rect x="560" y="487" width="160" height="72" rx="10" fill="#ffffff" stroke="#3b82f6"/>
-  <text x="640" y="515" class="tool" text-anchor="middle">write</text>
-  <text x="640" y="539" class="s" text-anchor="middle">new or whole file</text>
+  <rect x="385" y="487" width="160" height="72" rx="10" fill="#ffffff" stroke="#3b82f6" stroke-dasharray="5 4"/>
+  <text x="465" y="515" class="tool" text-anchor="middle">find names</text>
+  <text x="465" y="539" class="s" text-anchor="middle">automatic, before step 1</text>
+  <rect x="560" y="487" width="160" height="72" rx="10" fill="#ffffff" stroke="#3b82f6" stroke-dasharray="5 4"/>
+  <text x="640" y="515" class="tool" text-anchor="middle">cite parts</text>
+  <text x="640" y="539" class="s" text-anchor="middle">automatic: real line ranges</text>
   <rect x="735" y="487" width="160" height="72" rx="10" fill="#ffffff" stroke="#3b82f6"/>
   <text x="815" y="515" class="tool" text-anchor="middle">run_tests</text>
   <text x="815" y="539" class="s" text-anchor="middle">Docker · no network</text>
@@ -112,10 +112,10 @@
   <path d="M910,470 H960 V235 H844" class="loop" marker-end="url(#arrow-orange)"/>
   <text x="975" y="480" class="label" transform="rotate(-90 975 480)">LOOP: tool result → next step</text>
 
-  <!-- Write safety -->
+  <!-- Read-only -->
   <rect x="370" y="595" width="540" height="56" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
-  <text x="640" y="618" class="t" text-anchor="middle"><tspan font-weight="700">Before any write:</tspan> diff preview and Python syntax check.</text>
-  <text x="640" y="638" class="t" text-anchor="middle">Files change only with --apply and your y/N.</text>
+  <text x="640" y="618" class="t" text-anchor="middle"><tspan font-weight="700">Read-only:</tspan> CodeHaven never changes, creates, or deletes files.</text>
+  <text x="640" y="638" class="t" text-anchor="middle">Change requests get an explanation with cited lines, not an edit.</text>
 
   <text x="370" y="690" class="t"><tspan font-weight="700">Loop limits:</tspan> 12 steps by default (--max-steps up to 30).</text>
   <text x="370" y="712" class="t">The same lookup twice, or the last step, asks the model for its final answer.</text>

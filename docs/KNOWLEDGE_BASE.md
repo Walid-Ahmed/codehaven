@@ -36,9 +36,9 @@ Eligible visible files may still contain private data. Only select repositories 
 your local model. Larger repositories may need `search`/`read` for files outside
 the index. A directory need not have Git metadata to work.
 
-The index rebuilds after an agent-approved file write, so subsequent retrieval
-uses the updated code. Other edits made while a task runs are picked up on the
-next task (there is no filesystem watcher). Earlier conversation excerpts remain
+CodeHaven never writes files. The index is rebuilt at the start of each run and
+between questions in a session, so your own edits are picked up on the next
+question (there is no filesystem watcher). Earlier conversation excerpts remain
 snapshots; retrieve or read again when validating changed code.
 
 ## Add documents
@@ -88,7 +88,6 @@ The supplied directory must exist. Documents can be outside the project, but onl
 the user-configured reference root is indexed. The model cannot select a different
 root. Knowledge retrieval reads documents; it never edits that reference library.
 If references are inside the workspace, its ignore rules also apply to them.
-Permitted references can still be edited with the usual write approval.
 
 ## LangGraph manuals
 
@@ -121,8 +120,8 @@ keyword-matched passages plus up to four Python/JavaScript/TypeScript dependency
 and a shared 16 KB JSON cap. There are no embeddings or semantic
 vector search, so queries using the document's actual terminology work best.
 
-The index is rebuilt for each new task and after approved agent writes. External
-edits and deletions are picked up on the next run. No database, persistent index, account, or API key is required.
+The index is rebuilt for each new task. External edits and deletions are picked
+up on the next run. No database, persistent index, account, or API key is required.
 Indexing considers at most 1,000 candidate files per root, 1,000 documents total across references and repository code,
 5 MB of document text, and 8,000 passages. Hidden/excluded paths, symlinks, binary
 files, invalid UTF-8, and files over 64 KB are excluded. Metadata flags report
@@ -132,7 +131,7 @@ not every excluded path.
 
 References are untrusted data. The model is instructed to use them as evidence,
 not follow embedded commands. This is guidance rather than a prompt-injection
-security boundary. Existing write/test approvals still apply. Project tests now run in isolated Docker containers with no external network
+security boundary. CodeHaven cannot write files, and test runs still need approval. Project tests now run in isolated Docker containers with no external network
 and a read-only project snapshot; see [isolated tests](ISOLATED_TESTS.md).
 RAG itself performs no network requests.
 
@@ -175,8 +174,7 @@ the Python version running the agent is skipped by dependency analysis. Index
 limits may omit import targets; absence of a dependency passage is not evidence
 that no dependency exists. Use search/read for missing context.
 
-The dependency graph refreshes with the local index after approved writes and on
-each new task. It does not add internet access or another model.
+The dependency graph refreshes with the local index on each new task. It does not add internet access or another model.
 
 ## JavaScript and TypeScript dependencies
 

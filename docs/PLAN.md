@@ -37,13 +37,12 @@ Implemented a typed in-memory StateGraph with model, read, write, and limit node
 
 ## Next
 
-Shipped since this list was first written: exclusions (v0.6), context budgeting and malformed-reply recovery, patch edits with stale-content checks, atomic writes, and a local benchmark (v0.8). Prioritized from what the v0.8 evals showed:
+Since v0.9 CodeHaven is read-only and focused on understanding code; editing was removed (see Version 0.9). Next, in order:
 
-- Make edits more stable. Results still vary as prompts change: `fix-low-stock` passed two runs and failed a third when the model looped past the token limit, then swapped the two sides of its SEARCH/REPLACE block.
-- Catch inserted lines placed next to the right spot instead of in it. Docstrings and comments are the remaining common edit failure, and they pass every current check. A CLI smoke test also showed the model adding a stray duplicate of the line it changed. The diff shows these before you confirm, so read it rather than trusting the summary.
-- Run the tests automatically after an edit where Docker is available, so a wrong change fails the task. The evals currently decline test runs.
-- Evaluate on real repositories. Both eval repositories are small, and the tasks are short and mostly touch one file.
-- Add backups or rollback for multi-file changes.
+- Run the evals again on the converted question sets, and record a new baseline for the default model.
+- Reduce padded answers. The model often adds invented reference lists after a correct answer; they are flagged as unverified, but they make answers noisy.
+- Evaluate on real repositories. Both eval repositories are small, and the questions are short.
+- Add a Stop button to the browser page for an answer in progress.
 
 ## Version 0.2.1: approved unittest execution
 
@@ -207,3 +206,25 @@ Tasks 1-8 scored 4/8 on their first run, and tasks 9-14 scored 4/6, before later
 Timing: the 12 main tasks took 513 seconds. The Nov 1 run took 3,013 seconds, but it is not known whether another Ollama client was active then, so that gap cannot all be credited to these changes. With a competing client, steps measured 35-113 seconds of model loading each.
 
 Remaining failures in the final run: `fix-low-stock` (see Next), `slugify-docstring` and `f-comment` (a correct line in the wrong place, reported as success, so these answer checks do not catch it), and `h-holiday-date` (the placement check refused the change correctly, but the model resent it unchanged).
+
+## Version 0.9: read-only code understanding, browser chat, and model choice
+
+CodeHaven is now a read-only assistant for understanding code. The `edit` and `write` actions, `--apply`,
+and all code that wrote files were removed, not switched off, so no path in the program can change a
+file. The removed editing work remains in Git history up to commit 40cf5c8 if a later version brings
+editing back. Change requests are answered with an explanation: what to change, where (with cited lines),
+and the new code. `run_tests` stays, because tests run in Docker against a read-only snapshot.
+
+Also added:
+
+- `codehaven --gui`, a local browser page to pick a repository, index it, and chat about it, with
+  clickable citations, an offline logo and slogan, and a model picker.
+- Any installed local chat model through `--model` or the page. `qwen2.5-coder:7b` stays the default and
+  the tested model. Cloud names, remote-backed models, and embedding-only models are refused.
+- Points that name whole files cite those files, even when the model pairs a file name with the wrong
+  folder, and names that are not definitions, such as table rows, match the line that mentions them.
+
+Evals: the change tasks became questions that check the same understanding (for example, the
+`low_stock` bug and its fix, or the price of `SKU-0042`), five redundant ones were dropped, and the
+harness now fails any task that leaves a file changed. Earlier results in this file are for those
+earlier task sets and are not comparable with runs on the new ones.

@@ -6,7 +6,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-MODEL = "qwen2.5-coder:7b"
+MODEL = "qwen2.5-coder:7b"  # The default, and the model the evals were tuned and measured on.
+MODEL_NAME = re.compile(r"[\w.:/@-]{1,200}")
+
+
+def cloud_name(name):
+    """Ollama names cloud-backed models with a cloud tag; CodeHaven never sends code to them."""
+    return name.endswith(("-cloud", ":cloud"))
 MAX_RESPONSE_BYTES = 2_000_000
 STUB_MIN_BYTES = 400
 
@@ -214,8 +220,8 @@ class Ollama:
         if (not local or url.scheme != "http" or url.username or url.password
                 or url.path not in ("", "/") or url.query or url.fragment):
             raise ValueError("Endpoint must be an HTTP numeric loopback origin, e.g. http://127.0.0.1:11434")
-        if model != MODEL:
-            raise ValueError(f"Only {MODEL} is supported")
+        if not isinstance(model, str) or not MODEL_NAME.fullmatch(model) or cloud_name(model):
+            raise ValueError(f"Not a local Ollama model name: {model!r}")
         self.endpoint = endpoint.rstrip("/")
         self.model = model
         self.timeout = timeout
@@ -287,10 +293,39 @@ class Ollama:
         models = self.request("/api/tags").get("models", [])
         names = {m.get("name") for m in models}
         if self.model not in names:
-            raise ValueError(f"Model {self.model!r} is not installed. Run: ollama pull {MODEL} while online.")
+            raise ValueError(f"Model {self.model!r} is not installed. Run: ollama pull {self.model} while online.")
         info = self.request("/api/show", {"model": self.model})
         if info.get("remote_host") or info.get("remote_model"):
             raise ValueError("Remote-backed models are disabled")
+        if "capabilities" in info and "completion" not in info["capabilities"]:
+            raise ValueError(f"Model {self.model!r} cannot chat (it is an embedding model); choose another.")
+
+    def local_models(self):
+        """Installed models that run on this machine and can chat, the default first.
+
+        Cloud-backed models and embedding-only models are left out.
+        """
+        found = []
+        for item in self.request("/api/tags").get("models", []):
+            name = item.get("name") if isinstance(item, dict) else None
+            if (not isinstance(name, str) or cloud_name(name) or item.get("remote_host") or item.get("remote_model")
+                    or ("capabilities" in item and "completion" not in item["capabilities"])):
+                continue
+            details = item.get("details") or {}
+            found.append({"name": name, "parameters": details.get("parameter_size", ""), "family": details.get("family", ""),
+                          "bytes": item.get("size", 0)})
+        return sorted(found, key=lambda m: (m["name"] != MODEL, m["name"]))
+
+    def use(self, name):
+        """Switch to another installed local model; the current one stays if the new one fails its checks."""
+        if not isinstance(name, str) or not MODEL_NAME.fullmatch(name) or cloud_name(name):
+            raise ValueError(f"Not a local Ollama model name: {name!r}")
+        previous, self.model = self.model, name
+        try:
+            self.check_model()
+        except ValueError:
+            self.model = previous
+            raise
 
     def other_loaded_models(self):
         """Other models Ollama holds in memory: competing for memory makes it reload ours on every step."""

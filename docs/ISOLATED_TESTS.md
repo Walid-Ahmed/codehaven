@@ -31,7 +31,7 @@ offline-agent --workspace /path/to/project --test-runner pytest \
   'Run the tests and explain failures'
 ```
 
-Each run still asks for approval, independently of --apply. The agent shows the
+Each run asks for approval. CodeHaven shows the
 fixed command, selected image, and workspace first. The commands inside the
 container are:
 

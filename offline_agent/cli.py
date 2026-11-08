@@ -45,7 +45,7 @@ def interactive(session, first_task=None, prompt=input):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=f"CodeHaven — Your code. Your machine. No API fees. Powered by local {MODEL}")
     parser.add_argument("task", nargs="?", help="Coding task in plain English")
-    parser.add_argument("--workspace", default=".")
+    parser.add_argument("--workspace", help="Project folder; defaults to the current folder (with --gui, none)")
     parser.add_argument("--exclude", action="append", default=[], metavar="PATTERN",
                         help="Additional Git-style exclusion; repeat for multiple patterns")
     parser.add_argument("--knowledge-base", help="Local reference directory; defaults to workspace/knowledge")
@@ -65,11 +65,16 @@ def main(argv=None):
     parser.add_argument("-i", "--interactive", action="store_true",
                         help="Ask several tasks in one session; follow-ups see earlier answers")
     parser.add_argument("--no-stream", action="store_true", help="Print the final answer only once it is complete")
+    parser.add_argument("--gui", action="store_true", help="Open a local page in your browser to pick a repository and chat")
+    parser.add_argument("--port", type=int, default=0, help="Port for --gui on 127.0.0.1 (default: any free port)")
+    parser.add_argument("--no-browser", action="store_true", help="With --gui, print the link instead of opening it")
     args = parser.parse_args(argv)
     if not 2000 <= args.retrieval_budget <= 16000:
         parser.error("--retrieval-budget must be between 2000 and 16000 bytes")
-    if not args.doctor and not args.interactive and not args.task:
-        parser.error("a task is required unless --doctor or --interactive is used")
+    if not args.doctor and not args.interactive and not args.gui and not args.task:
+        parser.error("a task is required unless --doctor, --interactive, or --gui is used")
+    if not 0 <= args.port <= 65535:
+        parser.error("--port must be between 0 and 65535")
     try:
         model = Ollama(endpoint=args.endpoint, max_output_tokens=args.max_output_tokens,
                        prompt_budget=args.prompt_budget)
@@ -81,7 +86,11 @@ def main(argv=None):
         if args.doctor:
             print(f"Local Ollama is ready: {MODEL}")
             return 0
-        workspace = Workspace(args.workspace, excludes=args.exclude)
+        if args.gui:
+            from .gui import serve
+            return serve(model, port=args.port, open_browser=not args.no_browser, repository=args.workspace,
+                         max_steps=args.max_steps, retrieval_budget=args.retrieval_budget, excludes=args.exclude)
+        workspace = Workspace(args.workspace or ".", excludes=args.exclude)
         references = Path(args.knowledge_base).expanduser() if args.knowledge_base else workspace.root / "knowledge"
         knowledge = KnowledgeBase(references if args.knowledge_base or references.exists() else None,
                                   workspace=workspace, context_budget=args.retrieval_budget)

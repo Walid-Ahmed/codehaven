@@ -411,6 +411,8 @@ class AgentState(TypedDict):
     attempted: bool
     nudged: bool
     named: list[str]
+    final_text: str
+    issues: list[str]
 
 
 def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, confirm_tests=None, knowledge=None, test_options=None, output=print,
@@ -565,6 +567,7 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
             output(f"\n{step_label(steps, max_steps)}: {reply['action']} {target} ({reply['message']})")
         if repeated:
             output("Repeated action detected; skipping the duplicate tool call and requesting a final answer.")
+        final_text, issues = None, []
         if reply["action"] == "finish":
             issues = check_answer(reply["content"] or reply["message"], state.get("search_evidence", []),
                                   discovery=state.get("discovery", False), require_citation=kind == "question")
@@ -573,12 +576,14 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
                 issues.append("The task asks for a change, but no file was changed.")
             if issues and state.get("discovery"):
                 output("Model summary withheld because answer checks failed.")
-                output(inventory(state.get("search_evidence", []), state.get("evidence_limited", False)))
+                final_text = inventory(state.get("search_evidence", []), state.get("evidence_limited", False))
+                output(final_text)
             else:
                 if cut:
                     output(REPEAT_NOTE)
                 # Print unless already streamed; a streamed loop is followed by the note, not a second copy.
                 answer = reply["content"] or reply["message"]
+                final_text = "\n".join([answer] + ([REPEAT_NOTE] if cut else []) + ([LIMIT_NOTE] if capped else []))
                 if capped and streamed:
                     # The unfinished sentence was already on screen; say it is dropped and show only the points after it.
                     output(LIMIT_NOTE)
@@ -598,6 +603,8 @@ def build_graph(model, workspace, *, apply=False, max_steps=12, confirm=None, co
         return {"messages": state["messages"] + [
                     {"role": "assistant", "content": json.dumps(reply)}],
                 "reply": reply, "steps": steps, "repeated_lookup": repeated, "invalid_replies": 0,
+                # The answer as shown and its check results, for callers such as the GUI that do not read output.
+                "final_text": final_text, "issues": issues,
                 "exit_code": 2 if reply["action"] == "finish" and issues else 0}
 
     def tool_result(state, result):
@@ -896,7 +903,7 @@ class Session:
         self.reset()
 
     def reset(self):
-        self.turns, self.evidence = [], []
+        self.turns, self.evidence, self.last_state = [], [], {}
 
     def history(self):
         def clip(text, limit):
@@ -914,4 +921,5 @@ class Session:
         answer = (reply.get("content") or reply.get("message") or "") if reply.get("action") == "finish" else ""
         self.turns = (self.turns + [(task, answer or "(no final answer)")])[-self.TURNS:]
         self.evidence = state.get("search_evidence", [])
+        self.last_state = state
         return state["exit_code"]

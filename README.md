@@ -56,6 +56,16 @@ For several questions in a row, start an interactive session. Follow-ups see ear
 python3 -m offline_agent --workspace /absolute/path/to/project --interactive
 ```
 
+To chat in your browser instead, start the local page:
+
+```sh
+codehaven --gui
+```
+
+It opens a page where you pick a repository (type its path or browse folders), index it, and ask questions. Answers stream in, follow-up questions see earlier answers, and **New chat** starts over. Click a citation such as `pricing.py:17` to see those lines. Each answer can show the steps CodeHaven took, and warnings about citations it could not verify. Add `--workspace /path/to/repo` to index a repository at startup, `--port 8737` for a fixed port, or `--no-browser` to print the link instead of opening it.
+
+The page is served from `127.0.0.1` only, and loads nothing from the internet: its Content-Security-Policy blocks any outside script, style, or font. Requests must carry a secret token from the printed link and name this machine in their Host header, so other websites open in your browser cannot use the server to read your files. Chat in the page is read-only: proposed edits are shown as previews and never written, and tests are never run. Only the list of recent repositories is kept, in your browser's local storage. Ctrl+C in the terminal stops the server.
+
 Final answers stream to the terminal as the model writes them. Use `--no-stream` to print each answer only when it is complete.
 
 After installation, you can replace `python3 -m offline_agent` with `codehaven`. The existing `offline-agent` command remains supported (on Windows, use `python -m offline_agent`). Reinstall the package after updating to register the new command. Installation downloads LangGraph and its dependencies; runtime does not require internet access.

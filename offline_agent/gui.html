@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeHaven</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --panel-2: #f0eee8; --text: #1d1d1b; --muted: #6b6a64; --line: #e2dfd6;
+  --accent: #2f6f5e; --accent-text: #ffffff; --accent-soft: #e3efe9; --warn: #8a5a00; --warn-soft: #fbf1dc;
+  --error: #a3302a; --error-soft: #fbe7e5; --code-bg: #f3f1ea; --mark: #fff1b8;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161715; --panel: #1f201e; --panel-2: #272825; --text: #ecebe6; --muted: #a09e96; --line: #34352f;
+    --accent: #6cc3a5; --accent-text: #0f1a16; --accent-soft: #1f3a31; --warn: #f0c46a; --warn-soft: #3a2f17;
+    --error: #f28b82; --error-soft: #3d2220; --code-bg: #262723; --mark: #4a4220;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.55 var(--sans); }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 7px 12px; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button.link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
+input[type=text], textarea { width: 100%; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 8px 10px; }
+input[type=text]:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+code, pre { font-family: var(--mono); font-size: 13px; }
+
+.app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+.sidebar { border-right: 1px solid var(--line); background: var(--panel); padding: 18px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
+.brand h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+.brand p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+.row { display: flex; gap: 8px; margin-top: 8px; }
+.row button { flex: 1; }
+.index-status { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.index-status strong { color: var(--text); }
+.index-status.error { color: var(--error); }
+.recent button { display: block; width: 100%; text-align: left; margin-bottom: 6px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.privacy { margin-top: auto; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
+
+.main { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
+.topbar { display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.topbar .repo { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .repo.empty { color: var(--muted); font-weight: 400; }
+.topbar .spacer { flex: 1; }
+.pill { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+
+.messages { flex: 1; overflow-y: auto; padding: 22px; }
+.messages-inner { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.empty-state { text-align: center; color: var(--muted); margin-top: 12vh; }
+.empty-state h2 { color: var(--text); font-size: 22px; margin-bottom: 6px; }
+.suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+.suggestions button { font-size: 13px; }
+
+.msg.user { align-self: flex-end; max-width: 80%; background: var(--accent); color: var(--accent-text); padding: 9px 14px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.assistant { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; overflow-wrap: anywhere; }
+.msg.assistant .status { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+.answer p { margin: 0 0 10px; }
+.answer p:last-child { margin-bottom: 0; }
+.answer ul, .answer ol { margin: 0 0 10px; padding-left: 22px; }
+.answer li { margin-bottom: 4px; }
+.answer h4 { margin: 12px 0 6px; font-size: 15px; }
+.answer code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+.answer pre { background: var(--code-bg); padding: 10px 12px; border-radius: 8px; overflow-x: auto; margin: 0 0 10px; }
+.answer pre code { background: none; padding: 0; }
+a.cite { color: var(--accent); font-family: var(--mono); font-size: 13px; text-decoration: none; border-bottom: 1px dashed var(--accent); }
+a.cite:hover { border-bottom-style: solid; }
+.checks { margin-top: 12px; background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 9px 12px; font-size: 13px; }
+.checks strong { display: block; margin-bottom: 4px; }
+.checks ul { margin: 0; padding-left: 18px; }
+.error-box { margin-top: 10px; background: var(--error-soft); color: var(--error); border-radius: 8px; padding: 9px 12px; font-size: 13px; }
+details.steps { margin-top: 12px; font-size: 13px; color: var(--muted); }
+details.steps summary { cursor: pointer; }
+details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 8px 10px; border-radius: 8px; max-height: 320px; overflow-y: auto; margin: 6px 0 0; }
+
+.composer { border-top: 1px solid var(--line); background: var(--panel); padding: 14px 22px 16px; }
+.composer-inner { max-width: 860px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
+.composer textarea { resize: none; min-height: 44px; max-height: 200px; }
+.composer .hint { max-width: 860px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
+
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; z-index: 10; }
+.overlay.open { display: block; }
+.modal { position: fixed; z-index: 11; top: 8vh; left: 50%; transform: translateX(-50%); width: min(640px, calc(100vw - 32px)); max-height: 80vh; display: none; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.modal.open { display: flex; }
+.modal header { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+.modal header .where { flex: 1; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.modal .list { overflow-y: auto; padding: 6px 8px; flex: 1; }
+.modal .list button { display: flex; width: 100%; justify-content: space-between; border: 0; background: none; text-align: left; padding: 7px 10px; border-radius: 6px; }
+.modal .list button:hover { background: var(--panel-2); }
+.modal footer { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
+.tag { font-size: 11px; color: var(--accent); }
+
+.drawer { position: fixed; z-index: 11; top: 0; right: 0; bottom: 0; width: min(720px, 100vw); background: var(--panel); border-left: 1px solid var(--line); display: none; flex-direction: column; }
+.drawer.open { display: flex; }
+.drawer header { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: center; }
+.drawer header .where { flex: 1; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.drawer .code { overflow: auto; flex: 1; padding: 8px 0; font-family: var(--mono); font-size: 13px; }
+.drawer .line { display: flex; white-space: pre; padding: 0 16px; }
+.drawer .line .n { color: var(--muted); width: 48px; flex: none; text-align: right; padding-right: 14px; user-select: none; }
+.drawer .line.hit { background: var(--mark); }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; height: auto; }
+  .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+  .main { height: auto; min-height: 70vh; }
+  .messages { padding: 16px; }
+  .composer, .topbar { padding-left: 16px; padding-right: 16px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>CodeHaven</h1>
+      <p>Your code. Your machine. No API fees.</p>
+    </div>
+    <div class="section">
+      <h2>Repository</h2>
+      <input type="text" id="path" placeholder="/Users/you/dev/project" autocomplete="off" spellcheck="false" aria-label="Repository folder">
+      <div class="row">
+        <button id="browse">Browse…</button>
+        <button id="index" class="primary">Index</button>
+      </div>
+      <div class="index-status" id="index-status">Choose a folder, then index it to start chatting.</div>
+    </div>
+    <div class="section recent" id="recent-section" hidden>
+      <h2>Recent</h2>
+      <div id="recent"></div>
+    </div>
+    <div class="section">
+      <h2>Chat</h2>
+      <button id="new-chat" disabled>New chat</button>
+    </div>
+    <div class="privacy">Runs on this computer with <span id="model-name">a local model</span>. Nothing is sent to the internet. Chat is read-only: CodeHaven never changes your files here.</div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="repo empty" id="repo-label">No repository indexed</div>
+      <div class="spacer"></div>
+      <span class="pill" id="index-pill" hidden></span>
+    </div>
+    <div class="messages" id="messages">
+      <div class="messages-inner" id="messages-inner">
+        <div class="empty-state" id="empty">
+          <h2>Ask about your code</h2>
+          <p id="empty-text">Index a repository on the left, then ask how something works.<br>Answers cite the exact lines they rely on; click a citation to see the code.</p>
+          <div class="suggestions" id="suggestions" hidden>
+            <button data-q="Explain this project">Explain this project</button>
+            <button data-q="Explain README.md">Explain README.md</button>
+            <button data-q="What are the main modules and what does each do?">Main modules</button>
+            <button data-q="Which tests are there and what do they check?">Tests</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea id="question" rows="1" placeholder="Index a repository first" disabled aria-label="Question"></textarea>
+        <button id="send" class="primary" disabled>Ask</button>
+      </div>
+      <div class="hint">Enter to send, Shift+Enter for a new line. Name files and functions exactly for the best answers.</div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="overlay"></div>
+<div class="modal" id="browser" role="dialog" aria-modal="true" aria-label="Choose a folder">
+  <header><button id="up" aria-label="Parent folder">↑</button><div class="where" id="browser-path"></div></header>
+  <div class="list" id="browser-list"></div>
+  <footer><button id="browser-cancel">Cancel</button><button id="browser-use" class="primary">Use this folder</button></footer>
+</div>
+<div class="drawer" id="drawer" role="dialog" aria-label="Cited code">
+  <header><div class="where" id="drawer-title"></div><button id="drawer-close">Close</button></header>
+  <div class="code" id="drawer-code"></div>
+</div>
+
+<script nonce="__NONCE__">
+"use strict";
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const $ = (id) => document.getElementById(id);
+let busy = false, indexed = false, browsing = "";
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {...options, headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN}});
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+
+// ---- Safe rendering: escape everything first, then add a small set of markup.
+function esc(text) {
+  return text.replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+const CITE = /(^|[\s(\[>,;:])((?:repo\/)?[\w./-]+\.[A-Za-z]\w*):(\d+)(?:-(\d+))?(?![\w/])/g;
+function inline(text) {
+  let html = esc(text);
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  return html.replace(CITE, (m, pre, path, start, end) =>
+    `${pre}<a href="#" class="cite" data-path="${path}" data-start="${start}" data-end="${end || start}">${path}:${start}${end ? "-" + end : ""}</a>`);
+}
+function render(text) {
+  const out = [];
+  let list = null, para = [];
+  const flushPara = () => { if (para.length) { out.push(`<p>${para.map(inline).join("<br>")}</p>`); para = []; } };
+  const flushList = () => { if (list) { out.push(`<${list.tag}>${list.items.join("")}</${list.tag}>`); list = null; } };
+  const lines = text.replace(/\r/g, "").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) {
+      flushPara(); flushList();
+      const code = [];
+      while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
+      out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+    const bullet = line.match(/^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/);
+    if (bullet) {
+      flushPara();
+      const tag = bullet[1] ? "ol" : "ul";
+      if (!list || list.tag !== tag) { flushList(); list = {tag, items: []}; }
+      list.items.push(`<li>${inline(bullet[2])}</li>`);
+      continue;
+    }
+    const heading = line.match(/^\s*#{1,6}\s+(.*)$/);
+    if (heading) { flushPara(); flushList(); out.push(`<h4>${inline(heading[1])}</h4>`); continue; }
+    if (!line.trim()) { flushPara(); flushList(); continue; }
+    if (list && /^\s{2,}\S/.test(line)) { list.items[list.items.length - 1] = list.items[list.items.length - 1].replace(/<\/li>$/, `<br>${inline(line.trim())}</li>`); continue; }
+    flushList();
+    para.push(line);
+  }
+  flushPara(); flushList();
+  return out.join("");
+}
+
+// ---- Recent repositories live only in this browser.
+function recent() { try { return JSON.parse(localStorage.getItem("codehaven.recent") || "[]"); } catch { return []; } }
+function remember(path) {
+  try { localStorage.setItem("codehaven.recent", JSON.stringify([path, ...recent().filter((p) => p !== path)].slice(0, 6))); } catch {}
+  showRecent();
+}
+function showRecent() {
+  const paths = recent();
+  $("recent-section").hidden = !paths.length;
+  $("recent").replaceChildren(...paths.map((path) => {
+    const button = document.createElement("button");
+    button.textContent = path.split("/").filter(Boolean).pop() || path;
+    button.title = path;
+    button.addEventListener("click", () => { $("path").value = path; indexRepository(); });
+    return button;
+  }));
+}
+
+// ---- Indexing.
+function setIndexed(summary) {
+  indexed = Boolean(summary.repository);
+  $("model-name").textContent = summary.model || "a local model";
+  if (!indexed) return;
+  $("repo-label").textContent = summary.repository;
+  $("repo-label").classList.remove("empty");
+  $("index-pill").hidden = false;
+  $("index-pill").textContent = `${summary.files} files indexed`;
+  const status = $("index-status");
+  status.classList.remove("error");
+  status.innerHTML = `<strong>${summary.files}</strong> files and ${summary.chunks} passages indexed.` +
+    (summary.limited ? " Index limits were reached, so some files are left out; answers can still search and read them." : "");
+  $("path").value = summary.repository;
+  $("empty-text").textContent = "Ask how something in this repository works. Answers cite the exact lines they rely on; click a citation to see the code.";
+  $("suggestions").hidden = false;
+  updateComposer();
+}
+async function indexRepository() {
+  const path = $("path").value.trim();
+  if (!path || busy) return;
+  busy = true; updateComposer();
+  const status = $("index-status");
+  status.classList.remove("error");
+  status.textContent = "Indexing… this takes a few seconds for most repositories.";
+  try {
+    const summary = await api("/api/open", {method: "POST", body: JSON.stringify({path})});
+    clearChat();
+    setIndexed(summary);
+    remember(summary.repository);
+  } catch (error) {
+    status.classList.add("error");
+    status.textContent = error.message;
+  } finally {
+    busy = false; updateComposer();
+  }
+}
+
+// ---- Folder browser.
+async function browse(path) {
+  try {
+    const data = await api("/api/dirs?path=" + encodeURIComponent(path || ""));
+    browsing = data.path;
+    $("browser-path").textContent = data.path + (data.repository ? "  (Git repository)" : "");
+    $("up").disabled = !data.parent;
+    $("up").onclick = () => browse(data.parent);
+    const items = data.entries.map((entry) => {
+      const button = document.createElement("button");
+      const name = document.createElement("span");
+      name.textContent = "📁 " + entry.name;
+      button.append(name);
+      if (entry.repository) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "Git repository"; button.append(tag); }
+      button.addEventListener("click", () => browse(entry.path));
+      return button;
+    });
+    if (!items.length) { const empty = document.createElement("div"); empty.className = "index-status"; empty.style.padding = "8px 10px"; empty.textContent = "No folders here."; items.push(empty); }
+    $("browser-list").replaceChildren(...items);
+  } catch (error) {
+    $("browser-path").textContent = error.message;
+  }
+}
+function openBrowser() { $("overlay").classList.add("open"); $("browser").classList.add("open"); browse($("path").value.trim()); }
+function closeOverlays() { for (const id of ["overlay", "browser", "drawer"]) $(id).classList.remove("open"); }
+
+// ---- Cited code.
+async function showCitation(path, start, end) {
+  $("drawer-title").textContent = `${path}:${start}${end !== start ? "-" + end : ""}`;
+  $("drawer-code").textContent = "Loading…";
+  $("overlay").classList.add("open"); $("drawer").classList.add("open");
+  try {
+    const data = await api(`/api/file?path=${encodeURIComponent(path)}&start=${start}&end=${end}`);
+    $("drawer-title").textContent = `${data.path}:${data.start}${data.end !== data.start ? "-" + data.end : ""}  ·  ${data.total} lines`;
+    $("drawer-code").replaceChildren(...data.lines.map((text, index) => {
+      const number = data.first + index;
+      const row = document.createElement("div");
+      row.className = "line" + (number >= data.start && number <= data.end ? " hit" : "");
+      const n = document.createElement("span"); n.className = "n"; n.textContent = number;
+      const code = document.createElement("span"); code.textContent = text || " ";
+      row.append(n, code);
+      return row;
+    }));
+    const hit = $("drawer-code").querySelector(".hit");
+    if (hit) hit.scrollIntoView({block: "center"});
+  } catch (error) {
+    $("drawer-code").textContent = error.message;
+  }
+}
+document.addEventListener("click", (event) => {
+  const link = event.target.closest("a.cite");
+  if (!link) return;
+  event.preventDefault();
+  showCitation(link.dataset.path.replace(/^repo\//, ""), Number(link.dataset.start), Number(link.dataset.end));
+});
+
+// ---- Chat.
+function clearChat() {
+  $("messages-inner").replaceChildren($("empty"));
+  $("empty").hidden = false;
+}
+function addMessage(kind) {
+  $("empty").hidden = true;
+  const element = document.createElement("div");
+  element.className = "msg " + kind;
+  $("messages-inner").append(element);
+  return element;
+}
+function scrollDown() { const box = $("messages"); box.scrollTop = box.scrollHeight; }
+function updateComposer() {
+  const ready = indexed && !busy;
+  $("question").disabled = !ready;
+  $("send").disabled = !ready || !$("question").value.trim();
+  $("question").placeholder = !indexed ? "Index a repository first" : busy ? "CodeHaven is working…" : "Ask about this repository";
+  $("new-chat").disabled = !indexed || busy;
+  $("index").disabled = busy;
+  for (const button of $("suggestions").querySelectorAll("button")) button.disabled = !ready;
+}
+function statusText(line) {
+  return line.replace(/^\s+/, "").replace(/\s*\(loading and prompt processing can take time\)\.\.\.$/, "…");
+}
+
+async function ask(question) {
+  question = question.trim();
+  if (!question || busy || !indexed) return;
+  busy = true;
+  $("question").value = ""; resize(); updateComposer();
+  addMessage("user").textContent = question;
+  const card = addMessage("assistant");
+  const status = document.createElement("div"); status.className = "status";
+  const dot = document.createElement("span"); dot.className = "dot";
+  const statusLabel = document.createElement("span"); statusLabel.textContent = "Starting…";
+  status.append(dot, statusLabel);
+  const answer = document.createElement("div"); answer.className = "answer";
+  card.append(status, answer);
+  scrollDown();
+  const logs = [];
+  let streamed = "", phase = "Starting…";
+  const started = Date.now();
+  const timer = setInterval(() => { statusLabel.textContent = `${phase} ${Math.round((Date.now() - started) / 1000)}s`; }, 1000);
+  const finish = () => { clearInterval(timer); busy = false; updateComposer(); $("question").focus(); };
+  try {
+    const response = await fetch("/api/ask", {method: "POST", headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN},
+                                              body: JSON.stringify({question})});
+    if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || response.statusText); }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "", done = null;
+    while (true) {
+      const {value, done: ended} = await reader.read();
+      if (ended) break;
+      buffer += decoder.decode(value, {stream: true});
+      let newline;
+      while ((newline = buffer.indexOf("\n")) >= 0) {
+        const raw = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
+        if (!raw.trim()) continue;
+        const event = JSON.parse(raw);
+        if (event.type === "log") {
+          logs.push(event.text);
+          const step = event.text.trim().match(/^Step \d+ \(max \d+\): (.*)$/);
+          if (step) phase = statusText(step[0]);
+        } else if (event.type === "text") {
+          streamed += event.text;
+          answer.innerHTML = render(streamed);
+          phase = "Writing the answer…";
+          scrollDown();
+        } else if (event.type === "done" || event.type === "error") {
+          done = event;
+        }
+      }
+    }
+    status.remove();
+    if (!done) throw new Error("The connection closed before the answer finished.");
+    if (done.type === "error") throw new Error(done.message);
+    answer.innerHTML = render(done.complete ? done.answer : (streamed || "No final answer: the step limit was reached before CodeHaven finished."));
+    if (done.issues.length) {
+      const checks = document.createElement("div"); checks.className = "checks";
+      const title = document.createElement("strong"); title.textContent = "Unverified: check the cited lines before relying on this answer.";
+      const list = document.createElement("ul");
+      for (const issue of done.issues) { const item = document.createElement("li"); item.textContent = issue; list.append(item); }
+      checks.append(title, list); card.append(checks);
+    }
+    const shownLines = new Set((done.answer || "").split("\n").map((line) => line.trim()).filter(Boolean));
+    const steps = logs.filter((line) => line.trim() && !shownLines.has(line.trim()) && !line.startsWith("Answer check:"));
+    const details = document.createElement("details"); details.className = "steps";
+    const summary = document.createElement("summary");
+    summary.textContent = `${done.steps} step${done.steps === 1 ? "" : "s"} · ${Math.round((Date.now() - started) / 1000)}s · show what CodeHaven did`;
+    const pre = document.createElement("pre"); pre.textContent = steps.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    details.append(summary, pre); card.append(details);
+  } catch (error) {
+    status.remove();
+    const box = document.createElement("div"); box.className = "error-box"; box.textContent = error.message;
+    card.append(box);
+  } finally {
+    finish(); scrollDown();
+  }
+}
+
+function resize() { const box = $("question"); box.style.height = "auto"; box.style.height = Math.min(box.scrollHeight, 200) + "px"; }
+$("question").addEventListener("input", () => { resize(); updateComposer(); });
+$("question").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); ask($("question").value); }
+});
+$("send").addEventListener("click", () => ask($("question").value));
+$("index").addEventListener("click", indexRepository);
+$("path").addEventListener("keydown", (event) => { if (event.key === "Enter") indexRepository(); });
+$("browse").addEventListener("click", openBrowser);
+$("browser-cancel").addEventListener("click", closeOverlays);
+$("browser-use").addEventListener("click", () => { $("path").value = browsing; closeOverlays(); indexRepository(); });
+$("drawer-close").addEventListener("click", closeOverlays);
+$("overlay").addEventListener("click", closeOverlays);
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeOverlays(); });
+$("new-chat").addEventListener("click", async () => {
+  try { await api("/api/reset", {method: "POST", body: "{}"}); clearChat(); } catch (error) { alert(error.message); }
+});
+for (const button of $("suggestions").querySelectorAll("button")) button.addEventListener("click", () => ask(button.dataset.q));
+
+showRecent();
+// A reloaded page shows no earlier messages, so the server forgets them too: follow-ups never use hidden context.
+api("/api/status").then((summary) => {
+  setIndexed(summary);
+  if (summary.repository) api("/api/reset", {method: "POST", body: "{}"}).catch(() => {});
+}).catch((error) => { $("index-status").textContent = error.message; });
+updateComposer();
+</script>
+</body>
+</html>

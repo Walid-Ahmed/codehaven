@@ -19,4 +19,4 @@ offline-agent = "offline_agent.cli:main"
 include = ["offline_agent*"]
 
 [tool.setuptools.package-data]
-offline_agent = ["references/*.md"]
+offline_agent = ["references/*.md", "gui.html"]

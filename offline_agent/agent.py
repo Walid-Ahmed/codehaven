@@ -826,9 +826,16 @@ class Session:
 
     Follow-ups see a bounded record of earlier questions and answers plus retained evidence,
     not full tool transcripts, so prompts stay small and the system-prompt prefix stays cacheable.
+
+    Memory is tiered: the last RECENT answers are kept nearly whole, because follow-ups such as
+    "and what does it return?" refer to them, while older ones keep only their question and first
+    sentence. The whole record stays under HISTORY_BYTES, so it never crowds the code out of a
+    12 KB prompt; the oldest entries go first.
     """
-    TURNS = 4
-    QUESTION_BYTES, ANSWER_BYTES = 300, 1200
+    TURNS, RECENT = 8, 2
+    QUESTION_BYTES, ANSWER_BYTES = 300, 1000
+    OLDER_QUESTION_BYTES, OLDER_ANSWER_BYTES = 160, 200
+    HISTORY_BYTES = 3200
 
     def __init__(self, model, workspace, *, knowledge=None, **options):
         self.model, self.workspace, self.knowledge, self.options = model, workspace, knowledge, options
@@ -837,12 +844,27 @@ class Session:
     def reset(self):
         self.turns, self.evidence, self.last_state = [], [], {}
 
+    @staticmethod
+    def first_sentence(answer):
+        """The opening of an answer, without the cited points listed after it."""
+        line = next((line.strip() for line in answer.splitlines() if line.strip()), "")
+        match = re.match(r"(.+?[.!?])(?:\s|$)", line)
+        return match[1] if match else line
+
     def history(self):
         def clip(text, limit):
             raw = text.encode()
             return text if len(raw) <= limit else raw[:limit].decode("utf-8", "ignore") + " …"
-        return "\n".join(f"Q: {clip(question, self.QUESTION_BYTES)}\nA: {clip(answer, self.ANSWER_BYTES)}"
-                         for question, answer in self.turns)
+        entries = []
+        for index, (question, answer) in enumerate(self.turns):
+            if index >= len(self.turns) - self.RECENT:
+                entries.append(f"Q: {clip(question, self.QUESTION_BYTES)}\nA: {clip(answer, self.ANSWER_BYTES)}")
+            else:
+                entries.append(f"Q: {clip(question, self.OLDER_QUESTION_BYTES)}\n"
+                               f"A (summary): {clip(self.first_sentence(answer), self.OLDER_ANSWER_BYTES)}")
+        while len(entries) > 1 and len("\n".join(entries).encode()) > self.HISTORY_BYTES:
+            entries.pop(0)
+        return "\n".join(entries)
 
     def ask(self, task):
         if self.turns and self.knowledge is not None:

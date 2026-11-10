@@ -118,6 +118,7 @@ class GuiServerTests(unittest.TestCase):
         self.assertTrue(done["complete"])
         self.assertEqual(done["answer"], "checkout_total calls it.\n- pkg/pricing.py:6 `checkout_total`: Calls apply_discount.")
         self.assertEqual((done["exit_code"], done["issues"]), (0, []))
+        self.assertEqual((done["remembered"], done["memory"]), (1, 8))
         self.assertTrue(any(event["type"] == "log" and "Step 1 (max 12)" in event["text"] for event in events))
 
     def test_follow_ups_remember_the_conversation_until_a_new_chat(self):

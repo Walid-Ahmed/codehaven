@@ -62,6 +62,23 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual((result["exit_code"], result["steps"]), (0, 2))
         self.assertEqual((result["prompt_tokens"], result["generated_tokens"]), (200, 20))
 
+    def test_follow_ups_run_in_one_session_and_are_scored_per_turn(self):
+        task = TASKS["follow-discount"]
+        prompts = []
+
+        class Recording(ScriptedModel):
+            def chat(self, messages, schema):
+                prompts.append(messages[1]["content"])
+                return super().chat(messages, schema)
+        model = Recording([action("finish", content="checkout_total calls it. [inventory/pricing.py:17]"),
+                           action("finish", content="It adds 0.08 tax.")])
+        result = evaluate_task(task, model, REPO)
+        self.assertEqual(result["turns"], 2)
+        self.assertEqual(result["failures"], ["turn 2: answer lacks /config\\.py/"])
+        self.assertIn("Q2: What tax rate does that function add", result["answer"])
+        # The follow-up's prompt carries the first question and answer, so "that function" can be resolved.
+        self.assertIn("Q: Which function calls apply_discount?\nA: checkout_total calls it.", prompts[1])
+
     def test_any_changed_file_fails_a_task(self):
         from offline_agent.evaluation import changed_files
         with tempfile.TemporaryDirectory() as temporary:

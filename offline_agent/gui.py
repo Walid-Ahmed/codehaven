@@ -129,7 +129,8 @@ class App:
                 answer = state.get("final_text")
                 events.put({"type": "done", "exit_code": code, "steps": state.get("steps", 0),
                             "answer": answer if answer is not None else "",
-                            "complete": answer is not None, "issues": state.get("issues", [])})
+                            "complete": answer is not None, "issues": state.get("issues", []),
+                            "remembered": len(session.turns), "memory": session.TURNS})
             except Exception as exc:  # Reported to the page; the server keeps running.
                 events.put({"type": "error", "message": str(exc) or type(exc).__name__})
             finally:

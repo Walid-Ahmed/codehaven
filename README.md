@@ -10,7 +10,7 @@
 
 ![The CodeHaven page: a repository and model chosen in the sidebar, and an answer that explains how to fix Store.low_stock, citing inventory/store.py:27-29.](docs/assets/codehaven-gui.png)
 
-Version 0.9.0. No cloud inference, automatic downloads, or tracing: LangGraph runs the workflow locally and model requests go straight to Ollama on `127.0.0.1`. You can also use CodeHaven from the terminal.
+Version 0.9.1. No cloud inference, automatic downloads, or tracing: LangGraph runs the workflow locally and model requests go straight to Ollama on `127.0.0.1`. You can also use CodeHaven from the terminal.
 
 ## Get started
 
@@ -48,6 +48,8 @@ codehaven --gui
 
 Tips for good answers: name files and functions exactly (`Store.low_stock`, not "the stock function"), and ask one thing at a time.
 
+**How follow-up memory works.** Each new question is sent with a short record of the conversation, not the whole chat, so the model keeps room for the code itself. The last two answers are kept nearly whole (up to 1,000 characters each), because follow-ups such as "and what does *it* return?" refer to them. Up to six older questions are kept as the question plus the first sentence of its answer. The whole record stays under about 3 KB, a quarter of the default prompt budget; the oldest questions are dropped first. The file paths and line ranges found so far are also carried forward, so follow-ups can cite them without searching again. Detailed tool output, such as file text read for an earlier question, is not carried over; the model reads it again if needed. The sidebar shows how many earlier questions are remembered. **New chat**, or reloading the page, starts with an empty memory; start one whenever you change topic, because an old topic can steer a new answer.
+
 **Private and offline by design.** The page is served from `127.0.0.1` only and loads nothing from the internet: its Content-Security-Policy blocks any outside script, style, or font. Requests must carry a secret token from the link printed in the terminal and name this machine in their Host header, so other websites open in your browser cannot use the server to read your files. The page never runs tests. Only the list of recent repositories is kept, in your browser's local storage.
 
 Options: `--workspace /path/to/repo` indexes a repository at startup, `--model NAME` picks the starting model, `--port 8737` sets a fixed port, and `--no-browser` prints the link instead of opening it. Ctrl+C in the terminal stops the server.
@@ -72,7 +74,7 @@ codehaven --workspace /absolute/path/to/project \
 
 The answer names the lines to change (here `inventory/store.py:27-29`), says what to change them to (`<` becomes `<=`), and leaves your file untouched.
 
-For several questions in a row, start an interactive session. Follow-ups see earlier questions and answers, and the index refreshes between questions. Type `/reset` to forget earlier answers and `exit` to quit:
+For several questions in a row, start an interactive session. Follow-ups remember up to eight earlier questions, the same way as in the browser page, and the index refreshes between questions. A single `codehaven 'question'` command has no memory. Type `/reset` to forget earlier answers and `exit` to quit:
 
 ```sh
 codehaven --workspace /absolute/path/to/project --interactive
@@ -251,7 +253,7 @@ CodeHaven asks for approval before each run. Tests receive a filtered, read-only
 
 CodeHaven is read-only, but its file tools are not an OS sandbox: they rely on path checks, which are not hardened against hostile filesystem races. Avoid moving files or directories around while it runs. It runs only the fixed test commands described above and cannot accept arbitrary commands or install dependencies.
 
-Hidden files are skipped, but visible files can still contain secrets. Only point CodeHaven at projects you intend to expose to your local model. Conversation context accumulates within a task. Compaction keeps it within `--prompt-budget`, but stubbed results must be read again if the model needs them. Sessions remember only recent questions, answers, and cited evidence. Nothing is saved to disk between sessions. Model prose is untrusted and may make unsupported claims, so read the cited lines.
+Hidden files are skipped, but visible files can still contain secrets. Only point CodeHaven at projects you intend to expose to your local model. Conversation context accumulates within a task. Compaction keeps it within `--prompt-budget`, but stubbed results must be read again if the model needs them. Sessions remember up to eight recent questions, with older answers reduced to their first sentence, and the cited locations found so far. Nothing is saved to disk between sessions. Model prose is untrusted and may make unsupported claims, so read the cited lines.
 
 ## Development
 
@@ -277,7 +279,7 @@ To check that a change is not fitted to those tasks, also run the [second set](e
 python3 -m offline_agent.evaluation --tasks evals/bookings_tasks.json --repo evals/bookings_repo
 ```
 
-[evals/tasks.json](evals/tasks.json) holds 12 questions over the small [sample repository](evals/sample_repo), including a paged read of a 600-line file, entry-point discovery, and explaining a bug and its fix. Every task is a question checked by regexes on the answer. Each task runs on a fresh temporary copy with test runs declined, and **a task fails if any file in the copy changed**, so the evals also check that CodeHaven stays read-only. The run prints a table of pass/fail, exit code, steps, tokens, and time, and writes the full report, including each task's run log, raw model replies, and changed files, to `evals/results/latest.json`, which Git ignores. The summary separately counts tasks that also passed CodeHaven's own answer checks (exit code 0), and warns if model reloads made the timings unrepresentative. Use `--model` to score another installed model. Like normal use, evaluation talks only to loopback Ollama. Compare reports before and after a change. Results vary between runs, so look at trends rather than one pass or fail.
+[evals/tasks.json](evals/tasks.json) holds 12 questions over the small [sample repository](evals/sample_repo), including a paged read of a 600-line file, entry-point discovery, and explaining a bug and its fix. Every task is a question checked by regexes on the answer; three tasks also ask follow-up questions in the same session ("What tax rate does *that function* add?"), each checked on its own answer, to test the follow-up memory. Each task runs on a fresh temporary copy with test runs declined, and **a task fails if any file in the copy changed**, so the evals also check that CodeHaven stays read-only. The run prints a table of pass/fail, exit code, steps, tokens, and time, and writes the full report, including each task's run log, raw model replies, and changed files, to `evals/results/latest.json`, which Git ignores. The summary separately counts tasks that also passed CodeHaven's own answer checks (exit code 0), and warns if model reloads made the timings unrepresentative. Use `--model` to score another installed model. Like normal use, evaluation talks only to loopback Ollama. Compare reports before and after a change. Results vary between runs, so look at trends rather than one pass or fail.
 
 See [the implementation plan and roadmap](docs/PLAN.md) for architecture, acceptance criteria, and next steps. API integration follows [Ollama chat](https://docs.ollama.com/api/chat) and [structured outputs](https://docs.ollama.com/capabilities/structured-outputs).
 

@@ -13,5 +13,6 @@
   {"id": "g-guest-limit-name", "task": "What constant sets the maximum number of guests, and what is its value?", "checks": {"answer": ["MAX_GUESTS", "\\b4\\b"]}},
   {"id": "g-coupon", "task": "What does applyCoupon do with the coupon SAVE10?", "checks": {"answer": ["0\\.9|10\\s*%"]}},
   {"id": "g-booked-error", "task": "Which exception does Room.book raise when the room is already taken?", "checks": {"answer": ["LookupError"]}},
-  {"id": "g-regional-date", "task": "What is the date of Regional Day 200 in bookings/holidays.py?", "checks": {"answer": ["2027-09-12"]}}
+  {"id": "g-regional-date", "task": "What is the date of Regional Day 200 in bookings/holidays.py?", "checks": {"answer": ["2027-09-12"]}},
+  {"id": "follow-fee", "task": "What is the service fee rate, and in which file is it defined?", "checks": {"answer": ["0\\.05", "fees\\.py"]}, "followups": [{"task": "Which functions use that rate?", "checks": {"answer": ["calc_fee"]}}, {"task": "Going back to my first question: in which file was the rate defined?", "checks": {"answer": ["fees\\.py"]}}]}
 ]

@@ -10,5 +10,7 @@
   {"id": "low-stock-bug", "task": "Store.low_stock in inventory/store.py does not do what its docstring says. What is wrong, and what should the comparison be?", "checks": {"answer": ["<="]}},
   {"id": "catalog-price", "task": "What is the price of SKU-0042 in inventory/catalog.py?", "checks": {"answer": ["16\\.54"]}},
   {"id": "slugify-output", "task": "What does slugify in utils/text.py return for the text 'Hello World!'?", "checks": {"answer": ["hello-world"]}},
-  {"id": "restock-invalid", "task": "What happens when Store.restock is called with an amount of zero?", "checks": {"answer": ["ValueError", "positive"]}}
+  {"id": "restock-invalid", "task": "What happens when Store.restock is called with an amount of zero?", "checks": {"answer": ["ValueError", "positive"]}},
+  {"id": "follow-discount", "task": "Which function calls apply_discount?", "checks": {"answer": ["checkout_total"]}, "followups": [{"task": "What tax rate does that function add, and in which file is the rate defined?", "checks": {"answer": ["0\\.08|8\\s*%", "config\\.py"]}}]},
+  {"id": "follow-store", "task": "What happens when Store.remove_item is called with an item that does not exist?", "checks": {"answer": ["KeyError"]}, "followups": [{"task": "And what does the same class do when it is full, and how many items fit?", "checks": {"answer": ["ValueError|full", "\\b500\\b"]}}]}
 ]

@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .agent import run_state
+from .agent import Session
 from .knowledge import KnowledgeBase
 from .model import MODEL, Ollama
 from .workspace import Workspace
@@ -66,11 +66,17 @@ def load_tasks(path):
         if task["id"] in seen:
             raise ValueError(f"Duplicate task id: {task['id']}")
         seen.add(task["id"])
-        checks = task.get("checks")
-        if not isinstance(checks, dict) or not checks.get("answer") or set(checks) != {"answer"}:
-            raise ValueError(f"Task {task['id']} needs answer checks, and only those: CodeHaven never changes files")
-        for pattern in checks["answer"]:
-            re.compile(pattern)
+        followups = task.get("followups", [])
+        if not isinstance(followups, list):
+            raise ValueError(f"Task {task['id']}: followups must be a list")
+        for turn in [task] + followups:
+            if not isinstance(turn, dict) or not isinstance(turn.get("task"), str):
+                raise ValueError(f"Task {task['id']}: each follow-up needs a string task")
+            checks = turn.get("checks")
+            if not isinstance(checks, dict) or not checks.get("answer") or set(checks) != {"answer"}:
+                raise ValueError(f"Task {task['id']} needs answer checks, and only those: CodeHaven never changes files")
+            for pattern in checks["answer"]:
+                re.compile(pattern)
     return tasks
 
 
@@ -89,31 +95,40 @@ def changed_files(before, after):
 
 
 def evaluate_task(task, model, repo):
+    """Run one task, and its follow-up questions in the same session, on a fresh copy of the repository."""
     with tempfile.TemporaryDirectory(prefix="codehaven-eval-") as temporary:
         root = Path(temporary) / "repo"
         shutil.copytree(repo, root)
         workspace = Workspace(root)
         metered, log = Metered(model), []
         started = time.monotonic()
-        answer, error = "", None
-        try:
-            state = run_state(metered, workspace, task["task"], max_steps=task.get("max_steps", 12),
-                              knowledge=KnowledgeBase(None, workspace=workspace, context_budget=RETRIEVAL_BUDGET),
-                              confirm_tests=lambda: False, output=log.append)
-            exit_code, steps = state["exit_code"], state["steps"]
-            reply = state.get("reply") or {}
-            if reply.get("action") == "finish":
-                answer = reply.get("content") or reply.get("message") or ""
-        except ValueError as exc:
-            exit_code, steps, error = 1, metered.calls, str(exc)
+        session = Session(metered, workspace, knowledge=KnowledgeBase(None, workspace=workspace, context_budget=RETRIEVAL_BUDGET),
+                          max_steps=task.get("max_steps", 12), confirm_tests=lambda: False, output=log.append)
+        turns = [task] + task.get("followups", [])
+        answers, failures, exit_code, steps = [], [], 0, 0
+        for number, turn in enumerate(turns, 1):
+            label = f"turn {number}: " if len(turns) > 1 else ""
+            answer = ""
+            try:
+                code = session.ask(turn["task"])
+                state = session.last_state
+                steps += state.get("steps", 0)
+                exit_code = max(exit_code, code)
+                reply = state.get("reply") or {}
+                if reply.get("action") == "finish":
+                    answer = reply.get("content") or reply.get("message") or ""
+            except ValueError as exc:
+                exit_code, steps = 1, max(steps, metered.calls)
+                failures.append(f"{label}error: {exc}")
+            failures += [label + failure for failure in score(turn, answer)]
+            answers.append(answer if len(turns) == 1 else f"Q{number}: {turn['task']}\nA{number}: {answer}")
         changed = changed_files(repo, root)
-        failures = ([f"error: {error}"] if error else []) + score(task, answer)
         failures += [f"{name} changed, but CodeHaven must never change files" for name in changed]
     return {"id": task["id"], "passed": not failures, "exit_code": exit_code, "steps": steps, "changed": changed,
-            "reloads": metered.reloads, "log": [str(line) for line in log], "replies": metered.replies,
+            "turns": len(turns), "reloads": metered.reloads, "log": [str(line) for line in log], "replies": metered.replies,
             "prompt_tokens": metered.prompt_tokens, "generated_tokens": metered.generated_tokens,
             "model_seconds": round(metered.model_seconds, 2), "seconds": round(time.monotonic() - started, 2),
-            "failures": failures, "answer": answer[:2000]}
+            "failures": failures, "answer": "\n\n".join(answers)[:4000]}
 
 
 def summarize(results):

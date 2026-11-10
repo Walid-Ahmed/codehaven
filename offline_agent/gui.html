@@ -170,6 +170,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
     <div class="section">
       <h2>Chat</h2>
       <button id="new-chat" disabled>New chat</button>
+      <div class="index-status" id="memory-status">Follow-up questions remember up to 8 earlier questions. Start a new chat when you change topic.</div>
     </div>
     <div class="privacy">Runs on this computer with <span id="model-name">a local model</span>. Nothing is sent to the internet. CodeHaven only reads your code: it never changes, creates, or deletes files.</div>
   </aside>
@@ -508,6 +509,8 @@ async function ask(question) {
       for (const issue of done.issues) { const item = document.createElement("li"); item.textContent = issue; list.append(item); }
       checks.append(title, list); card.append(checks);
     }
+    $("memory-status").textContent = `Remembering ${done.remembered} earlier question${done.remembered === 1 ? "" : "s"} ` +
+      `(up to ${done.memory}). The last two are kept in full, older ones as a short summary. Start a new chat when you change topic.`;
     const shownLines = new Set((done.answer || "").split("\n").map((line) => line.trim()).filter(Boolean));
     const steps = logs.filter((line) => line.trim() && !shownLines.has(line.trim()) && !line.startsWith("Answer check:"));
     const details = document.createElement("details"); details.className = "steps";
@@ -539,7 +542,11 @@ $("drawer-close").addEventListener("click", closeOverlays);
 $("overlay").addEventListener("click", closeOverlays);
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeOverlays(); });
 $("new-chat").addEventListener("click", async () => {
-  try { await api("/api/reset", {method: "POST", body: "{}"}); clearChat(); } catch (error) { alert(error.message); }
+  try {
+    await api("/api/reset", {method: "POST", body: "{}"});
+    clearChat();
+    $("memory-status").textContent = "New chat: nothing remembered yet. Follow-up questions remember up to 8 earlier questions.";
+  } catch (error) { alert(error.message); }
 });
 for (const button of $("suggestions").querySelectorAll("button")) button.addEventListener("click", () => ask(button.dataset.q));
 

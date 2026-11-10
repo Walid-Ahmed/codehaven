@@ -228,3 +228,14 @@ Evals: the change tasks became questions that check the same understanding (for 
 `low_stock` bug and its fix, or the price of `SKU-0042`), five redundant ones were dropped, and the
 harness now fails any task that leaves a file changed. Earlier results in this file are for those
 earlier task sets and are not comparable with runs on the new ones.
+
+### Version 0.9.1: tiered follow-up memory
+
+Sessions (the browser page and `--interactive`) used to send the last four questions with answers of up to
+1,200 bytes each, which could take about 6 KB, half of the default 12 KB prompt. Memory is now tiered:
+the last two answers are kept nearly whole (1,000 bytes), up to six older questions keep only the
+question and the answer's first sentence, and the whole record is capped at 3,200 bytes, oldest dropped
+first. That reaches back eight questions instead of four while using about half the space. The browser
+page shows how many earlier questions are remembered. The evals gained three follow-up conversations,
+scored turn by turn; they check that follow-ups resolve ("that function") but, at two or three turns
+each, do not exercise the reach beyond four questions, which the unit tests cover.

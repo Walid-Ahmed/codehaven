@@ -470,7 +470,27 @@ class SessionTests(TempWorkspace):
     def test_history_is_bounded(self):
         session = Session(ScriptedModel([]), self.ws)
         session.turns = [(f"q{n}", "a" * 5000) for n in range(Session.TURNS)]
-        self.assertLess(len(session.history().encode()), Session.TURNS * 1600)
+        self.assertLessEqual(len(session.history().encode()), Session.HISTORY_BYTES)
+        self.assertIn("Q: q7\nA: " + "a" * 100, session.history())  # The newest answer survives the cap.
+
+    def test_memory_keeps_recent_answers_whole_and_older_ones_as_summaries(self):
+        session = Session(ScriptedModel([]), self.ws)
+        session.turns = [(f"Question {n}?", f"Answer {n} first. More detail {n}.\n- a.py:{n} `f{n}`: cited.") for n in range(1, 9)]
+        history = session.history()
+        self.assertTrue(history.startswith("Q: Question 1?\nA (summary): Answer 1 first."))
+        self.assertNotIn("More detail 1", history)
+        self.assertIn("Q: Question 7?\nA: Answer 7 first. More detail 7.\n- a.py:7 `f7`: cited.", history)
+        self.assertIn("Q: Question 8?\nA: Answer 8 first.", history)
+        self.assertEqual(history.count("Q: "), 8)  # Eight questions now fit where four used to.
+
+    def test_memory_drops_the_oldest_beyond_eight_questions(self):
+        knowledge = self.Knowledge()
+        replies = [action("finish", content=f"Answer {n}.") for n in range(1, 11)]
+        session = Session(ScriptedModel(replies), self.ws, knowledge=knowledge, output=lambda _: None)
+        for n in range(1, 11):
+            session.ask(f"Question {n}?")
+        self.assertEqual([q for q, _ in session.turns], [f"Question {n}?" for n in range(3, 11)])
+        self.assertNotIn("Question 2?", session.history())
 
 
 class TaskKindTests(TempWorkspace):

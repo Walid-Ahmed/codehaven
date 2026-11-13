@@ -4,11 +4,19 @@ The server listens on 127.0.0.1 only and serves one self-contained page: no scri
 from the internet, and the page's Content-Security-Policy forbids loading any. Every request must carry the
 secret token from the link the server prints, and a Host header naming this machine, so other websites open
 in the same browser cannot use the server to read files. Like the rest of CodeHaven, it never changes files.
+
+A single file can be uploaded instead of choosing a folder. The page sends it to this server only; a copy is
+kept in a private temporary folder, which is the workspace for that chat, and deleted when another repository
+or file is opened or the server stops. The original file is never touched.
 """
 import json
 import os
 import queue
+import re
 import secrets
+import shutil
+import signal
+import tempfile
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,12 +26,13 @@ from urllib.parse import parse_qs, urlsplit
 from .agent import Session
 from .knowledge import KnowledgeBase
 from .model import MODEL
-from .workspace import Workspace
+from .workspace import MAX_BYTES, Workspace
 
 PAGE = Path(__file__).with_name("gui.html")
 FILE_CONTEXT, FILE_LINES = 6, 400  # Lines shown around a citation, and the most one request returns.
 DIRECTORY_ENTRIES = 400
 REQUEST_BYTES = 64_000
+UPLOAD_NAME_CHARACTERS = 120
 
 
 class Busy(Exception):
@@ -39,6 +48,7 @@ class App:
         self.lock = threading.Lock()
         self.busy = False
         self.workspace = self.knowledge = self.session = None
+        self.upload = self.upload_folder = None  # The uploaded file's name and its private temporary folder.
         self.sink = None
 
     def claim(self):
@@ -64,15 +74,53 @@ class App:
                 raise ValueError("Use the full path of the repository folder, such as /Users/you/dev/project.")
             workspace = Workspace(root, excludes=self.excludes + tuple(excludes))
             references = workspace.root / "knowledge"
-            knowledge = KnowledgeBase(references if references.exists() else None, workspace=workspace,
-                                      context_budget=self.retrieval_budget)
-            self.workspace, self.knowledge = workspace, knowledge
-            self.session = Session(self.model, workspace, knowledge=knowledge, max_steps=self.max_steps,
-                                   output=lambda line: self.emit({"type": "log", "text": str(line)}),
-                                   stream=lambda text: self.emit({"type": "text", "text": text}))
+            self.load(workspace, references if references.exists() else None)
             return self.summary()
         finally:
             self.release()
+
+    def open_file(self, name, data):
+        """Chat about one uploaded file: a copy in a private temporary folder becomes the workspace."""
+        if len(data) > MAX_BYTES:
+            raise ValueError(f"Only UTF-8 text files up to {MAX_BYTES // 1000} KB can be uploaded.")
+        if b"\0" in data:
+            raise ValueError("Only text files can be uploaded; this file looks binary.")
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Only UTF-8 text files can be uploaded.") from exc
+        name = upload_name(name)
+        self.claim()
+        folder = Path(tempfile.mkdtemp(prefix="codehaven-upload-"))  # Readable by this user only.
+        try:
+            (folder / name).write_bytes(data)
+            workspace = Workspace(folder, excludes=self.excludes)
+            workspace.read(name)  # Refuses names the workspace rules hide, such as --exclude patterns.
+            self.load(workspace, None, upload=name, upload_folder=folder)
+            return self.summary()
+        except BaseException:
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
+        finally:
+            self.release()
+
+    def load(self, workspace, references, *, upload=None, upload_folder=None):
+        knowledge = KnowledgeBase(references, workspace=workspace, context_budget=self.retrieval_budget)
+        self.discard_upload()
+        self.workspace, self.knowledge = workspace, knowledge
+        self.upload, self.upload_folder = upload, upload_folder
+        self.session = Session(self.model, workspace, knowledge=knowledge, max_steps=self.max_steps, focus_file=upload,
+                               output=lambda line: self.emit({"type": "log", "text": str(line)}),
+                               stream=lambda text: self.emit({"type": "text", "text": text}))
+
+    def discard_upload(self):
+        """Delete the temporary copy of an uploaded file, if one is open."""
+        if self.upload_folder is not None:
+            shutil.rmtree(self.upload_folder, ignore_errors=True)
+            self.upload = self.upload_folder = None
+
+    def close(self):
+        self.discard_upload()
 
     def model_name(self):
         return getattr(self.model, "model", MODEL)
@@ -98,9 +146,13 @@ class App:
     def summary(self):
         workspace, knowledge = self.workspace, self.knowledge
         if workspace is None or knowledge is None:
-            return {"model": self.model_name(), "repository": None}
+            return {"model": self.model_name(), "repository": None, "upload": None}
         counts = knowledge.documents_by_source
-        return {"model": self.model_name(), "repository": str(workspace.root), "files": counts["repo"],
+        if self.upload is not None:
+            # The temporary folder means nothing to the user; the file is readable even if its type is not indexed.
+            return {"model": self.model_name(), "repository": None, "upload": self.upload, "files": 1,
+                    "references": 0, "chunks": len(knowledge.entries), "limited": False}
+        return {"model": self.model_name(), "repository": str(workspace.root), "upload": None, "files": counts["repo"],
                 "references": counts["user"], "chunks": len(knowledge.entries), "limited": knowledge.limited}
 
     def reset(self):
@@ -115,7 +167,7 @@ class App:
         """Yield the events of one answer: log lines, streamed text, and a final done or error event."""
         session = self.session
         if session is None:
-            raise ValueError("Choose a repository first.")
+            raise ValueError("Choose a repository or upload a file first.")
         if not isinstance(question, str) or not question.strip():
             raise ValueError("Type a question first.")
         self.claim()
@@ -147,7 +199,7 @@ class App:
     def file(self, path, start=1, end=None):
         """Lines of a repository file around a cited range, through the same rules as the agent's reads."""
         if self.workspace is None:
-            raise ValueError("Choose a repository first.")
+            raise ValueError("Choose a repository or upload a file first.")
         lines = self.workspace.read(path.removeprefix("repo/")).splitlines()
         start = max(1, int(start))
         end = max(start, int(end or start))
@@ -155,6 +207,21 @@ class App:
         last = min(len(lines), end + FILE_CONTEXT, first + FILE_LINES - 1)
         return {"path": path.removeprefix("repo/"), "start": start, "end": end, "total": len(lines),
                 "first": first, "lines": lines[first - 1:last]}
+
+
+def upload_name(name):
+    """A safe file name for an uploaded copy, keeping the original name where it can.
+
+    Only the last part of the name is kept, and characters other than letters, digits, dot, dash, and
+    underscore become underscores, so citations such as notes_v2.py:12 stay clickable.
+    """
+    name = re.split(r"[\\/]", str(name or ""))[-1].strip()
+    name = re.sub(r"[^\w.-]", "_", name, flags=re.ASCII)[-UPLOAD_NAME_CHARACTERS:]
+    if not name.strip("._"):
+        raise ValueError("The uploaded file needs a name.")
+    if name.startswith("."):
+        raise ValueError("Hidden files such as .env cannot be uploaded.")
+    return name
 
 
 def directories(path=""):
@@ -259,11 +326,22 @@ def make_handler(app, token, port_holder):
             except (ValueError, OSError, UnicodeError) as exc:
                 self.refuse(400, str(exc))
 
+        def upload(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 <= length <= MAX_BYTES:
+                self.close_connection = True  # The body is not read, so the connection cannot be reused.
+                raise ValueError(f"Only UTF-8 text files up to {MAX_BYTES // 1000} KB can be uploaded.")
+            return self.rfile.read(length)
+
         def do_POST(self):
             url = urlsplit(self.path)
+            query = parse_qs(url.query)
             if not self.authorized({}):
                 return
             try:
+                if url.path == "/api/upload":
+                    self.send(200, app.open_file(query.get("name", [""])[0], self.upload()))
+                    return
                 data = self.body()
                 if url.path == "/api/open":
                     self.send(200, app.open(str(data.get("path", "")), data.get("excludes") or ()))
@@ -320,10 +398,15 @@ def serve(model, *, port=0, open_browser=True, repository=None, max_steps=12, re
     print(f"CodeHaven is running at:\n  {url}\nOnly this machine can reach it. Press Ctrl+C to stop.", flush=True)
     if open_browser:
         webbrowser.open(url)
+
+    def stop(_signum, _frame):
+        raise KeyboardInterrupt  # A plain kill also deletes the uploaded file's temporary copy.
+    signal.signal(signal.SIGTERM, stop)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
         server.server_close()
+        app.close()
     return 0

@@ -120,6 +120,14 @@ keyword-matched passages plus up to four Python/JavaScript/TypeScript dependency
 and a shared 16 KB JSON cap. There are no embeddings or semantic
 vector search, so queries using the document's actual terminology work best.
 
+When a question names code, such as `MAX_GUESTS`, `apply_discount`, `Store.remove_item`, `applyCoupon`,
+or "the stem function", the definition of that name comes first, as a passage with `kind: definition`,
+`via: question`, and `name`. Keyword ranking alone often missed these, because tests and callers repeat a
+name more often than the line that defines it. A word counts as a name only when it is written like code
+(underscore, camelCase, ALL_CAPS, a dot, backticks, or `()`) or sits next to "function", "method", "class",
+or "constant", and only when it is defined in one to three indexed Python/JavaScript/TypeScript files.
+At most three definitions are added, within the same byte budget.
+
 The index is rebuilt for each new task. External edits and deletions are picked
 up on the next run. No database, persistent index, account, or API key is required.
 Indexing considers at most 1,000 candidate files per root, 1,000 documents total across references and repository code,

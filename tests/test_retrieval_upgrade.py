@@ -130,6 +130,39 @@ class RetrievalBudgetTests(unittest.TestCase):
         self.assertIn('repo/lib.py', [r['source'] for r in result['results']])
         self.assertIn('repo/guide.md', [r['source'] for r in result['results']])
 
+    def test_named_constant_definition_comes_first_even_when_tests_repeat_it(self):
+        self.put('lib.py', 'MAX_FILES = 10\n' + '# gap\n' * 40 + 'def other():\n    return 1\n')
+        self.put('tests/test_lib.py', 'from lib import MAX_FILES\n' + 'assert MAX_FILES == 10\n' * 25)
+        self.put('notes.md', 'MAX_FILES MAX_FILES MAX_FILES limits indexing')
+        first = json.loads(KnowledgeBase(workspace=self.root).retrieve('What is MAX_FILES?'))['results'][0]
+        self.assertEqual((first['source'], first['kind'], first['name']), ('repo/lib.py', 'definition', 'MAX_FILES'))
+        self.assertLessEqual(first['start_line'], 1)
+
+    def test_dotted_method_and_javascript_names_are_looked_up(self):
+        self.put('store.py', 'class Store:\n' + '    x = 1\n' * 40 + '    def remove_item(self, name):\n        raise KeyError(name)\n')
+        self.put('cart.js', '// cart\n' * 40 + 'export function applyCoupon(a) {\n  return a * 0.9;\n}\n')
+        kb = KnowledgeBase(workspace=self.root)
+        row = json.loads(kb.retrieve('What happens in Store.remove_item?'))['results'][0]
+        self.assertEqual((row['kind'], row['symbol'], row['start_line']), ('definition', 'remove_item', 42))
+        row = json.loads(kb.retrieve('Who calls applyCoupon'))['results'][0]
+        self.assertEqual((row['kind'], row['source'], row['start_line']), ('definition', 'repo/cart.js', 41))
+
+    def test_plain_words_are_only_looked_up_when_marked_as_code(self):
+        self.put('text.py', 'def stem(word):\n    return word\n\ndef clean(text):\n    return text\n')
+        kb = KnowledgeBase(workspace=self.root)
+        kinds = lambda query: [r['kind'] for r in json.loads(kb.retrieve(query))['results']]
+        self.assertNotIn('definition', kinds('how do we stem and clean words'))
+        self.assertEqual(kinds('What does the stem function do?')[0], 'definition')
+        self.assertEqual(kinds('What does `clean` return?')[0], 'definition')
+        self.assertEqual(kinds('What does clean() return?')[0], 'definition')
+
+    def test_names_defined_in_many_files_are_not_looked_up(self):
+        for number in range(4):
+            self.put(f'm{number}.py', f'def load_all():\n    return {number}\n')
+        kb = KnowledgeBase(workspace=self.root)
+        self.assertEqual(kb.named_definitions('What does load_all do?'), [])
+        self.assertEqual(len(kb.symbols['load_all']), 4)
+
     def test_js_cycles_reexports_and_depth_are_bounded(self):
         self.put('main.ts', 'import { cost } from "./index";\nexport function uniqueworkflow() { return cost(); }')
         self.put('index.ts', 'export { price as cost } from "./price";')

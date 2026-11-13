@@ -160,6 +160,15 @@ class KnowledgeBase:
         self.passages_by_source = {}
         for entry in self.entries:
             self.passages_by_source.setdefault(entry["source"], []).append(entry)
+        # Where each function, class, method, and module constant is defined, so a name in the question can be looked up.
+        self.symbols = {}
+        for name in sorted(self.dependencies.definitions.keys() | self.dependencies.spans.keys()):
+            places = [(symbol, line) for symbol, line in self.dependencies.definitions.get(name, {}).items()]
+            places += [(span["name"], span["start"]) for span in self.dependencies.spans.get(name, [])]
+            for symbol, line in places:
+                found = self.symbols.setdefault(symbol, [])
+                if (name, line) not in found:
+                    found.append((name, line))
 
     def refresh(self):
         """Rebuild the bounded local snapshot after an agent-approved write."""
@@ -181,6 +190,9 @@ class KnowledgeBase:
                 continue
             text = "\n".join(lines[span["start"] - 1:span["end"]])
             overlap = len(terms & set(tokens(text)))
+            if definition_line is not None:
+                # The innermost symbol around a definition is the one defined there: a method, not its whole class.
+                overlap = 0
             if definition_line is not None or overlap:
                 choices.append((overlap, -(span["end"] - span["start"]), span, text))
         if not choices:
@@ -205,6 +217,31 @@ class KnowledgeBase:
             if len(found) >= 3:
                 break
         return found
+
+    def named_definitions(self, query):
+        """Definitions of the code names a question mentions, as (name, file, line), in the order they appear.
+
+        Only names written like code count: with an underscore, camelCase, ALL_CAPS, a dot, backticks, or (),
+        or a plain word right next to "function", "method", "class", or "constant". Keyword ranking often
+        misses these, because a name's definition can use it once while tests and callers repeat it."""
+        mentioned = []
+        for match in re.finditer(r"`([^`\n]{1,100})`|([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(\s*\(\))?", query):
+            text = match.group(1) or match.group(2)
+            for name in re.findall(r"[A-Za-z_$][\w$]*", text)[-1:]:  # Store.remove_item -> remove_item
+                coded = (match.group(1) or match.group(3) or "." in text or "_" in name.strip("_")
+                         or re.search(r"[a-z][A-Z]", name) or re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", name))
+                if not coded:
+                    near = re.compile(rf"\b(?:function|method|class|constant)\s+{re.escape(name)}\b"
+                                      rf"|\b{re.escape(name)}\s+(?:function|method|class|constant)\b", re.I)
+                    coded = near.search(query)
+                if coded and name not in mentioned and not name.startswith("__"):
+                    mentioned.append(name)
+        found = []
+        for name in mentioned:
+            places = self.symbols.get(name, [])
+            if 1 <= len(places) <= 3:  # A name defined in many files says little about which one is meant.
+                found += [(name, path, line) for path, line in places]
+        return found[:3]
 
     def retrieve(self, query):
         if not isinstance(query, str) or not query.strip() or len(query) > 1000:
@@ -270,6 +307,13 @@ class KnowledgeBase:
         has_dependencies = any(self.dependencies.edges.get(e["source"].removeprefix("repo/"))
                                for _, e in candidates[:4] if e["source"].startswith("repo/"))
         primary_budget = int(self.context_budget * 0.6) if has_dependencies else self.context_budget
+        # A name the question mentions comes first, ahead of keyword matches, so its definition is never crowded out.
+        for name, path, line in self.named_definitions(query):
+            passage = next((p for p in self.passages_by_source.get("repo/" + path, [])
+                            if p["start_line"] <= line <= p["end_line"]), None)
+            if passage is not None:
+                accept(passage, {"score": 0.0, "kind": "definition", "via": "question", "name": name},
+                       primary_budget, line)
         deferred = []
         for score, entry in candidates:
             if len(selected) >= 4:

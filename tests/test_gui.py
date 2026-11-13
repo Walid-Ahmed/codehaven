@@ -9,9 +9,10 @@ import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import quote
 
 from offline_agent.cli import main
-from offline_agent.gui import PAGE, App, directories, make_server
+from offline_agent.gui import PAGE, App, directories, make_server, upload_name
 
 
 def action(kind, path="", content="", message="Working"):
@@ -157,7 +158,7 @@ class GuiServerTests(unittest.TestCase):
         self.assertEqual(self.json("GET", "/api/status")[0], 200)
 
     def test_questions_need_a_repository_and_text(self):
-        self.assertEqual(self.json("POST", "/api/ask", {"question": "Hi?"})[1]["error"], "Choose a repository first.")
+        self.assertEqual(self.json("POST", "/api/ask", {"question": "Hi?"})[1]["error"], "Choose a repository or upload a file first.")
         self.open_repo()
         self.assertEqual(self.json("POST", "/api/ask", {"question": "   "})[0], 400)
 
@@ -170,6 +171,69 @@ class GuiServerTests(unittest.TestCase):
         for path in ("../repo/pkg/pricing.py", ".env", "private/keys.py", str(self.repo / "pkg" / "pricing.py")):
             with self.subTest(path=path):
                 self.assertEqual(self.json("GET", "/api/file?path=" + path)[0], 400)
+
+    def upload(self, name, data, *, token=True):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        headers = {"Host": f"127.0.0.1:{self.port}", "Content-Type": "application/octet-stream"}
+        if token:
+            headers["X-CodeHaven-Token"] = self.token
+        connection.request("POST", "/api/upload?name=" + quote(name), body=data, headers=headers)
+        response = connection.getresponse()
+        result = json.loads(response.read())
+        connection.close()
+        return response.status, result
+
+    def test_an_uploaded_file_is_chatted_about_without_a_repository(self):
+        original = Path(self.temp.name, "notes v2.py")
+        original.write_text("def total(items):\n    return sum(items)\n")
+        status, summary = self.upload(str(original), original.read_bytes())
+        self.assertEqual(status, 200, summary)
+        self.assertEqual((summary["upload"], summary["repository"], summary["files"]), ("notes_v2.py", None, 1))
+        folder = self.app.upload_folder
+        assert folder is not None
+        self.assertEqual((folder / "notes_v2.py").read_bytes(), original.read_bytes())
+        self.assertEqual(self.json("GET", "/api/status")[1]["upload"], "notes_v2.py")
+        self.model.replies = [action("finish", content="It adds the items.")]
+        _, data = self.request("POST", "/api/ask", {"question": "What does this file do?"})
+        events = [json.loads(line) for line in data.decode().splitlines()]
+        self.assertEqual(events[-1]["type"], "done")
+        # Unnamed in the question, the only file is still preloaded for the model.
+        self.assertTrue(any(e["type"] == "log" and e["text"].startswith("Preloaded notes_v2.py") and "this chat is about" in e["text"] for e in events))
+        self.assertEqual(self.json("GET", "/api/file?path=notes_v2.py&start=2")[1]["lines"][1], "    return sum(items)")
+        self.open_repo()  # Opening something else deletes the temporary copy, never the original.
+        self.assertFalse(folder.exists())
+        self.assertTrue(original.exists())
+        self.assertIsNone(self.json("GET", "/api/status")[1]["upload"])
+
+    def test_uploads_must_be_small_named_utf8_text_and_need_the_token(self):
+        self.assertEqual(self.upload("a.py", b"x = 1\n", token=False)[0], 403)
+        for name, data, message in [("big.txt", b"a" * 64_001, "64 KB"), ("image.png", b"\x89PNG\0\0", "binary"),
+                                    ("latin.txt", "caf\xe9".encode("latin-1"), "UTF-8"), (".env", b"SECRET=1\n", "Hidden"),
+                                    ("", b"x\n", "needs a name")]:
+            with self.subTest(name=name):
+                status, error = self.upload(name, data)
+                self.assertEqual(status, 400)
+                self.assertIn(message, error["error"])
+        self.assertIsNone(self.app.upload_folder)
+        self.assertFalse(self.app.busy)
+
+    def test_upload_names_keep_only_a_safe_file_name(self):
+        self.assertEqual(upload_name("C:\\Users\\me\\report (final).md"), "report__final_.md")
+        self.assertEqual(upload_name("../../etc/passwd"), "passwd")
+        self.assertEqual(upload_name("café.py"), "caf_.py")
+        with self.assertRaises(ValueError):
+            upload_name("../")
+
+    def test_excluded_uploads_are_refused_and_the_copy_removed(self):
+        app = App(self.model, excludes=("*.log",))
+        with self.assertRaisesRegex(ValueError, "excluded"):
+            app.open_file("server.log", b"started\n")
+        self.assertIsNone(app.upload_folder)
+        app.open_file("server.txt", b"started\n")
+        folder = app.upload_folder
+        assert folder is not None
+        app.close()
+        self.assertFalse(folder.exists())
 
     def test_folder_browser_lists_visible_folders_and_marks_repositories(self):
         (self.repo / ".git").mkdir()

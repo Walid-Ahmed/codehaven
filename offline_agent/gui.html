@@ -53,6 +53,10 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .index-status { margin-top: 10px; font-size: 13px; color: var(--muted); }
 .index-status strong { color: var(--text); }
 .index-status.error { color: var(--error); }
+.upload-row { display: flex; gap: 8px; margin-top: 8px; }
+.upload-row button { flex: 1; }
+body.dropping .main::after { content: "Drop a file to chat about it"; position: fixed; inset: 12px 12px 12px 312px; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: 12px; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 18px; z-index: 5; pointer-events: none; }
+@media (max-width: 760px) { body.dropping .main::after { inset: 12px; } }
 .recent button { display: block; width: 100%; text-align: left; margin-bottom: 6px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .privacy { margin-top: auto; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
 
@@ -159,6 +163,12 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
       <div class="index-status" id="index-status">Choose a folder, then index it to start chatting.</div>
     </div>
     <div class="section">
+      <h2>Or a single file</h2>
+      <input type="file" id="file-input" hidden>
+      <div class="upload-row"><button id="upload">Upload a file…</button></div>
+      <div class="index-status" id="upload-status">No folder needed: pick or drop one text file (up to 64 KB). It stays on this computer, and the copy CodeHaven reads is deleted when you open something else.</div>
+    </div>
+    <div class="section">
       <h2>Model</h2>
       <select id="model" aria-label="Local model"><option>Loading…</option></select>
       <div class="index-status" id="model-status">Models installed in Ollama on this computer.</div>
@@ -172,7 +182,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
       <button id="new-chat" disabled>New chat</button>
       <div class="index-status" id="memory-status">Follow-up questions remember up to 8 earlier questions. Start a new chat when you change topic.</div>
     </div>
-    <div class="privacy">Runs on this computer with <span id="model-name">a local model</span>. Nothing is sent to the internet. CodeHaven only reads your code: it never changes, creates, or deletes files.</div>
+    <div class="privacy">Runs on this computer with <span id="model-name">a local model</span>. Nothing is sent to the internet. CodeHaven only reads your code: it never changes, creates, or deletes your files.</div>
   </aside>
 
   <main class="main">
@@ -186,19 +196,14 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
       <div class="messages-inner" id="messages-inner">
         <div class="empty-state" id="empty">
           <h2>Ask about your code</h2>
-          <p id="empty-text">Index a repository on the left, then ask how something works.<br>Answers cite the exact lines they rely on; click a citation to see the code.</p>
-          <div class="suggestions" id="suggestions" hidden>
-            <button data-q="Explain this project">Explain this project</button>
-            <button data-q="Explain README.md">Explain README.md</button>
-            <button data-q="What are the main modules and what does each do?">Main modules</button>
-            <button data-q="Which tests are there and what do they check?">Tests</button>
-          </div>
+          <p id="empty-text">Index a repository or upload a file on the left, then ask how something works.<br>Answers cite the exact lines they rely on; click a citation to see the code.</p>
+          <div class="suggestions" id="suggestions" hidden></div>
         </div>
       </div>
     </div>
     <div class="composer">
       <div class="composer-inner">
-        <textarea id="question" rows="1" placeholder="Index a repository first" disabled aria-label="Question"></textarea>
+        <textarea id="question" rows="1" placeholder="Index a repository or upload a file first" disabled aria-label="Question"></textarea>
         <button id="send" class="primary" disabled>Ask</button>
       </div>
       <div class="hint">Enter to send, Shift+Enter for a new line. Name files and functions exactly for the best answers.</div>
@@ -221,7 +226,29 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
 "use strict";
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
 const $ = (id) => document.getElementById(id);
-let busy = false, indexed = false, browsing = "";
+let busy = false, indexed = false, uploaded = false, browsing = "";
+const UPLOAD_BYTES = 64000;  // The same limit as every file CodeHaven reads.
+const REPOSITORY_SUGGESTIONS = [
+  ["Explain this project", "Explain this project"],
+  ["Explain README.md", "Explain README.md"],
+  ["Main modules", "What are the main modules and what does each do?"],
+  ["Tests", "Which tests are there and what do they check?"],
+];
+function fileSuggestions(name) {
+  return [
+    [`Explain ${name}`, `Explain ${name}`],
+    ["Main parts", `What are the main functions or sections in ${name}, and what does each do?`],
+    ["Risky parts", `Which parts of ${name} could fail or behave unexpectedly, and why?`],
+  ];
+}
+function setSuggestions(items) {
+  $("suggestions").replaceChildren(...items.map(([label, question]) => {
+    const button = document.createElement("button");
+    button.textContent = label;
+    button.addEventListener("click", () => ask(question));
+    return button;
+  }));
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, {...options, headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN}});
@@ -295,20 +322,34 @@ function showRecent() {
 }
 
 // ---- Indexing.
+const UPLOAD_HINT = $("upload-status").textContent;
 function setIndexed(summary) {
-  indexed = Boolean(summary.repository);
+  indexed = Boolean(summary.repository || summary.upload);
+  uploaded = Boolean(summary.upload);
   $("model-name").textContent = summary.model || "a local model";
   if (!indexed) return;
-  $("repo-label").textContent = summary.repository;
   $("repo-label").classList.remove("empty");
   $("index-pill").hidden = false;
-  $("index-pill").textContent = `${summary.files} files indexed`;
-  const status = $("index-status");
-  status.classList.remove("error");
-  status.innerHTML = `<strong>${summary.files}</strong> files and ${summary.chunks} passages indexed.` +
-    (summary.limited ? " Index limits were reached, so some files are left out; answers can still search and read them." : "");
-  $("path").value = summary.repository;
-  $("empty-text").textContent = "Ask how something in this repository works. Answers cite the exact lines they rely on; click a citation to see the code.";
+  const status = $("index-status"), upload = $("upload-status");
+  status.classList.remove("error"); upload.classList.remove("error");
+  if (summary.upload) {
+    $("repo-label").textContent = `${summary.upload} · uploaded file`;
+    $("index-pill").textContent = "1 file";
+    status.textContent = "Choose a folder, then index it to chat about a whole repository.";
+    upload.replaceChildren("Chatting about ", Object.assign(document.createElement("strong"), {textContent: summary.upload}),
+      ". The copy CodeHaven reads is deleted when you open something else; your original is never touched.");
+    $("empty-text").textContent = `Ask how something in ${summary.upload} works. Answers cite the exact lines they rely on; click a citation to see the code.`;
+    setSuggestions(fileSuggestions(summary.upload));
+  } else {
+    $("repo-label").textContent = summary.repository;
+    $("index-pill").textContent = `${summary.files} files indexed`;
+    status.innerHTML = `<strong>${summary.files}</strong> files and ${summary.chunks} passages indexed.` +
+      (summary.limited ? " Index limits were reached, so some files are left out; answers can still search and read them." : "");
+    upload.textContent = UPLOAD_HINT;
+    $("path").value = summary.repository;
+    $("empty-text").textContent = "Ask how something in this repository works. Answers cite the exact lines they rely on; click a citation to see the code.";
+    setSuggestions(REPOSITORY_SUGGESTIONS);
+  }
   $("suggestions").hidden = false;
   updateComposer();
 }
@@ -331,6 +372,48 @@ async function indexRepository() {
     busy = false; updateComposer();
   }
 }
+
+// ---- One uploaded file, for a quick question without a repository. The file goes only to this local server.
+async function uploadFile(file) {
+  if (!file || busy) return;
+  const status = $("upload-status");
+  status.classList.remove("error");
+  if (file.size > UPLOAD_BYTES) {
+    status.classList.add("error");
+    status.textContent = `${file.name} is ${Math.ceil(file.size / 1000)} KB; CodeHaven reads text files up to 64 KB. Index its folder instead to ask about part of it.`;
+    return;
+  }
+  busy = true; updateComposer();
+  status.textContent = `Reading ${file.name}…`;
+  try {
+    const response = await fetch("/api/upload?name=" + encodeURIComponent(file.name),
+                                 {method: "POST", headers: {"Content-Type": "application/octet-stream", "X-CodeHaven-Token": TOKEN}, body: file});
+    const summary = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(summary.error || response.statusText);
+    clearChat();
+    setIndexed(summary);
+  } catch (error) {
+    status.classList.add("error");
+    status.textContent = error.message;
+  } finally {
+    busy = false; updateComposer();
+  }
+}
+$("upload").addEventListener("click", () => $("file-input").click());
+$("file-input").addEventListener("change", () => { const file = $("file-input").files[0]; $("file-input").value = ""; uploadFile(file); });
+let dragDepth = 0;
+const dragsFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
+document.addEventListener("dragenter", (event) => { if (!dragsFiles(event)) return; event.preventDefault(); dragDepth++; if (!busy) document.body.classList.add("dropping"); });
+document.addEventListener("dragover", (event) => { if (dragsFiles(event)) event.preventDefault(); });
+document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dropping"); } });
+document.addEventListener("drop", (event) => {
+  if (!dragsFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0; document.body.classList.remove("dropping");
+  const files = event.dataTransfer.files;
+  if (files.length > 1) { $("upload-status").classList.add("error"); $("upload-status").textContent = "Drop one file at a time, or index the folder that holds them."; return; }
+  uploadFile(files[0]);
+});
 
 // ---- Folder browser.
 async function browse(path) {
@@ -439,10 +522,12 @@ function updateComposer() {
   const ready = indexed && !busy;
   $("question").disabled = !ready;
   $("send").disabled = !ready || !$("question").value.trim();
-  $("question").placeholder = !indexed ? "Index a repository first" : busy ? "CodeHaven is working…" : "Ask about this repository";
+  $("question").placeholder = !indexed ? "Index a repository or upload a file first" : busy ? "CodeHaven is working…"
+    : uploaded ? "Ask about this file" : "Ask about this repository";
   $("new-chat").disabled = !indexed || busy;
   $("model").disabled = busy;
   $("index").disabled = busy;
+  $("upload").disabled = busy;
   for (const button of $("suggestions").querySelectorAll("button")) button.disabled = !ready;
 }
 function statusText(line) {
@@ -548,7 +633,6 @@ $("new-chat").addEventListener("click", async () => {
     $("memory-status").textContent = "New chat: nothing remembered yet. Follow-up questions remember up to 8 earlier questions.";
   } catch (error) { alert(error.message); }
 });
-for (const button of $("suggestions").querySelectorAll("button")) button.addEventListener("click", () => ask(button.dataset.q));
 
 showRecent();
 loadModels();

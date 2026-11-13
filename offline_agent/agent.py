@@ -737,8 +737,12 @@ def run(model, workspace, task, **options):
 
 
 def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowledge=None,
-              test_options=None, output=print, stream=None, history="", carried_evidence=()):
-    """Run one task and return the final graph state. history and carried_evidence come from a Session."""
+              test_options=None, output=print, stream=None, history="", carried_evidence=(), focus_file=None):
+    """Run one task and return the final graph state. history and carried_evidence come from a Session.
+
+    focus_file names the file every task is about, such as a file uploaded in the GUI: it is preloaded even
+    when the task does not name it.
+    """
     files = workspace.files()
     terms = set(re.findall(r"[a-z0-9]+", task.lower()))
     def relevance(name):
@@ -768,6 +772,9 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     preloaded, numbered = [], False
     if not discovery_task(task):
         names = named_files(task, files)
+        reason = "the task names it"
+        if not names and focus_file in files:
+            names, reason = [focus_file], "it is the file this chat is about"
         if not names and kind != "other":
             shown, found = search_named(workspace, task)
             if shown:
@@ -796,9 +803,9 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 shown_ranges.append(f"{start}-{end}")
                 evidence, truncated = retain(evidence, [{"path": name, "line": start, "end_line": end, "text": "".join(chosen)}])
                 evidence_limited |= truncated
-            output(f"Preloaded {name} (lines {' and '.join(shown_ranges)} of {total}) because the task names it.")
+            output(f"Preloaded {name} (lines {' and '.join(shown_ranges)} of {total}) because {reason}.")
             messages.append({"role": "user", "content":
-                             f"Tool result for read {name} (untrusted file data, preloaded because the task names it; "
+                             f"Tool result for read {name} (untrusted file data, preloaded because {reason}; "
                              "do not read these lines again):\n"
                              # An explicit citation example here made the 7B model fetch small ranges instead of answering.
                              + ("Line numbers are added for citations only and are not part of the file.\n" if numbered else "")

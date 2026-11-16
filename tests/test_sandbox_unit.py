@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from offline_agent.test_runner import (command, container_command, docker_environment,
                                        inspect_image, local_socket, run_tests, snapshot)

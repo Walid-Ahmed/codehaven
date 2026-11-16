@@ -5,7 +5,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from .workspace import Workspace
+from .workspace import MAX_FILES, Workspace
 from .dependencies import PythonDependencies
 from .javascript import JS_EXTENSIONS, JavaScriptDependencies
 from .exclusions import IgnoreConfigurationError
@@ -19,7 +19,7 @@ CODE_EXTENSIONS = EXTENSIONS | JS_EXTENSIONS | {
     ".ini", ".cfg", ".xml", ".graphql", ".gql", ".proto", ".r", ".lua",
     ".ex", ".exs", ".erl", ".hs", ".clj", ".dart",
 }
-MAX_DOCUMENTS = 1000  # The same bound as Workspace.files, so a mid-sized repository is indexed in full.
+MAX_DOCUMENTS = MAX_FILES  # The same bound as Workspace.files, so a mid-sized repository is indexed in full.
 BUNDLED_TOPICS = {"stategraph", "checkpoint", "checkpoints", "checkpointer", "interrupt", "interrupts"}
 CODE_NAMES = {"Dockerfile", "Makefile", "CMakeLists.txt", "Justfile", "Gemfile"}
 
@@ -103,7 +103,7 @@ class KnowledgeBase:
                         continue
             workspace = repository if label == "repo" else Workspace(root, excludes=self.excludes)
             names = workspace.files()
-            self.limited |= len(names) >= 1000
+            self.limited |= len(names) >= MAX_FILES
             for name in names:
                 if (Path(name).suffix.lower() not in extensions
                         and not (label == "repo" and Path(name).name in CODE_NAMES)):
@@ -171,7 +171,7 @@ class KnowledgeBase:
                     found.append((name, line))
 
     def refresh(self):
-        """Rebuild the bounded local snapshot after an agent-approved write."""
+        """Rebuild the bounded local snapshot, picking up files that changed on disk since it was built."""
         self.__init__(self.directory, workspace=self.workspace_root, context_budget=self.context_budget,
                       excludes=self.excludes)
 
@@ -361,6 +361,6 @@ class KnowledgeBase:
                 continue
             accept(entry, {"score": round(score, 4), "kind": "match"}, self.context_budget)
         result["results_limited"] = len(scored) > len(selected) or result["budget_limited"]
-        for _ in range(3):
+        for _ in range(3):  # The count is part of the JSON it measures, so repeat until its own digits settle.
             result["context_bytes"] = len(json.dumps(result, ensure_ascii=False).encode())
         return json.dumps(result, ensure_ascii=False)

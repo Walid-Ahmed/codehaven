@@ -60,7 +60,7 @@ Hidden files, `.gitignore` and `.agentignore` matches, symlinks, binary files an
 
 ### No vector database
 
-CodeHaven uses no embeddings and no vector database. Matching is by words and code structure, not by meaning, and nothing is saved to disk. This keeps it fast and free of extra models and stored indexes.
+CodeHaven uses no embeddings and no vector database. Matching is by words and code structure, not by meaning, and no index is saved to disk (only long-term memory's saved answers are, unless `--no-remember` is used). This keeps it fast and free of extra models and stored indexes.
 
 The cost is that questions using none of the code's words, such as "where do we handle login?" when the code says `session`, can miss. The measurements below show this is the main remaining gap. They also show that most misses on the eval questions would not be fixed by embeddings either.
 

@@ -8,13 +8,19 @@ import urllib.request
 
 MODEL = "qwen2.5-coder:7b"  # The default, and the model the evals were tuned and measured on.
 MODEL_NAME = re.compile(r"[\w.:/@-]{1,200}")
+MAX_RESPONSE_BYTES = 2_000_000
+STUB_MIN_BYTES = 400
+PROMPT_BUDGET = 12_000  # Default conversation budget in UTF-8 bytes; --prompt-budget changes it.
 
 
 def cloud_name(name):
     """Ollama names cloud-backed models with a cloud tag; CodeHaven never sends code to them."""
     return name.endswith(("-cloud", ":cloud"))
-MAX_RESPONSE_BYTES = 2_000_000
-STUB_MIN_BYTES = 400
+
+
+def read_limit(model):
+    """The most bytes of one file to put in a prompt: half the model's budget, so the rest of the conversation fits."""
+    return max(4000, getattr(model, "prompt_budget", PROMPT_BUDGET) // 2)
 
 
 class InvalidReply(ValueError):
@@ -34,7 +40,7 @@ class RepetitionGuard:
     """Stop a final answer that keeps repeating the same phrase, as small models can at temperature 0.
 
     Checked on every streamed piece, so the window slides across a loop's shared phrase even when
-    the surrounding words drift. A global repeat penalty is avoided because edits must copy text exactly.
+    the surrounding words drift. A global repeat penalty is avoided because answers quote code, which must be copied exactly.
     """
     WINDOW, TIMES, DISTINCT = 60, 3, 8
 
@@ -123,7 +129,7 @@ def response_metrics(result):
             metrics[label] = value
     duration = result.get("eval_duration")
     if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0 and "generated_tokens" in metrics:
-        metrics["tokens_per_second"] = round(metrics["generated_tokens"] / (result["eval_duration"] / 1e9), 2)
+        metrics["tokens_per_second"] = round(metrics["generated_tokens"] / (duration / 1e9), 2)
     if metrics and "cached_tokens" not in metrics:
         metrics["cached_tokens"] = None
     return metrics
@@ -151,7 +157,7 @@ def stub(message):
                                   "Read or search again if you need it.]"}
 
 
-def compact_messages(messages, budget=12_000):
+def compact_messages(messages, budget=PROMPT_BUDGET):
     """Keep a stable prefix until bounded history requires compaction.
 
     Preserve system instructions and the original task. First replace older tool results
@@ -202,7 +208,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class Ollama:
     # Waiting on a local model is normal: loading plus prompt processing alone can take minutes on a busy machine.
     def __init__(self, model=MODEL, endpoint="http://127.0.0.1:11434", timeout=600,
-                 max_output_tokens=1024, prompt_budget=12_000):
+                 max_output_tokens=1024, prompt_budget=PROMPT_BUDGET):
         if not 256 <= max_output_tokens <= 8192:
             raise ValueError("--max-output-tokens must be between 256 and 8192")
         if not 8000 <= prompt_budget <= 64_000:
@@ -349,8 +355,7 @@ class Ollama:
         self.last_metrics = response_metrics(result)
         if result.get("done_reason") == "length":
             raise InvalidReply("Model reached the response token limit; no partial action was executed. "
-                               "Use edit with smaller SEARCH/REPLACE blocks or a shorter answer, "
-                               "or increase --max-output-tokens.")
+                               "Give a shorter answer, or increase --max-output-tokens.")
         try:
             return json.loads(result["message"]["content"])
         except (KeyError, TypeError, json.JSONDecodeError) as exc:

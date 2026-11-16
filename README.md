@@ -4,9 +4,9 @@
 
 ![CodeHaven: working locally, with offline coding, privacy, and no API fees.](docs/assets/codehaven-working-preview.png)
 
-**CodeHaven helps you understand a codebase, entirely offline.** Open it in your browser, point it at a project, and ask how something works, where something is used, or what a file does. Answers cite the exact lines they rely on, and one click shows those lines. It runs on a local Ollama model (`qwen2.5-coder:7b` by default), so your code never leaves your computer and there are no API fees.
+**CodeHaven helps you understand a codebase, entirely offline.** Open it in your browser, point it at a project, and ask how something works, where something is used, or what a file does. Answers cite the exact lines they rely on, and one click shows those lines. For one file or a group of files it can also draw a structure map and write study flashcards, and it remembers checked answers between sessions. It runs on a local Ollama model (`qwen2.5-coder:7b` by default), so your code never leaves your computer and there are no API fees.
 
-> **CodeHaven is read-only.** It reads, searches, and explains, and it never changes, creates, or deletes your files. Ask it to fix something and it explains what to change and where, with cited lines and the new code, and leaves the edit to you. No code path in this version writes files.
+> **CodeHaven is read-only.** It reads, searches, and explains, and it never changes, creates, or deletes your files. Ask it to fix something and it explains what to change and where, with cited lines and the new code, and leaves the edit to you. No code path in this version writes inside your project; the only file CodeHaven keeps is its own memory of checked answers, in `~/CodeHaven/memory`, which `--no-remember` turns off.
 
 ![The CodeHaven page: a repository and model chosen in the sidebar, and an answer that explains how to fix Store.low_stock, citing inventory/store.py:27-29.](docs/assets/codehaven-gui.png)
 
@@ -42,20 +42,39 @@ codehaven --gui
 
 1. **Pick a repository.** Type its path or click **Browse…** (Git repositories are marked), then click **Index**. Indexing a typical project takes a few seconds, and the page shows how many files it indexed. Recent repositories are listed for one-click reopening.
    **Or upload a single file.** No folder needed for a quick question: click **Upload a file…** or drop a file anywhere on the page. Any UTF-8 text file up to 64 KB works, and every question is about that file, so "What does this file do?" works without naming it. The file is sent only to the local server, which reads a copy kept in a private temporary folder and deletes it when you open something else or stop the server; your original file is never touched. Hidden files such as `.env`, and names matched by `--exclude`, are refused.
+   **Or download a GitHub repository (opt-in).** Start with `codehaven --gui --allow-clone` and the sidebar shows a box for an address such as `github.com/owner/repository`. This is the only time CodeHaven uses the internet, and only when you click **Download and index**: git on your computer downloads the latest snapshot (no history, tags, submodules, or Git LFS files; stopped after 3 minutes or 500 MB) into `~/CodeHaven/repos/owner/repository` (change it with `--clone-dir`). Nothing of yours is uploaded. The copy stays on your computer, so later it opens offline from **Recent**, and asking for the same address again opens it without downloading. Without `--allow-clone` the box is hidden, the server refuses to clone, and CodeHaven stays fully offline.
+   **Private repositories.** CodeHaven never asks for, sees, or stores a GitHub password or token, and refuses addresses that contain one. A private repository downloads only if git on this computer is already signed in to an account that can read it: a credential helper (for example after `gh auth login`), or an SSH key with a `git@github.com:owner/repository.git` address. git is not allowed to prompt for a password or passphrase. Otherwise, clone it yourself with your usual tools and index the folder.
 2. **Pick a model.** The sidebar lists the chat models installed in Ollama on this computer, with `qwen2.5-coder:7b` selected when it is installed. That default is the model all of CodeHaven's tests were tuned and measured on; other models may answer differently, and the first answer after switching is slower while the model loads. Cloud-backed and embedding-only models are never offered.
 3. **Ask questions.** Answers stream in as they are written. Follow-up questions see your earlier questions and answers, and **New chat** starts over. Try "Explain this project", "Which function calls `checkout_total`?", or "Explain `src/app.py`".
 4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat.
 5. **See how it got there.** Each answer can show the steps CodeHaven took. If a citation could not be checked against what was actually read, a yellow **Unverified** box says so.
+6. **Study one file or a group of files.** The tabs above the chat add two study aids. Click **Choose files…** to tick the files they are about; with an uploaded file, that file is used.
+   - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, and TypeScript; up to 40 files per map.
+   - **Flashcards** asks the local model for question-and-answer cards, 3 to 6 per file for up to 8 files, one file at a time. Click a card or press Space to turn it over, use the arrow keys to move, and **Shuffle** or **Copy all as text** when you want. Each answer links to the lines it is about; those line numbers are looked up in the file from the name the model gave, so they are never invented. A card whose named part cannot be found says so.
 
 Tips for good answers: name files and functions exactly (`Store.low_stock`, not "the stock function"), and ask one thing at a time.
 
 **How follow-up memory works.** Each new question is sent with a short record of the conversation, not the whole chat, so the model keeps room for the code itself. The last two answers are kept nearly whole (up to 1,000 characters each), because follow-ups such as "and what does *it* return?" refer to them. Up to six older questions are kept as the question plus the first sentence of its answer. The whole record stays under about 3 KB, a quarter of the default prompt budget; the oldest questions are dropped first. The file paths and line ranges found so far are also carried forward, so follow-ups can cite them without searching again. Detailed tool output, such as file text read for an earlier question, is not carried over; the model reads it again if needed. The sidebar shows how many earlier questions are remembered. **New chat**, or reloading the page, starts with an empty memory; start one whenever you change topic, because an old topic can steer a new answer.
 
-**Private and offline by design.** The page is served from `127.0.0.1` only and loads nothing from the internet: its Content-Security-Policy blocks any outside script, style, or font. Requests must carry a secret token from the link printed in the terminal and name this machine in their Host header, so other websites open in your browser cannot use the server to read your files. The page never runs tests. Only the list of recent repositories is kept, in your browser's local storage.
+**Private and offline by design.** The page is served from `127.0.0.1` only and loads nothing from the internet: its Content-Security-Policy blocks any outside script, style, or font. Requests must carry a secret token from the link printed in the terminal and name this machine in their Host header, so other websites open in your browser cannot use the server to read your files. Only with `--allow-clone`, and only when you ask, does the server reach the internet, to download a GitHub repository. The page never runs tests. Only the list of recent repositories is kept, in your browser's local storage.
 
-Options: `--workspace /path/to/repo` indexes a repository at startup, `--model NAME` picks the starting model, `--port 8737` sets a fixed port, and `--no-browser` prints the link instead of opening it. Ctrl+C in the terminal stops the server.
+Options: `--workspace /path/to/repo` indexes a repository at startup, `--model NAME` picks the starting model, `--port 8737` sets a fixed port, `--no-browser` prints the link instead of opening it, and `--allow-clone` (with optional `--clone-dir FOLDER`) turns on downloading GitHub repositories. Ctrl+C in the terminal stops the server.
 
 If every answer takes a minute or more, another program is probably using a different Ollama model at the same time; see [Local inference speed](#local-inference-speed).
+
+## Long-term memory
+
+CodeHaven keeps answers about a repository on this computer and uses them again in later sessions, in the browser page and in the terminal. It is on by default; start with `--no-remember` and nothing is saved to disk:
+
+```bash
+codehaven --gui --no-remember
+```
+
+- **What is saved.** Only answers that passed the answer checks and cite lines of code. Unverified answers, and answers about an uploaded file, are never saved.
+- **Where.** One file per repository in `~/CodeHaven/memory` (change it with `--memory-dir`), readable by your user only. Nothing is written inside the repository, and nothing leaves the computer.
+- **When it is used.** A new question brings back at most two saved answers that share its key words, shown to the model as notes from earlier sessions.
+- **When it is dropped.** Each saved answer records a fingerprint of the files it cites. If any of them has changed, the answer is deleted instead of being trusted. Up to 200 answers are kept per repository; the oldest go first.
+- **Forgetting.** Click **Forget this repository** in the page's sidebar, or run `codehaven --forget --workspace ~/dev/project`.
 
 ## Use it from the terminal
 
@@ -133,6 +152,9 @@ Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/
 - Searches the project for code names in a question, such as `apply_discount` or `applyCoupon`, before the model's first step, and shows each match with the function it is in. Left alone, the model often answered "who calls X?" from the definition without searching.
 - Answers questions and change requests in a stricter format: an answer plus up to 10 points. Each point names a part of the code: a function, class, `Class.method`, variable, route such as `/health`, `imports`, a whole file, or a line such as a table row. CodeHaven finds that part's real lines and prints `path:start-end` from them, because small models describe code well but make up line numbers. Python files are parsed, never run; other names match the first line that mentions them. A point naming a file beside the wrong folder is matched to the one file with that name. A range is narrowed to the lines the model actually saw. A name that cannot be found is shown as not found and flagged. Explaining a named file limits the overview to a short paragraph.
 - Search results name the enclosing function or class of each match and mark definitions.
+- Draws a structure map of one file (its parts and which call which) or of several files (which imports which) by parsing the code, without the model.
+- Writes flashcards about chosen files with the local model, and looks up the lines each answer is about instead of trusting the model's numbers.
+- Remembers checked, cited answers per repository between sessions, and deletes a saved answer as soon as a file it cites changes.
 - Runs unittest or pytest in isolated Docker containers after approval, with networking disabled, read-only project snapshots, a 30-second timeout, and bounded output. Tests cannot change your project.
 - Keeps long tasks within the prompt budget by first replacing older tool results and file contents with one-line stubs, oldest first, such as `Tool result for read big.py … [Older result compacted: 9,412 bytes omitted]`. Older messages are dropped only if that is not enough.
 - Limits reads to 64 KB per file and tasks to 12 steps by default (maximum 30).
@@ -254,7 +276,7 @@ CodeHaven asks for approval before each run. Tests receive a filtered, read-only
 
 CodeHaven is read-only, but its file tools are not an OS sandbox: they rely on path checks, which are not hardened against hostile filesystem races. Avoid moving files or directories around while it runs. It runs only the fixed test commands described above and cannot accept arbitrary commands or install dependencies.
 
-Hidden files are skipped, but visible files can still contain secrets. Only point CodeHaven at projects you intend to expose to your local model. Conversation context accumulates within a task. Compaction keeps it within `--prompt-budget`, but stubbed results must be read again if the model needs them. Sessions remember up to eight recent questions, with older answers reduced to their first sentence, and the cited locations found so far. Nothing is saved to disk between sessions. Model prose is untrusted and may make unsupported claims, so read the cited lines.
+Hidden files are skipped, but visible files can still contain secrets. Only point CodeHaven at projects you intend to expose to your local model. Conversation context accumulates within a task. Compaction keeps it within `--prompt-budget`, but stubbed results must be read again if the model needs them. Sessions remember up to eight recent questions, with older answers reduced to their first sentence, and the cited locations found so far. Between sessions, only long-term memory's saved answers are kept on disk, and `--no-remember` turns that off (see Long-term memory). Model prose is untrusted and may make unsupported claims, so read the cited lines.
 
 ## Development
 

@@ -7,7 +7,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from offline_agent.agent import run
 from offline_agent.cli import main
 from offline_agent.knowledge import KnowledgeBase
 from offline_agent.workspace import Workspace

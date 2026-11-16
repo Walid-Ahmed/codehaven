@@ -10,7 +10,7 @@ from langsmith import tracing_context
 
 from .test_runner import DEFAULT_IMAGE, command, run_tests
 from .evidence import NEGATED_EDIT, retain, discovery_task, check_answer, inventory
-from .model import InvalidReply, RepeatedAnswer, compact_messages
+from .model import PROMPT_BUDGET, InvalidReply, RepeatedAnswer, compact_messages, read_limit
 from .workspace import line_range, sections, symbol_lines
 
 # Read-only by design: no action can create, change, or delete a file.
@@ -197,6 +197,8 @@ def named_files(task, files):
         if len(found) == PRELOAD_FILES:
             break
     return found
+
+
 REPEAT_NOTE = "[Answer stopped when it began repeating itself; only the text before the repetition is kept.]"
 LIMIT_NOTE = "[Answer reached its length limit; it ends at its last complete sentence.]"
 
@@ -212,6 +214,8 @@ def trim_at_limit(text, limit):
     if end > 0:
         return text[:end + 1].rstrip(), True
     return text[:text.rstrip().rfind(" ")].rstrip() + " …" if " " in text.strip() else text, True
+
+
 CORRECTION = ("Your previous reply was invalid: {}. No tool ran. Reply again with one JSON object containing exactly "
               "action, path, content, and message as strings, where action is one of " + ", ".join(ACTIONS) + ".")
 
@@ -436,7 +440,7 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
         """True when this exact action already ran and its result is still in the model's view."""
         key = action_key(reply)
         try:
-            visible = compact_messages(state["messages"], getattr(model, "prompt_budget", 12_000))
+            visible = compact_messages(state["messages"], getattr(model, "prompt_budget", PROMPT_BUDGET))
         except ValueError:
             visible = state["messages"]
         for index in range(len(visible) - 1, -1, -1):
@@ -613,7 +617,7 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
         limited = state.get("evidence_limited", False)
         reply = state["reply"]
         # Page long files so a read fits the conversation instead of being silently truncated by compaction.
-        limit = max(4000, getattr(model, "prompt_budget", 12_000) // 2)
+        limit = read_limit(model)
         try:
             text, start, end, total = workspace.page(reply["path"], reply["content"], limit)
             if line_range(reply["content"]) is None and end >= total:
@@ -731,14 +735,21 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
     return graph.compile()
 
 
-def run(model, workspace, task, **options):
-    """Run one task and return its exit code: 0 finished, 2 incomplete or unverified."""
+def run(model, workspace, task, *, memory=None, **options):
+    """Run one task and return its exit code: 0 finished, 2 incomplete or unverified.
+
+    With a Memory, saved answers from earlier sessions are recalled and a checked answer is saved.
+    """
+    if memory is not None:
+        return Session(model, workspace, memory=memory, **options).ask(task)
     return run_state(model, workspace, task, **options)["exit_code"]
 
 
 def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowledge=None,
-              test_options=None, output=print, stream=None, history="", carried_evidence=(), focus_file=None):
+              test_options=None, output=print, stream=None, history="", carried_evidence=(), focus_file=None, notes=""):
     """Run one task and return the final graph state. history and carried_evidence come from a Session.
+
+    notes are answers recalled from long-term memory, shown before the session's own history.
 
     focus_file names the file every task is about, such as a file uploaded in the GUI: it is preloaded even
     when the task does not name it.
@@ -755,8 +766,10 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
             break
         selected.append(name)
         size += len(name.encode()) + 1
-    earlier = (f"Earlier in this session (answers may be outdated if files changed since):\n{history}\n\nCurrent task: "
-               if history else "")
+    earlier = ((f"Notes saved in earlier sessions about this repository (the files they cite have not changed since; "
+                f"use them only where they help with the current task):\n{notes}\n\n" if notes else "")
+               + (f"Earlier in this session (answers may be outdated if files changed since):\n{history}\n\n" if history else ""))
+    earlier += "Current task: " if earlier else ""
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": earlier + task + f"\nWorkspace path sample ({len(selected)} of {len(files)} listed files; use search/read/retrieve for more):\n" +
                  "\n".join(selected)}]
@@ -784,7 +797,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 evidence_limited |= truncated
         # Line numbers help citations; nothing is ever edited, so files need not stay byte-exact.
         numbered = kind in ("question", "change")
-        limit = (max(4000, getattr(model, "prompt_budget", 12_000) // 2)
+        limit = (read_limit(model)
                  - (len(FINISH_NOW.encode() + ANSWER_FROM_PRELOAD.encode()) + 2 if numbered else 0)) // max(1, len(names))
         for name in names:
             try:
@@ -838,14 +851,18 @@ class Session:
     "and what does it return?" refer to them, while older ones keep only their question and first
     sentence. The whole record stays under HISTORY_BYTES, so it never crowds the code out of a
     12 KB prompt; the oldest entries go first.
+
+    With a Memory (opt-in), answers that passed their checks are also saved to disk, and relevant ones whose
+    cited files are unchanged are shown again in later sessions. saved tells whether the last answer was kept.
     """
     TURNS, RECENT = 8, 2
     QUESTION_BYTES, ANSWER_BYTES = 300, 1000
     OLDER_QUESTION_BYTES, OLDER_ANSWER_BYTES = 160, 200
     HISTORY_BYTES = 3200
 
-    def __init__(self, model, workspace, *, knowledge=None, **options):
+    def __init__(self, model, workspace, *, knowledge=None, memory=None, **options):
         self.model, self.workspace, self.knowledge, self.options = model, workspace, knowledge, options
+        self.memory, self.saved = memory, False
         self.reset()
 
     def reset(self):
@@ -876,11 +893,19 @@ class Session:
     def ask(self, task):
         if self.turns and self.knowledge is not None:
             self.knowledge.refresh()  # Pick up files changed between questions.
+        notes = self.memory.recall(task, skip=[question for question, _ in self.turns]) if self.memory else []
+        evidence = self.evidence
+        if notes:
+            self.options.get("output", print)(f"Recalled {len(notes)} saved answer{'s' if len(notes) != 1 else ''} "
+                                              "from earlier sessions; the files they cite have not changed.")
+            evidence, _ = retain(evidence, self.memory.evidence(notes))
         state = run_state(self.model, self.workspace, task, knowledge=self.knowledge, history=self.history(),
-                          carried_evidence=self.evidence, **self.options)
+                          carried_evidence=evidence, notes=self.memory.text(notes) if notes else "", **self.options)
         reply = state.get("reply") or {}
         answer = (reply.get("content") or reply.get("message") or "") if reply.get("action") == "finish" else ""
         self.turns = (self.turns + [(task, answer or "(no final answer)")])[-self.TURNS:]
         self.evidence = state.get("search_evidence", [])
         self.last_state = state
+        # Only an answer that passed its checks is worth keeping for another day.
+        self.saved = bool(self.memory and answer and state["exit_code"] == 0 and self.memory.add(task, answer))
         return state["exit_code"]

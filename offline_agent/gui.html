@@ -103,6 +103,53 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
 .composer textarea { resize: none; min-height: 44px; max-height: 200px; }
 .composer .hint { max-width: 860px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
 
+.tabs { display: flex; gap: 4px; background: var(--panel-2); border-radius: 10px; padding: 3px; }
+.tabs button { border: 0; background: none; padding: 5px 12px; border-radius: 7px; font-size: 13px; }
+.tabs button[aria-pressed=true] { background: var(--panel); font-weight: 600; box-shadow: 0 0 0 1px var(--line); }
+.view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.study-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 22px; border-bottom: 1px solid var(--line); background: var(--panel); font-size: 13px; }
+.study-bar .chosen { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
+.study-bar .chosen.none { font-family: var(--sans); color: var(--muted); }
+.study-bar .spacer { flex: 1; }
+.study-bar select { width: auto; padding: 5px 8px; }
+.study-bar label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.study-status { padding: 10px 22px 0; font-size: 13px; color: var(--muted); }
+.study-status.error { color: var(--error); }
+.map-scroll { flex: 1; overflow: auto; padding: 14px 22px 22px; }
+.map-scroll svg { display: block; }
+.map-scroll .node { cursor: pointer; }
+.map-scroll .node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+.map-scroll .node.class rect, .map-scroll .node.file rect { stroke: var(--accent); }
+.map-scroll .node.ghost { cursor: default; }
+.map-scroll .node.ghost rect { fill: var(--panel-2); stroke-dasharray: 4 3; }
+.map-scroll .node:focus-visible rect, .map-scroll .node:hover rect { stroke: var(--accent); stroke-width: 2; }
+.map-scroll .node:focus { outline: none; }
+.map-scroll .node .label { fill: var(--text); font: 600 12px var(--mono); }
+.map-scroll .node .sub { fill: var(--muted); font: 11px var(--sans); }
+.map-scroll .edge { fill: none; stroke: var(--muted); stroke-width: 1.3; }
+.map-scroll .edge.back { stroke-dasharray: 5 4; }
+.map-scroll .arrow { fill: var(--muted); }
+.map-scroll svg.focus .edge:not(.hot) { opacity: .12; }
+.map-scroll svg.focus .node:not(.hot) { opacity: .4; }
+.map-scroll .edge.hot { stroke: var(--accent); stroke-width: 2; }
+.cards-body { flex: 1; overflow-y: auto; padding: 18px 22px 22px; }
+.deck { max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.flashcard { min-height: 220px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px 26px; display: flex; flex-direction: column; gap: 10px; cursor: pointer; overflow-wrap: anywhere; }
+.flashcard:hover, .flashcard:focus-visible { border-color: var(--accent); outline: none; }
+.flashcard.answer { background: var(--accent-soft); }
+.flashcard .side { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.flashcard .text { font-size: 18px; line-height: 1.45; margin: auto 0; }
+.flashcard .text code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 15px; }
+.flashcard .source { font-size: 13px; color: var(--muted); min-height: 20px; }
+.deck-nav { display: flex; align-items: center; gap: 10px; }
+.deck-nav .count { flex: 1; text-align: center; color: var(--muted); font-size: 13px; }
+.deck-tools { display: flex; gap: 8px; justify-content: center; }
+.deck-tools button { font-size: 13px; }
+.picker-filter { flex: 1; }
+.modal .list label { display: flex; gap: 8px; align-items: center; padding: 5px 10px; border-radius: 6px; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; cursor: pointer; }
+.modal .list label:hover { background: var(--panel-2); }
+.modal footer .note { flex: 1; font-size: 12px; color: var(--muted); align-self: center; }
+
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; z-index: 10; }
 .overlay.open { display: block; }
 .modal { position: fixed; z-index: 11; top: 8vh; left: 50%; transform: translateX(-50%); width: min(640px, calc(100vw - 32px)); max-height: 80vh; display: none; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
@@ -129,7 +176,9 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
   .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
   .main { height: auto; min-height: 70vh; }
   .messages { padding: 16px; }
-  .composer, .topbar { padding-left: 16px; padding-right: 16px; }
+  .composer, .topbar, .study-bar, .study-status { padding-left: 16px; padding-right: 16px; }
+  .topbar { flex-wrap: wrap; }
+  .map-scroll, .cards-body { padding-left: 16px; padding-right: 16px; }
 }
 </style>
 </head>
@@ -151,7 +200,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M3 3l18 18"/><path d="M8.5 8.6A5 5 0 0 0 6.6 12 4 4 0 0 0 7 20h10.5M20.4 17.6A3.5 3.5 0 0 0 17.5 12h-.6a6 6 0 0 0-7-5.8"/>
       </svg>
-      <div><strong>Offline by design</strong><span>Your code never leaves this computer. No internet, no API fees, and CodeHaven never changes your files.</span></div>
+      <div><strong>Offline by design</strong><span id="offline-text">Your code never leaves this computer. No internet, no API fees, and CodeHaven never changes your files.</span></div>
     </div>
     <div class="section">
       <h2>Repository</h2>
@@ -161,6 +210,12 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
         <button id="index" class="primary">Index</button>
       </div>
       <div class="index-status" id="index-status">Choose a folder, then index it to start chatting.</div>
+    </div>
+    <div class="section" id="clone-section" hidden>
+      <h2>Or a GitHub repository</h2>
+      <input type="text" id="github" placeholder="github.com/owner/repository" autocomplete="off" spellcheck="false" aria-label="GitHub repository address">
+      <div class="row"><button id="clone">Download and index</button></div>
+      <div class="index-status" id="clone-status">Downloads the latest version once; after that it opens offline from this computer. Nothing of yours is uploaded. Private repositories work only if git here is already signed in to GitHub: CodeHaven never asks for your password.</div>
     </div>
     <div class="section">
       <h2>Or a single file</h2>
@@ -182,16 +237,27 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
       <button id="new-chat" disabled>New chat</button>
       <div class="index-status" id="memory-status">Follow-up questions remember up to 8 earlier questions. Start a new chat when you change topic.</div>
     </div>
-    <div class="privacy">Runs on this computer with <span id="model-name">a local model</span>. Nothing is sent to the internet. CodeHaven only reads your code: it never changes, creates, or deletes your files.</div>
+    <div class="section" id="saved-section" hidden>
+      <h2>Long-term memory</h2>
+      <div class="index-status" id="saved-status"></div>
+      <div class="row"><button id="forget" disabled>Forget this repository</button></div>
+    </div>
+    <div class="privacy">Runs on this computer with <span id="model-name">a local model</span>. <span id="privacy-network">Nothing is sent to the internet.</span><span id="privacy-saved"></span> CodeHaven only reads your code: it never changes, creates, or deletes your files.</div>
   </aside>
 
   <main class="main">
     <div class="topbar">
       <div class="repo empty" id="repo-label">No repository indexed</div>
+      <div class="tabs" role="group" aria-label="View">
+        <button id="tab-chat" aria-pressed="true">Chat</button>
+        <button id="tab-map" aria-pressed="false" disabled>Map</button>
+        <button id="tab-cards" aria-pressed="false" disabled>Flashcards</button>
+      </div>
       <div class="spacer"></div>
       <span class="pill" id="index-pill" hidden></span>
-      <span class="pill offline" title="CodeHaven runs only on this computer and never connects to the internet">Offline</span>
+      <span class="pill offline" id="offline-pill" title="CodeHaven runs only on this computer and never connects to the internet">Offline</span>
     </div>
+    <div class="view" id="view-chat">
     <div class="messages" id="messages">
       <div class="messages-inner" id="messages-inner">
         <div class="empty-state" id="empty">
@@ -208,6 +274,44 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
       </div>
       <div class="hint">Enter to send, Shift+Enter for a new line. Name files and functions exactly for the best answers.</div>
     </div>
+    </div>
+    <div class="view" id="view-map" hidden>
+      <div class="study-bar">
+        <span class="chosen none" data-chosen></span>
+        <button data-choose>Choose files…</button>
+        <button id="map-back" hidden>← All files</button>
+        <span class="spacer"></span>
+        <button id="map-draw" class="primary">Draw map</button>
+      </div>
+      <div class="study-status" id="map-status">Choose one file to see its functions and classes and which call which, or several files to see how they import each other. The map is drawn from the code itself, without the model, so it is instant.</div>
+      <div class="map-scroll"><svg id="map-svg" role="img" aria-label="Structure map" width="0" height="0"></svg></div>
+    </div>
+    <div class="view" id="view-cards" hidden>
+      <div class="study-bar">
+        <span class="chosen none" data-chosen></span>
+        <button data-choose>Choose files…</button>
+        <span class="spacer"></span>
+        <label>Cards per file <select id="cards-count"></select></label>
+        <button id="cards-make" class="primary">Make flashcards</button>
+      </div>
+      <div class="study-status" id="cards-status">Choose one or more files and the local model writes question-and-answer cards about them. Each answer links to the lines it is about. One file takes about as long as one chat answer.</div>
+      <div class="cards-body">
+        <div class="deck" id="deck" hidden>
+          <div class="flashcard" id="flashcard" role="button" tabindex="0" aria-live="polite">
+            <span class="side" id="card-side"></span>
+            <div class="text" id="card-text"></div>
+            <div class="source" id="card-source"></div>
+          </div>
+          <div class="deck-nav">
+            <button id="card-prev">← Previous</button>
+            <span class="count" id="card-count"></span>
+            <button id="card-flip" class="primary">Show answer</button>
+            <button id="card-next">Next →</button>
+          </div>
+          <div class="deck-tools"><button id="cards-shuffle">Shuffle</button><button id="cards-copy">Copy all as text</button></div>
+        </div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -216,6 +320,11 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
   <header><button id="up" aria-label="Parent folder">↑</button><div class="where" id="browser-path"></div></header>
   <div class="list" id="browser-list"></div>
   <footer><button id="browser-cancel">Cancel</button><button id="browser-use" class="primary">Use this folder</button></footer>
+</div>
+<div class="modal" id="picker" role="dialog" aria-modal="true" aria-label="Choose files">
+  <header><input type="text" class="picker-filter" id="picker-filter" placeholder="Filter files, such as pricing or tests/" autocomplete="off" spellcheck="false" aria-label="Filter files"></header>
+  <div class="list" id="picker-list"></div>
+  <footer><span class="note" id="picker-note"></span><button id="picker-clear">Clear</button><button id="picker-done" class="primary">Done</button></footer>
 </div>
 <div class="drawer" id="drawer" role="dialog" aria-label="Cited code">
   <header><div class="where" id="drawer-title"></div><button id="drawer-close">Close</button></header>
@@ -255,6 +364,26 @@ async function api(path, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || response.statusText);
   return data;
+}
+
+// Events of a streamed reply: the server sends one JSON object per line.
+async function* streamEvents(path, body) {
+  const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN},
+                                      body: JSON.stringify(body)});
+  if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || response.statusText); }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, {stream: true});
+    let newline;
+    while ((newline = buffer.indexOf("\n")) >= 0) {
+      const raw = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
+      if (raw.trim()) yield JSON.parse(raw);
+    }
+  }
 }
 
 // ---- Safe rendering: escape everything first, then add a small set of markup.
@@ -327,6 +456,8 @@ function setIndexed(summary) {
   indexed = Boolean(summary.repository || summary.upload);
   uploaded = Boolean(summary.upload);
   $("model-name").textContent = summary.model || "a local model";
+  setClone(Boolean(summary.clone));
+  setSaved(summary);
   if (!indexed) return;
   $("repo-label").classList.remove("empty");
   $("index-pill").hidden = false;
@@ -362,7 +493,7 @@ async function indexRepository() {
   status.textContent = "Indexing… this takes a few seconds for most repositories.";
   try {
     const summary = await api("/api/open", {method: "POST", body: JSON.stringify({path})});
-    clearChat();
+    clearChat(); resetStudy();
     setIndexed(summary);
     remember(summary.repository);
   } catch (error) {
@@ -372,6 +503,63 @@ async function indexRepository() {
     busy = false; updateComposer();
   }
 }
+
+// ---- Long-term memory, unless the server was started with --no-remember: checked answers kept on this computer.
+let remembering = false, savedCount = 0;
+function setSaved(summary, kept) {
+  remembering = Boolean(summary.remember ?? remembering);
+  savedCount = summary.saved || 0;
+  $("saved-section").hidden = !remembering;
+  if (!remembering) return;
+  $("privacy-saved").textContent = " Answers that pass their checks are saved on this computer; start with --no-remember to save nothing.";
+  const answers = `${savedCount} saved answer${savedCount === 1 ? "" : "s"}`;
+  $("saved-status").textContent = uploaded ? "Uploaded files are never remembered."
+    : !indexed ? "On: checked answers are saved on this computer and used again in later sessions."
+    : `${answers} for this repository${kept ? " (the last one was just saved)" : ""}. A saved answer is used again only while the files it cites are unchanged, and only answers that passed their checks are saved.`;
+  $("forget").disabled = busy || uploaded || !savedCount;
+}
+$("forget").addEventListener("click", async () => {
+  if (!confirm(`Delete the ${savedCount} saved answer${savedCount === 1 ? "" : "s"} for this repository? This cannot be undone.`)) return;
+  try { setSaved(await api("/api/forget", {method: "POST", body: "{}"})); } catch (error) { alert(error.message); }
+});
+
+// ---- GitHub, only when the server was started with --allow-clone: git on this computer downloads it once.
+let cloneOn = false;
+function setClone(on) {
+  if (on === cloneOn) return;
+  cloneOn = on;
+  $("clone-section").hidden = !on;
+  if (!on) return;
+  $("offline-pill").textContent = "Offline · GitHub download on";
+  $("offline-pill").title = "CodeHaven connects to the internet only to download a GitHub repository you ask for. Nothing is uploaded.";
+  $("offline-text").textContent = "Your code and questions never leave this computer. Downloading from GitHub is on (--allow-clone): it uses the internet only when you click Download, and uploads nothing.";
+  $("privacy-network").textContent = "Only GitHub downloads you ask for use the internet; nothing is sent.";
+}
+async function cloneRepository() {
+  const address = $("github").value.trim();
+  if (!address || busy) return;
+  busy = true; updateComposer();
+  const status = $("clone-status");
+  status.classList.remove("error");
+  status.textContent = "Downloading from GitHub… this can take a minute for large repositories.";
+  try {
+    const summary = await api("/api/clone", {method: "POST", body: JSON.stringify({address})});
+    clearChat(); resetStudy();
+    setIndexed(summary);
+    remember(summary.repository);
+    status.replaceChildren(summary.cloned ? "Downloaded " : "Opened the copy already on this computer of ",
+      Object.assign(document.createElement("strong"), {textContent: summary.source}),
+      summary.cloned ? ". It is kept on this computer and opens offline from Recent." : ", without using the internet.");
+    $("github").value = "";
+  } catch (error) {
+    status.classList.add("error");
+    status.textContent = error.message;
+  } finally {
+    busy = false; updateComposer();
+  }
+}
+$("clone").addEventListener("click", cloneRepository);
+$("github").addEventListener("keydown", (event) => { if (event.key === "Enter") cloneRepository(); });
 
 // ---- One uploaded file, for a quick question without a repository. The file goes only to this local server.
 async function uploadFile(file) {
@@ -390,7 +578,7 @@ async function uploadFile(file) {
                                  {method: "POST", headers: {"Content-Type": "application/octet-stream", "X-CodeHaven-Token": TOKEN}, body: file});
     const summary = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(summary.error || response.statusText);
-    clearChat();
+    clearChat(); resetStudy();
     setIndexed(summary);
   } catch (error) {
     status.classList.add("error");
@@ -439,7 +627,7 @@ async function browse(path) {
   }
 }
 function openBrowser() { $("overlay").classList.add("open"); $("browser").classList.add("open"); browse($("path").value.trim()); }
-function closeOverlays() { for (const id of ["overlay", "browser", "drawer"]) $(id).classList.remove("open"); }
+function closeOverlays() { for (const id of ["overlay", "browser", "picker", "drawer"]) $(id).classList.remove("open"); }
 
 // ---- Cited code.
 async function showCitation(path, start, end) {
@@ -528,6 +716,13 @@ function updateComposer() {
   $("model").disabled = busy;
   $("index").disabled = busy;
   $("upload").disabled = busy;
+  $("clone").disabled = busy;
+  $("forget").disabled = busy || uploaded || !savedCount;
+  $("tab-map").disabled = $("tab-cards").disabled = !indexed;
+  $("map-draw").disabled = !indexed;
+  $("cards-make").disabled = !ready;
+  for (const button of document.querySelectorAll("[data-choose]")) button.hidden = uploaded;
+  showChosen();
   for (const button of $("suggestions").querySelectorAll("button")) button.disabled = !ready;
 }
 function statusText(line) {
@@ -554,33 +749,19 @@ async function ask(question) {
   const timer = setInterval(() => { statusLabel.textContent = `${phase} ${Math.round((Date.now() - started) / 1000)}s`; }, 1000);
   const finish = () => { clearInterval(timer); busy = false; updateComposer(); $("question").focus(); };
   try {
-    const response = await fetch("/api/ask", {method: "POST", headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN},
-                                              body: JSON.stringify({question})});
-    if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || response.statusText); }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "", done = null;
-    while (true) {
-      const {value, done: ended} = await reader.read();
-      if (ended) break;
-      buffer += decoder.decode(value, {stream: true});
-      let newline;
-      while ((newline = buffer.indexOf("\n")) >= 0) {
-        const raw = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
-        if (!raw.trim()) continue;
-        const event = JSON.parse(raw);
-        if (event.type === "log") {
-          logs.push(event.text);
-          const step = event.text.trim().match(/^Step \d+ \(max \d+\): (.*)$/);
-          if (step) phase = statusText(step[0]);
-        } else if (event.type === "text") {
-          streamed += event.text;
-          answer.innerHTML = render(streamed);
-          phase = "Writing the answer…";
-          scrollDown();
-        } else if (event.type === "done" || event.type === "error") {
-          done = event;
-        }
+    let done = null;
+    for await (const event of streamEvents("/api/ask", {question})) {
+      if (event.type === "log") {
+        logs.push(event.text);
+        const step = event.text.trim().match(/^Step \d+ \(max \d+\): (.*)$/);
+        if (step) phase = statusText(step[0]);
+      } else if (event.type === "text") {
+        streamed += event.text;
+        answer.innerHTML = render(streamed);
+        phase = "Writing the answer…";
+        scrollDown();
+      } else if (event.type === "done" || event.type === "error") {
+        done = event;
       }
     }
     status.remove();
@@ -594,6 +775,7 @@ async function ask(question) {
       for (const issue of done.issues) { const item = document.createElement("li"); item.textContent = issue; list.append(item); }
       checks.append(title, list); card.append(checks);
     }
+    setSaved({saved: done.saved}, done.kept);
     $("memory-status").textContent = `Remembering ${done.remembered} earlier question${done.remembered === 1 ? "" : "s"} ` +
       `(up to ${done.memory}). The last two are kept in full, older ones as a short summary. Start a new chat when you change topic.`;
     const shownLines = new Set((done.answer || "").split("\n").map((line) => line.trim()).filter(Boolean));
@@ -633,6 +815,281 @@ $("new-chat").addEventListener("click", async () => {
     $("memory-status").textContent = "New chat: nothing remembered yet. Follow-up questions remember up to 8 earlier questions.";
   } catch (error) { alert(error.message); }
 });
+
+// ---- Views: chat, and two study aids for one file or a group of files.
+function setView(name) {
+  for (const view of ["chat", "map", "cards"]) {
+    $("view-" + view).hidden = view !== name;
+    $("tab-" + view).setAttribute("aria-pressed", String(view === name));
+  }
+}
+for (const view of ["chat", "map", "cards"]) $("tab-" + view).addEventListener("click", () => setView(view));
+
+// ---- The files a map or flashcards are about. An uploaded file is always the choice.
+let selected = [], fileList = null, picking = new Set();
+function showChosen() {
+  const text = uploaded ? $("repo-label").textContent : !selected.length ? "No files chosen"
+    : selected.length === 1 ? selected[0] : `${selected.length} files: ${selected.map((path) => path.split("/").pop()).join(", ")}`;
+  for (const label of document.querySelectorAll("[data-chosen]")) {
+    label.textContent = text;
+    label.title = selected.join("\n");
+    label.classList.toggle("none", !uploaded && !selected.length);
+  }
+}
+function resetStudy() {
+  selected = []; fileList = null; mapData = null; cards = [];
+  drawGraph([], []);
+  $("map-back").hidden = true;
+  $("deck").hidden = true;
+  for (const id of ["map-status", "cards-status"]) { $(id).classList.remove("error"); $(id).textContent = STUDY_HINTS[id]; }
+}
+function showPicker() {
+  const filter = $("picker-filter").value.trim().toLowerCase();
+  const shown = fileList.files.filter((path) => path.toLowerCase().includes(filter));
+  const rows = shown.slice(0, 300).map((path) => {
+    const row = document.createElement("label");
+    const box = Object.assign(document.createElement("input"), {type: "checkbox", checked: picking.has(path)});
+    box.addEventListener("change", () => { if (box.checked) picking.add(path); else picking.delete(path); showPickerNote(); });
+    row.append(box, path);
+    return row;
+  });
+  if (shown.length > rows.length) rows.push(Object.assign(document.createElement("div"), {className: "index-status", textContent: `${shown.length - rows.length} more files: type in the filter to narrow the list.`}));
+  if (!shown.length) rows.push(Object.assign(document.createElement("div"), {className: "index-status", textContent: "No files match."}));
+  $("picker-list").replaceChildren(...rows);
+  showPickerNote();
+}
+function showPickerNote() {
+  const limits = fileList.limits;
+  $("picker-note").textContent = `${picking.size} chosen. A map takes up to ${limits.map} files, flashcards up to ${limits.flashcards}.`;
+}
+async function openPicker() {
+  $("overlay").classList.add("open"); $("picker").classList.add("open");
+  picking = new Set(selected);
+  try {
+    if (!fileList) { $("picker-list").textContent = "Loading…"; fileList = await api("/api/files"); }
+    showPicker();
+    $("picker-filter").focus();
+  } catch (error) {
+    $("picker-list").textContent = error.message;
+  }
+}
+for (const button of document.querySelectorAll("[data-choose]")) button.addEventListener("click", openPicker);
+$("picker-filter").addEventListener("input", () => { if (fileList) showPicker(); });
+$("picker-clear").addEventListener("click", () => { picking.clear(); if (fileList) showPicker(); });
+$("picker-done").addEventListener("click", () => { selected = [...picking]; closeOverlays(); showChosen(); });
+const STUDY_HINTS = {"map-status": $("map-status").textContent, "cards-status": $("cards-status").textContent};
+function studyError(id, message) { $(id).classList.add("error"); $(id).textContent = message; }
+
+// ---- Structure map: boxes and arrows drawn as SVG by this page; nothing is loaded from anywhere.
+const SVG = $("map-svg").namespaceURI;  // Taken from the page, so no web address is written anywhere in it.
+const BOX = {width: 214, height: 46, gapX: 70, gapY: 14, pad: 8};
+let mapData = null;
+function svg(tag, attributes = {}, text) {
+  const element = document.createElementNS(SVG, tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+function shorten(text, width = 27) { return text.length <= width ? text : "…" + text.slice(text.length - width + 1); }
+// Columns from left to right: a box sits one column after the last box that points at it. Arrows that close a
+// loop are drawn dashed and do not move anything, so two files that import each other still fit in a picture.
+function layout(nodes, edges) {
+  const out = new Map(nodes.map((node) => [node.id, []]));
+  for (const edge of edges) out.get(edge.from).push(edge);
+  const state = new Map(), back = new Set();
+  const visit = (id) => {
+    state.set(id, 1);
+    for (const edge of out.get(id)) { if (state.get(edge.to) === 1) back.add(edge); else if (!state.get(edge.to)) visit(edge.to); }
+    state.set(id, 2);
+  };
+  for (const node of nodes) if (!state.get(node.id)) visit(node.id);
+  const column = new Map(nodes.map((node) => [node.id, 0]));
+  for (let round = 0, moved = true; moved && round <= nodes.length; round++) {
+    moved = false;
+    for (const edge of edges) {
+      if (!back.has(edge) && column.get(edge.to) < column.get(edge.from) + 1) { column.set(edge.to, column.get(edge.from) + 1); moved = true; }
+    }
+  }
+  const linked = new Set(edges.flatMap((edge) => [edge.from, edge.to]));
+  const columns = [];
+  for (const node of nodes) if (linked.has(node.id)) (columns[column.get(node.id)] ||= []).push(node);
+  // Order each column by where its callers sit in the column before, which keeps most arrows from crossing.
+  const row = new Map();
+  columns.forEach((list, index) => {
+    if (index) {
+      const weight = (node) => {
+        const rows = edges.filter((edge) => edge.to === node.id && row.has(edge.from)).map((edge) => row.get(edge.from));
+        return rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 1e9;
+      };
+      list.sort((a, b) => weight(a) - weight(b));
+    }
+    list.forEach((node, position) => row.set(node.id, position));
+  });
+  const place = new Map(), step = BOX.height + BOX.gapY;
+  const tallest = Math.max(0, ...columns.map((list) => list.length));
+  columns.forEach((list, index) => list.forEach((node, position) => place.set(node.id, {
+    x: BOX.pad + index * (BOX.width + BOX.gapX), y: BOX.pad + position * step + (tallest - list.length) * step / 2})));
+  // Boxes with no arrows go in a grid underneath.
+  const loose = nodes.filter((node) => !linked.has(node.id));
+  const across = Math.max(3, columns.length), top = BOX.pad + (tallest ? tallest * step + 18 : 0);
+  loose.forEach((node, index) => place.set(node.id, {x: BOX.pad + (index % across) * (BOX.width + 16), y: top + Math.floor(index / across) * step}));
+  return {place, back};
+}
+function drawGraph(nodes, edges) {
+  const picture = $("map-svg");
+  const known = new Set(nodes.map((node) => node.id)), seen = new Set();
+  edges = edges.filter((edge) => {
+    const key = edge.from + "\n" + edge.to;
+    if (edge.from === edge.to || !known.has(edge.from) || !known.has(edge.to) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const {place, back} = layout(nodes, edges);
+  const marker = svg("marker", {id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse"});
+  marker.append(svg("path", {d: "M0 0 10 5 0 10Z", class: "arrow"}));
+  const defs = svg("defs"); defs.append(marker);
+  const lines = edges.map((edge) => {
+    const from = place.get(edge.from), to = place.get(edge.to);
+    const y1 = from.y + BOX.height / 2, y2 = to.y + BOX.height / 2, x1 = from.x + BOX.width;
+    const forward = to.x > from.x;
+    // An arrow that goes back, or stays in its column, leaves and arrives on the right-hand side.
+    const d = forward ? `M${x1} ${y1} C${x1 + 36} ${y1} ${to.x - 36} ${y2} ${to.x} ${y2}`
+      : `M${x1} ${y1} C${x1 + 44} ${y1} ${to.x + BOX.width + 44} ${y2} ${to.x + BOX.width} ${y2}`;
+    const line = svg("path", {d, class: "edge" + (back.has(edge) || !forward ? " back" : ""), "marker-end": "url(#arrow)"});
+    line.append(svg("title", {}, `${edge.from} → ${edge.to}${edge.title ? ": " + edge.title : ""}`));
+    line.dataset.from = edge.from; line.dataset.to = edge.to;
+    return line;
+  });
+  const boxes = nodes.map((node) => {
+    const {x, y} = place.get(node.id);
+    const group = svg("g", {class: `node ${node.kind || ""}${node.ghost ? " ghost" : ""}`, transform: `translate(${x} ${y})`});
+    group.append(svg("title", {}, node.title || node.id), svg("rect", {width: BOX.width, height: BOX.height, rx: 8}),
+                 svg("text", {x: 12, y: 19, class: "label"}, shorten(node.label)), svg("text", {x: 12, y: 36, class: "sub"}, node.sub));
+    const near = new Set([node.id, ...edges.filter((edge) => edge.from === node.id || edge.to === node.id).flatMap((edge) => [edge.from, edge.to])]);
+    const focus = (on) => {
+      picture.classList.toggle("focus", on);
+      for (const line of lines) line.classList.toggle("hot", on && (line.dataset.from === node.id || line.dataset.to === node.id));
+      boxes.forEach((box, index) => box.classList.toggle("hot", on && near.has(nodes[index].id)));
+    };
+    group.addEventListener("mouseenter", () => focus(true));
+    group.addEventListener("mouseleave", () => focus(false));
+    if (node.open) {
+      group.setAttribute("tabindex", "0"); group.setAttribute("role", "button");
+      group.addEventListener("click", node.open);
+      group.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); node.open(); } });
+    }
+    return group;
+  });
+  const places = [...place.values()];
+  picture.setAttribute("width", places.length ? Math.max(...places.map((spot) => spot.x)) + BOX.width + 60 : 0);
+  picture.setAttribute("height", places.length ? Math.max(...places.map((spot) => spot.y)) + BOX.height + BOX.pad : 0);
+  picture.replaceChildren(defs, ...lines, ...boxes);
+  return edges.length;
+}
+function plural(count, word) { return `${count} ${word}${count === 1 ? "" : "s"}`; }
+function showFileMap(file) {
+  const nodes = file.parts.map((part) => ({id: part.name, label: part.name, kind: part.kind, title: `${part.name} · click to see the code`,
+    sub: `${part.kind === "part" ? "" : part.kind + " · "}lines ${part.start}-${part.end}`, open: () => showCitation(file.path, part.start, part.end)}));
+  const calls = drawGraph(nodes, file.parts.flatMap((part) => part.calls.map((name) => ({from: part.name, to: name, title: "calls"}))));
+  $("map-back").hidden = mapData.files.length < 2;
+  $("map-status").textContent = !nodes.length ? `${file.path} has ${plural(file.lines, "line")} but no functions or classes CodeHaven can name, so there is nothing to draw.`
+    : `${file.path}: ${plural(nodes.length, "part")}, ${plural(calls, "call")} between them${file.parts_limited ? " (only the first parts are shown)" : ""}. An arrow points from the caller to what it calls. Click a box to see its code.`;
+}
+function showFilesMap() {
+  const nodes = mapData.files.map((file) => ({id: file.path, label: file.path, kind: "file", title: `${file.path} · click to see inside`,
+    sub: `${plural(file.parts.length, "part")} · ${plural(file.lines, "line")}`, open: () => showFileMap(file)}));
+  nodes.push(...mapData.neighbours.map((path) => ({id: path, label: path, ghost: true, sub: "not chosen", title: `${path} · linked to a chosen file, but not chosen`})));
+  const links = drawGraph(nodes, mapData.links.map((link) => ({from: link.from, to: link.to, title: link.names.length ? "imports " + link.names.join(", ") : "imports it"})));
+  $("map-back").hidden = true;
+  $("map-status").textContent = `${plural(mapData.files.length, "file")}, ${plural(links, "import")}${mapData.limited ? " (limits reached, so some are left out)" : ""}. An arrow points from a file to the file it imports; dashed boxes are files you did not choose. Click a file to see inside it.`;
+}
+async function drawMap() {
+  if (!uploaded && !selected.length) { openPicker(); return; }
+  $("map-status").classList.remove("error");
+  $("map-status").textContent = "Reading the code…";
+  try {
+    mapData = await api("/api/map", {method: "POST", body: JSON.stringify({paths: selected})});
+    if (mapData.files.length === 1 && !mapData.neighbours.length) showFileMap(mapData.files[0]); else showFilesMap();
+  } catch (error) {
+    drawGraph([], []);
+    studyError("map-status", error.message);
+  }
+}
+$("map-draw").addEventListener("click", drawMap);
+$("map-back").addEventListener("click", showFilesMap);
+
+// ---- Flashcards: the local model writes them one file at a time; the lines behind each answer are looked up, not guessed.
+let cards = [], cardAt = 0, cardAnswer = false;
+function showCard() {
+  $("deck").hidden = !cards.length;
+  if (!cards.length) return;
+  const card = cards[cardAt];
+  $("flashcard").classList.toggle("answer", cardAnswer);
+  $("card-side").textContent = cardAnswer ? "Answer" : "Question";
+  $("card-text").innerHTML = inline(cardAnswer ? card.answer : card.question);
+  const where = card.start ? `${card.path}:${card.start}${card.end !== card.start ? "-" + card.end : ""}` : "";
+  $("card-source").innerHTML = !cardAnswer ? esc(card.path) : where ? inline(`See ${where}`) + (card.symbol ? ` (<code>${esc(card.symbol)}</code>)` : "")
+    : esc(`${card.path}: the part this answer names was not found, so check it against the file.`);
+  $("card-count").textContent = `Card ${cardAt + 1} of ${cards.length}`;
+  $("card-flip").textContent = cardAnswer ? "Show question" : "Show answer";
+  $("card-prev").disabled = cardAt === 0;
+  $("card-next").disabled = cardAt === cards.length - 1;
+}
+function moveCard(step) { cardAt = Math.min(cards.length - 1, Math.max(0, cardAt + step)); cardAnswer = false; showCard(); }
+function flipCard() { cardAnswer = !cardAnswer; showCard(); }
+async function makeCards() {
+  if (busy || !indexed) return;
+  if (!uploaded && !selected.length) { openPicker(); return; }
+  busy = true; updateComposer();
+  const status = $("cards-status"), failed = [], started = Date.now();
+  status.classList.remove("error");
+  cards = []; cardAt = 0; cardAnswer = false; showCard();
+  let phase = "Starting…", finished = false;
+  const tick = () => { status.textContent = `${phase} ${Math.round((Date.now() - started) / 1000)}s`; };
+  const timer = setInterval(tick, 1000);
+  tick();
+  try {
+    for await (const event of streamEvents("/api/flashcards", {paths: selected, count: Number($("cards-count").value)})) {
+      if (event.type === "file") { phase = `Writing cards for ${event.path} (file ${event.index} of ${event.of})…`; tick(); }
+      else if (event.type === "cards") { cards.push(...event.cards); showCard(); }
+      else if (event.type === "error") failed.push(`${event.path}: ${event.message}`);
+      else if (event.type === "done") finished = true;
+    }
+    clearInterval(timer);
+    if (!finished) throw new Error("The connection closed before the cards were finished.");
+    status.classList.toggle("error", !cards.length);
+    status.textContent = (cards.length ? `${plural(cards.length, "card")} in ${Math.round((Date.now() - started) / 1000)}s. Click the card, or press Space, to turn it over; the arrow keys move between cards. `
+                                       : "No cards were made. ")
+      + (failed.length ? `Skipped ${failed.join("; ")}` : "");
+  } catch (error) {
+    clearInterval(timer);
+    studyError("cards-status", error.message);
+  } finally {
+    busy = false; updateComposer();
+  }
+}
+$("cards-make").addEventListener("click", makeCards);
+$("flashcard").addEventListener("click", (event) => { if (!event.target.closest("a")) flipCard(); });
+$("card-flip").addEventListener("click", flipCard);
+$("card-prev").addEventListener("click", () => moveCard(-1));
+$("card-next").addEventListener("click", () => moveCard(1));
+$("cards-shuffle").addEventListener("click", () => {
+  for (let i = cards.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cards[i], cards[j]] = [cards[j], cards[i]]; }
+  cardAt = 0; cardAnswer = false; showCard();
+});
+$("cards-copy").addEventListener("click", async () => {
+  const text = cards.map((card) => `Q: ${card.question}\nA: ${card.answer}\n${card.start ? `${card.path}:${card.start}-${card.end}` : card.path}`).join("\n\n");
+  try { await navigator.clipboard.writeText(text); $("cards-copy").textContent = "Copied"; }
+  catch { $("cards-copy").textContent = "Copying is blocked by the browser"; }
+  setTimeout(() => { $("cards-copy").textContent = "Copy all as text"; }, 2000);
+});
+document.addEventListener("keydown", (event) => {
+  if ($("view-cards").hidden || !cards.length || $("overlay").classList.contains("open") || event.target.closest("input, select, textarea, button")) return;
+  if (event.key === " " || event.key === "Enter") { event.preventDefault(); flipCard(); }
+  else if (event.key === "ArrowRight") moveCard(1);
+  else if (event.key === "ArrowLeft") moveCard(-1);
+});
+$("cards-count").replaceChildren(...[3, 4, 5, 6].map((count) => Object.assign(document.createElement("option"), {value: count, textContent: count, selected: count === 5})));
 
 showRecent();
 loadModels();

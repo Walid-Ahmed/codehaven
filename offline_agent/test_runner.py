@@ -10,7 +10,7 @@ import threading
 import uuid
 from pathlib import Path
 
-from .workspace import MAX_BYTES
+from .workspace import MAX_BYTES, MAX_FILES
 
 TIMEOUT = 30
 OUTPUT_LIMIT = 16_000
@@ -74,7 +74,7 @@ def snapshot(workspace, destination, runner):
     if not tests.is_dir():
         raise ValueError('A permitted tests/ directory is required')
     names = workspace.files()
-    if len(names) >= 1000:
+    if len(names) >= MAX_FILES:
         raise ValueError('Snapshot file limit reached; narrow the workspace or add exclusions')
     def is_test(name):
         file = Path(name)

@@ -8,7 +8,9 @@ from .exclusions import Exclusions, IgnoreConfigurationError
 
 EXCLUDED = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build",
             ".aws", ".ssh", ".codex", ".agents"}
-MAX_BYTES = 64_000
+MAX_BYTES = 64_000  # The largest file read, listed, or indexed.
+MAX_FILES = 1000  # The most files one listing returns; callers report the listing as limited at this size.
+MAX_MATCHES, SEARCH_BYTES = 50, 15_800  # Bounds on one search result, so it always fits in a prompt.
 
 
 def line_range(spec):
@@ -180,6 +182,7 @@ class Workspace:
         if not start.is_dir():
             raise ValueError("File listing scope must be a directory")
         found = []
+
         def visible_directory(path):
             try:
                 self.path(path.relative_to(self.root).as_posix())
@@ -203,7 +206,7 @@ class Workspace:
                     raise
                 except (ValueError, OSError):
                     continue
-                if len(found) >= 1000:
+                if len(found) >= MAX_FILES:
                     return found
         return found
 
@@ -214,7 +217,7 @@ class Workspace:
         with target.open("rb") as handle:
             raw = handle.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES or b"\0" in raw:
-            raise ValueError("Only UTF-8 text files up to 64 KB can be read")
+            raise ValueError(f"Only UTF-8 text files up to {MAX_BYTES // 1000} KB can be read")
         return raw.decode("utf-8")
 
     def page(self, name, spec="", limit=MAX_BYTES):
@@ -250,7 +253,7 @@ class Workspace:
             candidates = self.files()
         result = {"query": query, "scope": scope or ".", "literal": True,
                   "matches": [], "files_searched": 0, "files_skipped": 0,
-                  "limit_reached": False, "candidate_limit_reached": len(candidates) >= 1000}
+                  "limit_reached": False, "candidate_limit_reached": len(candidates) >= MAX_FILES}
         for name in candidates:
             try:
                 text = self.read(name)
@@ -274,12 +277,12 @@ class Workspace:
                     match["in"] = part
                     if defines:
                         match["defines"] = True
-                if len(result["matches"]) >= 50:
+                if len(result["matches"]) >= MAX_MATCHES:
                     result["limit_reached"] = True
                     return json.dumps(result, ensure_ascii=False)
                 result["matches"].append(match)
                 # Reserve room for counters and the truncation flag on later iterations.
-                if len(json.dumps(result, ensure_ascii=False).encode()) > 15_800:
+                if len(json.dumps(result, ensure_ascii=False).encode()) > SEARCH_BYTES:
                     result["matches"].pop()
                     result["limit_reached"] = True
                     return json.dumps(result, ensure_ascii=False)

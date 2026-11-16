@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .agent import Session
 from .knowledge import KnowledgeBase
-from .model import MODEL, Ollama
+from .model import MODEL, PROMPT_BUDGET, Ollama
 from .workspace import Workspace
 
 EVALS = Path(__file__).resolve().parents[1] / "evals"
@@ -34,7 +34,7 @@ class Metered:
 
     def __init__(self, model):
         self.model = model
-        self.prompt_budget = getattr(model, "prompt_budget", 12_000)
+        self.prompt_budget = getattr(model, "prompt_budget", PROMPT_BUDGET)
         self.last_metrics = {}
         self.calls = self.prompt_tokens = self.generated_tokens = self.reloads = 0
         self.model_seconds = 0.0

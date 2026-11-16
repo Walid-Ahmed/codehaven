@@ -1,12 +1,15 @@
+"""The codehaven command: one task, an interactive session, or the browser GUI."""
 import argparse
-from functools import partial
 import sys
+from functools import partial
 from pathlib import Path
-from .knowledge import KnowledgeBase
+
 from .agent import Session, run
+from .knowledge import KnowledgeBase
+from .memory import Memory
 from .model import MODEL, Ollama
-from .workspace import Workspace
 from .test_runner import DEFAULT_IMAGE
+from .workspace import Workspace
 
 EXIT_WORDS = {"exit", "quit", "/exit", "/quit"}
 
@@ -70,11 +73,34 @@ def main(argv=None):
     parser.add_argument("--gui", action="store_true", help="Open a local page in your browser to pick a repository and chat")
     parser.add_argument("--port", type=int, default=0, help="Port for --gui on 127.0.0.1 (default: any free port)")
     parser.add_argument("--no-browser", action="store_true", help="With --gui, print the link instead of opening it")
+    parser.add_argument("--allow-clone", action="store_true",
+                        help="With --gui, allow downloading GitHub repositories you ask for (the only network use; "
+                             "off by default, nothing is uploaded)")
+    parser.add_argument("--clone-dir", metavar="FOLDER",
+                        help="With --allow-clone, where downloaded repositories are kept (default ~/CodeHaven/repos)")
+    parser.add_argument("--remember", action=argparse.BooleanOptionalAction, default=True,
+                        help="Keep checked answers about this repository on this computer and recall them in later "
+                             "sessions while the files they cite are unchanged (on by default; --no-remember saves "
+                             "nothing to disk)")
+    parser.add_argument("--memory-dir", metavar="FOLDER",
+                        help="Where saved answers are kept (default ~/CodeHaven/memory)")
+    parser.add_argument("--forget", action="store_true",
+                        help="Delete the answers saved for this workspace, then exit")
     args = parser.parse_args(argv)
+    if args.forget:
+        try:
+            memory = Memory(Workspace(args.workspace or ".", excludes=args.exclude), args.memory_dir)
+            count = len(memory.notes)
+            memory.forget()
+        except (ValueError, OSError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        print(f"Forgot {count} saved answer{'s' if count != 1 else ''} for {memory.workspace.root}.")
+        return 0
     if not 2000 <= args.retrieval_budget <= 16000:
         parser.error("--retrieval-budget must be between 2000 and 16000 bytes")
     if not args.doctor and not args.interactive and not args.gui and not args.task:
-        parser.error("a task is required unless --doctor, --interactive, or --gui is used")
+        parser.error("a task is required unless --doctor, --interactive, --gui, or --forget is used")
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
     try:
@@ -99,7 +125,9 @@ def main(argv=None):
         if args.gui:
             from .gui import serve
             return serve(model, port=args.port, open_browser=not args.no_browser, repository=args.workspace,
-                         max_steps=args.max_steps, retrieval_budget=args.retrieval_budget, excludes=args.exclude)
+                         max_steps=args.max_steps, retrieval_budget=args.retrieval_budget, excludes=args.exclude,
+                         allow_clone=args.allow_clone, clone_folder=args.clone_dir,
+                         remember=args.remember, memory_folder=args.memory_dir)
         workspace = Workspace(args.workspace or ".", excludes=args.exclude)
         references = Path(args.knowledge_base).expanduser() if args.knowledge_base else workspace.root / "knowledge"
         knowledge = KnowledgeBase(references if args.knowledge_base or references.exists() else None,
@@ -120,9 +148,14 @@ def main(argv=None):
                        confirm_tests=lambda: input(
                            f"Run {args.test_runner} in Docker with network disabled and project read-only? [y/N] "
                        ).strip().lower() == "y")
+        memory = Memory(workspace, args.memory_dir) if args.remember else None
+        if memory is not None:
+            print(f"Long-term memory: {len(memory.notes)} saved answer{'s' if len(memory.notes) != 1 else ''} for this "
+                  f"workspace in {memory.folder}. Checked answers are saved there; use --no-remember to save nothing, "
+                  "or --forget to delete them.")
         if args.interactive:
-            return interactive(Session(model, workspace, **options), args.task)
-        return run(model, workspace, args.task, **options)
+            return interactive(Session(model, workspace, memory=memory, **options), args.task)
+        return run(model, workspace, args.task, memory=memory, **options)
     except (ValueError, OSError, EOFError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

@@ -6,12 +6,15 @@ from pathlib import Path
 
 from . import ocr
 from .agent import Session, run
+from .chats import Chats
 from .knowledge import KnowledgeBase
 from .memory import Memory
 from .model import MODEL, Ollama
+from .semantic import Semantic, choose_model
 from .test_runner import DEFAULT_IMAGE
 from .workspace import Workspace
 
+SEMANTIC_WAIT = 60  # Seconds a command waits for meaning search before answering with what is ready.
 EXIT_WORDS = {"exit", "quit", "/exit", "/quit"}
 
 
@@ -114,8 +117,20 @@ def main(argv=None):
                              "nothing to disk)")
     parser.add_argument("--memory-dir", metavar="FOLDER",
                         help="Where saved answers are kept (default ~/CodeHaven/memory)")
+    parser.add_argument("--chats-dir", metavar="FOLDER",
+                        help="Where the browser page keeps saved chats (default ~/CodeHaven/chats; nothing is kept "
+                             "with --no-remember)")
     parser.add_argument("--forget", action="store_true",
                         help="Delete the answers saved for this workspace, then exit")
+    parser.add_argument("--semantic", action=argparse.BooleanOptionalAction, default=True,
+                        help="Also search by meaning with a local Ollama embedding model, when one is installed "
+                             "(on by default; --no-semantic uses key words only)")
+    parser.add_argument("--embed-model", metavar="NAME",
+                        help="Installed local embedding model for --semantic (default: the first found of "
+                             "nomic-embed-text, embeddinggemma, mxbai-embed-large, ...)")
+    parser.add_argument("--index-dir", metavar="FOLDER",
+                        help="Where meaning-search vectors are kept (default ~/CodeHaven/index; nothing is kept "
+                             "with --no-remember)")
     parser.add_argument("--ocr", metavar="PICTURE",
                         help="Read the code in a PNG or JPEG picture, such as a screenshot, into a new file beside it, "
                              "then exit. Offline; needs Tesseract installed on this computer")
@@ -128,10 +143,14 @@ def main(argv=None):
             memory = Memory(Workspace(args.workspace or ".", excludes=args.exclude), args.memory_dir)
             count = len(memory.notes)
             memory.forget()
+            chats = Chats(memory.workspace, args.chats_dir)
+            saved_chats = len(chats.chats)
+            chats.forget()
         except (ValueError, OSError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
-        print(f"Forgot {count} saved answer{'s' if count != 1 else ''} for {memory.workspace.root}.")
+        print(f"Forgot {count} saved answer{'s' if count != 1 else ''} and {saved_chats} saved "
+              f"chat{'s' if saved_chats != 1 else ''} for {memory.workspace.root}.")
         return 0
     if not 2000 <= args.retrieval_budget <= 16000:
         parser.error("--retrieval-budget must be between 2000 and 16000 bytes")
@@ -151,23 +170,40 @@ def main(argv=None):
                 raise
             model.use(available[0])
             print(f"{args.model} is not available; starting with {available[0]}. Choose another model in the page.")
+        embed_model = choose_model(model, args.embed_model) if args.semantic else None
+        if embed_model and hasattr(model, "companions"):
+            model.companions.add(embed_model)  # Ours, so not reported as another program's model.
         others = model.other_loaded_models()
         if others:
             print("Warning: Ollama also has " + ", ".join(others) + " loaded. If both models do not fit in memory, Ollama "
                   "reloads them in turn, which can add a minute or more to every step. Check with `ollama ps`.")
         if args.doctor:
             print(f"Local Ollama is ready: {model.model}")
+            print(f"Meaning search: {embed_model}" if embed_model else "Meaning search: off (--no-semantic)" if not args.semantic
+                  else "Meaning search: off, no embedding model is installed. To turn it on, run once while online: "
+                       "ollama pull nomic-embed-text")
             return 0
         if args.gui:
             from .gui import serve
             return serve(model, port=args.port, open_browser=not args.no_browser, repository=args.workspace,
                          max_steps=args.max_steps, retrieval_budget=args.retrieval_budget, excludes=args.exclude,
                          allow_clone=args.allow_clone, clone_folder=args.clone_dir,
-                         remember=args.remember, memory_folder=args.memory_dir)
+                         remember=args.remember, memory_folder=args.memory_dir,
+                         embed_model=embed_model, index_folder=args.index_dir, chats_folder=args.chats_dir)
         workspace = Workspace(args.workspace or ".", excludes=args.exclude)
         references = Path(args.knowledge_base).expanduser() if args.knowledge_base else workspace.root / "knowledge"
+        semantic = None
+        if embed_model:
+            semantic = Semantic(model, embed_model, output=partial(print, flush=True),
+                                cache=Semantic.cache_path(workspace, embed_model, args.index_dir) if args.remember else None)
         knowledge = KnowledgeBase(references if args.knowledge_base or references.exists() else None,
-                                  workspace=workspace, context_budget=args.retrieval_budget)
+                                  workspace=workspace, context_budget=args.retrieval_budget, semantic=semantic)
+        if semantic is not None:
+            # A first run embeds every passage; later runs only the changed ones. Never hold a question up for long.
+            complete = semantic.wait(SEMANTIC_WAIT, partial(print, flush=True))
+            ready, total = semantic.coverage()
+            print(f"Meaning search: on with {embed_model}, {ready} of {total} passages ready"
+                  + ("." if complete else "; the rest are prepared in the background and saved for next time."))
         print(f"Knowledge base: {knowledge.documents_by_source['repo']} repository files, "
               f"{knowledge.documents_by_source['user']} user references, {len(knowledge.entries)} chunks. "
               "Add your own .md, .txt, or .rst references to " + str(references))

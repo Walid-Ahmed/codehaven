@@ -8,6 +8,7 @@ from pathlib import Path
 from .workspace import MAX_FILES, Workspace
 from .dependencies import PythonDependencies
 from .javascript import JS_EXTENSIONS, JavaScriptDependencies
+from .languages import OtherDependencies
 from .exclusions import IgnoreConfigurationError
 
 EXTENSIONS = {".md", ".txt", ".rst"}
@@ -57,10 +58,11 @@ def chunks(text):
 
 
 class KnowledgeBase:
-    def __init__(self, directory=None, *, workspace=None, context_budget=16_000, excludes=()):
+    def __init__(self, directory=None, *, workspace=None, context_budget=16_000, excludes=(), semantic=None):
         if not 2000 <= context_budget <= 16_000:
             raise ValueError("Retrieval budget must be between 2000 and 16000 bytes")
         self.context_budget = context_budget
+        self.semantic = semantic  # Optional search by meaning; see semantic.py. None means key words only.
         self.source_texts = {}
         self.directory = directory
         self.workspace_root = workspace.root if isinstance(workspace, Workspace) else workspace
@@ -88,7 +90,7 @@ class KnowledgeBase:
             roots.append(("repo", self.workspace_root, CODE_EXTENSIONS))
         total_bytes = 0
         seen = set()
-        code_files = {}
+        code_files, manifests = {}, {}
         for label, root, extensions in roots:
             root = Path(root).resolve(strict=True)
             if label == "user" and repository is not None and root.is_relative_to(repository.root):
@@ -105,6 +107,11 @@ class KnowledgeBase:
             names = workspace.files()
             self.limited |= len(names) >= MAX_FILES
             for name in names:
+                if label == "repo" and Path(name).name == "go.mod":
+                    try:
+                        manifests[name] = workspace.read(name)  # Names the Go module, so its imports can be followed.
+                    except (ValueError, OSError, UnicodeError):
+                        pass
                 if (Path(name).suffix.lower() not in extensions
                         and not (label == "repo" and Path(name).name in CODE_NAMES)):
                     continue
@@ -157,6 +164,10 @@ class KnowledgeBase:
         self.dependencies.definitions.update(js.definitions)
         self.dependencies.spans.update(js.spans)
         self.dependencies.parse_failures += js.parse_failures
+        other = OtherDependencies(code_files, manifests)  # Go, Java, and Rust.
+        self.dependencies.edges.update(other.edges)
+        self.dependencies.definitions.update(other.definitions)
+        self.dependencies.spans.update(other.spans)
         self.passages_by_source = {}
         for entry in self.entries:
             self.passages_by_source.setdefault(entry["source"], []).append(entry)
@@ -169,11 +180,13 @@ class KnowledgeBase:
                 found = self.symbols.setdefault(symbol, [])
                 if (name, line) not in found:
                     found.append((name, line))
+        if self.semantic is not None:
+            self.semantic.start(self.entries)  # Embeds new or changed passages in the background.
 
     def refresh(self):
         """Rebuild the bounded local snapshot, picking up files that changed on disk since it was built."""
         self.__init__(self.directory, workspace=self.workspace_root, context_budget=self.context_budget,
-                      excludes=self.excludes)
+                      excludes=self.excludes, semantic=self.semantic)
 
     def _expanded(self, entry, terms, definition_line=None):
         """Prefer complete syntactic symbols over arbitrary line chunks."""
@@ -261,6 +274,18 @@ class KnowledgeBase:
                 score += inverse * frequency * 2.2 / norm
             if score > 0:
                 scored.append((score, entry))
+        near = self.semantic.rank(query, self.entries) if self.semantic is not None else []
+        if near:
+            # Reciprocal rank fusion: a passage's place in each ranking counts, not the two scores, which are
+            # on different scales. A passage near the top of both lists beats one that leads only one of them.
+            scored.sort(key=lambda pair: (-pair[0], pair[1]["source"], pair[1]["start_line"]))
+            fused = {}
+            for place, (_, entry) in enumerate(scored[:64]):
+                fused[id(entry)] = [1 / (60 + place), entry]
+            for place, (_, index) in enumerate(near):
+                entry = self.entries[index]
+                fused.setdefault(id(entry), [0.0, entry])[0] += 1 / (60 + place)
+            scored = [(score, entry) for score, entry in fused.values()]
         # The bundled notes only cover LangGraph, so they must not crowd out the project on other questions.
         if "langgraph" not in terms and not terms & BUNDLED_TOPICS and any(not e["source"].startswith("builtin/") for _, e in scored):
             scored = [pair for pair in scored if not pair[1]["source"].startswith("builtin/")]
@@ -276,6 +301,7 @@ class KnowledgeBase:
                   "documents_by_source": self.documents_by_source,
                   "skipped_documents": self.skipped, "index_limited": self.limited,
                   "excluded_reference_roots": self.excluded_reference_roots,
+                  "meaning_search": bool(near),
                   "results_limited": False, "dependency_limit_reached": False,
                   "dependency_parse_failures": self.dependencies.parse_failures,
                   "context_budget_bytes": self.context_budget, "context_bytes": 0,

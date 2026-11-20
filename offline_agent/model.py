@@ -217,6 +217,7 @@ class Ollama:
         self.prompt_budget = prompt_budget
         self.last_metrics = {}
         self.last_raw = ""
+        self.companions = set()  # Other models CodeHaven itself uses, such as the embedding model.
         url = urllib.parse.urlsplit(endpoint)
         try:
             local = ipaddress.ip_address(url.hostname).is_loopback
@@ -339,7 +340,7 @@ class Ollama:
             running = self.request("/api/ps").get("models", [])
         except ValueError:
             return []
-        return sorted({m.get("name") for m in running if isinstance(m, dict) and m.get("name") not in (None, self.model)})
+        return sorted({m.get("name") for m in running if isinstance(m, dict) and m.get("name") not in {None, self.model, *self.companions}})
 
     def chat(self, messages, schema, on_text=None):
         """Return one JSON action. Always streams from Ollama so a looping answer can be stopped early;

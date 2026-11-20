@@ -63,10 +63,10 @@ class StudyTests(unittest.TestCase):
         self.assertEqual(result["neighbours"], ["app.py"])
         self.assertEqual(result["files"][1]["parts"][0]["calls"], [])  # Cart is defined in another file.
 
-    def test_other_languages_fall_back_to_definition_lines(self):
+    def test_go_parts_end_at_their_closing_brace(self):
         parts = study.structure(self.workspace, self.knowledge, ["main.go"])["files"][0]["parts"]
         self.assertEqual([(part["name"], part["start"], part["end"], part["calls"]) for part in parts],
-                         [("Add", 3, 6, ["Sub"]), ("Sub", 7, 9, [])])
+                         [("Add", 3, 5, ["Sub"]), ("Sub", 7, 9, [])])
 
     def test_choices_follow_the_workspace_rules_and_limits(self):
         for paths, message in (([], "at least one"), ([".env"], "unavailable"), (["../x.py"], "relative path"),

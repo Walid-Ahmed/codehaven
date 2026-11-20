@@ -40,11 +40,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import ocr, study
+from . import documents, ocr, study
 from .agent import Session
+from .chats import Chats, new_id
 from .knowledge import KnowledgeBase
 from .memory import Memory
 from .model import MODEL
+from .semantic import Semantic
 from .workspace import MAX_BYTES, MAX_FILES, Workspace
 
 PAGE = Path(__file__).with_name("gui.html")
@@ -56,6 +58,7 @@ CLONE_FOLDER = Path.home() / "CodeHaven" / "repos"
 CLONE_SECONDS, CLONE_BYTES = 180, 500_000_000  # A download is stopped after 3 minutes or 500 MB on disk.
 OWNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 REPOSITORY = re.compile(r"[A-Za-z0-9._-]{1,100}")
+SEMANTIC_WAIT = 15  # Seconds indexing waits for meaning search; the rest is prepared in the background.
 CLONE_OFF = "Cloning from GitHub is off, so CodeHaven stays offline. Restart it with --allow-clone to turn it on."
 
 
@@ -67,7 +70,9 @@ class App:
     """One repository and one conversation at a time, shared by the request threads."""
 
     def __init__(self, model, *, max_steps=12, retrieval_budget=4000, excludes=(), allow_clone=False, clone_folder=None,
-                 remember=False, memory_folder=None):
+                 remember=False, memory_folder=None, embed_model=None, index_folder=None, chats_folder=None):
+        self.chats_folder, self.chats, self.chat_id = chats_folder, None, new_id()
+        self.embed_model, self.index_folder, self.semantic = embed_model, index_folder, None
         self.remember, self.memory_folder, self.memory = bool(remember), memory_folder, None
         self.model, self.max_steps, self.retrieval_budget = model, max_steps, retrieval_budget
         self.excludes = tuple(excludes)
@@ -78,6 +83,7 @@ class App:
         self.workspace = self.knowledge = self.session = None
         self.upload = self.upload_folder = None  # The uploaded file's name and its private temporary folder.
         self.picture = None  # When the upload was a picture: how reading it went, for the page to show.
+        self.document = None  # When the upload was a notebook or a PDF: what was read from it.
         self.sink = None
 
     def claim(self):
@@ -140,6 +146,8 @@ class App:
         """
         if ocr.image_suffix(data):
             return self.open_picture(upload_name(name), data)
+        if documents.kind(name, data):
+            return self.open_document(upload_name(name), data)
         if len(data) > MAX_BYTES:
             raise ValueError(f"Only UTF-8 text files up to {MAX_BYTES // 1000} KB can be uploaded.")
         if b"\0" in data:
@@ -165,6 +173,17 @@ class App:
         finally:
             self.release()
 
+    def open_document(self, name, data):
+        """Chat about a notebook or a PDF: its cells or pages are read into one text file on this computer."""
+        self.claim()
+        try:
+            found = documents.read_document(name, data)
+            summary = self.open_copy(upload_name(found["name"]), found["text"].encode("utf-8"))
+            self.document = {key: found[key] for key in ("source", "kind", "note")}
+            return {**summary, "document": self.document}
+        finally:
+            self.release()
+
     def open_copy(self, name, data):
         folder = Path(tempfile.mkdtemp(prefix="codehaven-upload-"))  # Readable by this user only.
         try:
@@ -180,12 +199,24 @@ class App:
 
     def load(self, workspace, references, *, upload=None, upload_folder=None, keep_chat=False):
         turns = self.session.turns if keep_chat and self.session is not None else []
-        knowledge = KnowledgeBase(references, workspace=workspace, context_budget=self.retrieval_budget)
+        semantic = None
+        if self.embed_model:
+            # An uploaded file lives in a temporary folder, so its vectors are kept in memory only.
+            keep = self.remember and upload is None
+            semantic = Semantic(self.model, self.embed_model, output=lambda line: self.emit({"type": "log", "text": str(line)}),
+                                cache=Semantic.cache_path(workspace, self.embed_model, self.index_folder) if keep else None)
+        knowledge = KnowledgeBase(references, workspace=workspace, context_budget=self.retrieval_budget, semantic=semantic)
+        if semantic is not None:
+            semantic.wait(SEMANTIC_WAIT)
+        self.semantic = semantic
         self.discard_upload()
         self.workspace, self.knowledge = workspace, knowledge
         self.upload, self.upload_folder = upload, upload_folder
         # An uploaded file lives in a temporary folder that is deleted, so there is nothing lasting to remember.
         self.memory = Memory(workspace, self.memory_folder) if self.remember and upload is None else None
+        self.chats = Chats(workspace, self.chats_folder) if self.remember and upload is None else None
+        if not turns:
+            self.chat_id = new_id()  # A newly opened repository starts a new chat; an attached file continues one.
         self.session = Session(self.model, workspace, knowledge=knowledge, max_steps=self.max_steps, focus_file=upload,
                                memory=self.memory,
                                output=lambda line: self.emit({"type": "log", "text": str(line)}),
@@ -197,7 +228,7 @@ class App:
         """Delete the temporary copy of an uploaded file, if one is open."""
         if self.upload_folder is not None:
             shutil.rmtree(self.upload_folder, ignore_errors=True)
-            self.upload = self.upload_folder = self.picture = None
+            self.upload = self.upload_folder = self.picture = self.document = None
 
     def close(self):
         self.discard_upload()
@@ -224,17 +255,25 @@ class App:
             self.release()
 
     def summary(self):
-        base = {"model": self.model_name(), "clone": self.allow_clone, "remember": self.remember,
+        meaning = None
+        if self.semantic is not None:
+            ready, total = self.semantic.coverage()
+            meaning = {"model": self.embed_model, "ready": ready, "total": total, "failed": bool(self.semantic.failed)}
+        base = {"model": self.model_name(), "clone": self.allow_clone, "remember": self.remember, "meaning": meaning,
+                "chats": self.chats.listing() if self.chats is not None else [],
                 "saved": len(self.memory.notes) if self.memory is not None else 0}
         workspace, knowledge = self.workspace, self.knowledge
         if workspace is None or knowledge is None:
-            return {**base, "repository": None, "upload": None, "picture": None}
+            return {**base, "repository": None, "upload": None, "picture": None, "document": None}
         counts = knowledge.documents_by_source
         if self.upload is not None:
             # The temporary folder means nothing to the user; the file is readable even if its type is not indexed.
-            return {**base, "repository": None, "upload": self.upload, "picture": self.picture, "files": 1,
+            return {**base, "repository": None, "upload": self.upload, "picture": self.picture,
+                    "document": self.document, "files": 1,
                     "references": 0, "chunks": len(knowledge.entries), "limited": False}
-        return {**base, "repository": str(workspace.root), "upload": None, "picture": None, "files": counts["repo"],
+        return {**base, "repository": str(workspace.root), "upload": None, "picture": None, "document": None,
+                "files": counts["repo"],
+                "git": (workspace.root / ".git").exists(),
                 "references": counts["user"], "chunks": len(knowledge.entries), "limited": knowledge.limited}
 
     def forget(self):
@@ -243,6 +282,10 @@ class App:
         try:
             if self.memory is not None:
                 self.memory.forget()
+            if self.chats is not None:
+                self.chats.forget()
+            if self.semantic is not None:
+                self.semantic.forget()  # The saved vectors go too; they are rebuilt when the repository is indexed again.
             return self.summary()
         finally:
             self.release()
@@ -252,12 +295,40 @@ class App:
             self.claim()
             try:
                 self.session.reset()
+                self.chat_id = new_id()
             finally:
                 self.release()
 
+    def open_chat(self, chat_id):
+        """Reopen a saved chat: the page shows it again, and follow-ups remember it as they did when it was live."""
+        if self.chats is None or self.session is None:
+            raise ValueError("Saved chats are off, or no repository is open.")
+        self.claim()
+        try:
+            chat = self.chats.get(str(chat_id))
+            self.session.reset()
+            self.session.turns = [(turn["question"], turn["answer"]) for turn in chat["turns"]][-self.session.TURNS:]
+            self.chat_id = chat["id"]
+            return {"id": chat["id"], "title": chat["title"], "updated": chat["updated"], "turns": chat["turns"],
+                    "remembered": len(self.session.turns), "memory": self.session.TURNS}
+        finally:
+            self.release()
+
+    def delete_chat(self, chat_id):
+        if self.chats is None:
+            raise ValueError("Saved chats are off, or no repository is open.")
+        self.claim()
+        try:
+            self.chats.delete(str(chat_id))
+            if self.chat_id == chat_id:
+                self.chat_id = new_id()  # Further questions in the open chat start a new saved one.
+            return {"chats": self.chats.listing()}
+        finally:
+            self.release()
+
     def ask(self, question):
         """Yield the events of one answer: log lines, streamed text, and a final done or error event."""
-        session = self.session
+        session, chats, chat_id = self.session, self.chats, self.chat_id
         if session is None:
             raise ValueError("Choose a repository or upload a file first.")
         if not isinstance(question, str) or not question.strip():
@@ -271,11 +342,15 @@ class App:
                 code = session.ask(question.strip())
                 state = session.last_state
                 answer = state.get("final_text")
+                if chats is not None and answer:
+                    with contextlib.suppress(OSError):  # A chat that cannot be saved must not cost the answer.
+                        chats.record(chat_id, question, answer, state.get("issues", []))
                 events.put({"type": "done", "exit_code": code, "steps": state.get("steps", 0),
                             "answer": answer if answer is not None else "",
                             "complete": answer is not None, "issues": state.get("issues", []),
                             "remembered": len(session.turns), "memory": session.TURNS,
-                            "kept": session.saved, "saved": len(session.memory.notes) if session.memory else 0})
+                            "kept": session.saved, "saved": len(session.memory.notes) if session.memory else 0,
+                            "chats": chats.listing() if chats is not None else []})
             except Exception as exc:  # Reported to the page; the server keeps running.
                 events.put({"type": "error", "message": str(exc) or type(exc).__name__})
             finally:
@@ -573,8 +648,8 @@ def make_handler(app, token, port_holder):
             length = int(self.headers.get("Content-Length") or 0)
             if not 0 <= length <= ocr.IMAGE_BYTES:  # Text files have a smaller limit, checked once the bytes are seen.
                 self.close_connection = True  # The body is not read, so the connection cannot be reused.
-                raise ValueError(f"Only text files up to {MAX_BYTES // 1000} KB, and pictures up to "
-                                 f"{ocr.IMAGE_BYTES // 1_000_000} MB, can be uploaded.")
+                raise ValueError(f"Only text files up to {MAX_BYTES // 1000} KB, and pictures, notebooks, and PDFs up "
+                                 f"to {ocr.IMAGE_BYTES // 1_000_000} MB, can be uploaded.")
             return self.rfile.read(length)
 
         def do_POST(self):
@@ -595,6 +670,10 @@ def make_handler(app, token, port_holder):
                     self.send(200, app.use_model(str(data.get("name", ""))))
                 elif url.path == "/api/forget":
                     self.send(200, app.forget())
+                elif url.path == "/api/chat":
+                    self.send(200, app.open_chat(data.get("id", "")))
+                elif url.path == "/api/chat/delete":
+                    self.send(200, app.delete_chat(data.get("id", "")))
                 elif url.path == "/api/reset":
                     app.reset()
                     self.send(200, {"ok": True})
@@ -646,10 +725,12 @@ def make_server(app, port=0):
 
 
 def serve(model, *, port=0, open_browser=True, repository=None, max_steps=12, retrieval_budget=4000, excludes=(),
-          allow_clone=False, clone_folder=None, remember=False, memory_folder=None):
+          allow_clone=False, clone_folder=None, remember=False, memory_folder=None, embed_model=None, index_folder=None,
+          chats_folder=None):
     """Run the GUI until Ctrl+C. Returns an exit code like the CLI's."""
     app = App(model, max_steps=max_steps, retrieval_budget=retrieval_budget, excludes=excludes,
-              allow_clone=allow_clone, clone_folder=clone_folder, remember=remember, memory_folder=memory_folder)
+              allow_clone=allow_clone, clone_folder=clone_folder, remember=remember, memory_folder=memory_folder,
+              embed_model=embed_model, index_folder=index_folder, chats_folder=chats_folder)
     if repository:
         summary = app.open(str(Path(repository).expanduser().resolve()))
         print(f"Indexed {summary['files']} files from {summary['repository']}.")
@@ -659,8 +740,11 @@ def serve(model, *, port=0, open_browser=True, repository=None, max_steps=12, re
         print(f"Cloning from GitHub is on: git may download repositories you ask for into {app.clone_folder}. "
               "Nothing is uploaded. Restart without --allow-clone to stay fully offline.", flush=True)
     if remember:
-        print("Long-term memory is on: checked answers are saved on this computer and recalled in later sessions. "
-              "Restart with --no-remember to save nothing.", flush=True)
+        print("Long-term memory is on: checked answers and your chats are saved on this computer, so answers can be "
+              "recalled and chats reopened in later sessions. Restart with --no-remember to save nothing.", flush=True)
+    print(f"Meaning search is on, using the local embedding model {embed_model}." if embed_model else
+          "Meaning search is off: answers use key-word search. To turn it on, install a local embedding model once "
+          "while online (ollama pull nomic-embed-text).", flush=True)
     if open_browser:
         webbrowser.open(url)
 

@@ -8,6 +8,8 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
+from . import changes, insights
+from .review import review
 from .test_runner import DEFAULT_IMAGE, command, run_tests
 from .evidence import NEGATED_EDIT, retain, discovery_task, check_answer, inventory
 from .model import PROMPT_BUDGET, InvalidReply, RepeatedAnswer, compact_messages, read_limit
@@ -94,6 +96,15 @@ ANSWER_WITH_POINTS = ("For finish, answer the task directly in content. In point
 # CodeHaven never writes files, so a change request gets an explanation of the change instead.
 CHANGE_ADVICE = ("CodeHaven is read-only and cannot change files. Do not say a change was made. For finish, explain in content what "
                  "to change and why, with the new code; in points, name each part of the code to change.")
+# "Review store.py" is handled by review.py, one function at a time, not by the general workflow.
+REVIEW = re.compile(r"^\W*(?:please\s+|can you\s+|could you\s+)?(?:do\s+a\s+|give\s+me\s+a\s+)?(?:code[- ]review|review|audit|critique)\b"
+                    r"|\bfind\s+(?:the\s+|any\s+|likely\s+)?(?:bugs|problems|issues|mistakes)\s+in\b", re.I)
+# A diff is explained like a named file: a short summary, then one cited point per changed part.
+CHANGES_ANSWER = ("The changes the task asks about are shown above, read with git; nothing was changed. If they answer the task, "
+                  "return finish now. For finish, put a one or two sentence summary of what changed in content, and in points "
+                  "give one entry per changed part (usually 1 to 8): its path, the name of the function, class, or variable "
+                  "that changed, exactly as written in the code, or the file name when the change is not inside one, and, in "
+                  "your own words, what changed there (describe it; do not copy the line). State only what the + and - lines show; do not guess at reasons the lines do not give.")
 # A later step taking this long to load means the model was unloaded in between, which costs far more than the work itself.
 RELOAD_SECONDS = 5
 
@@ -774,7 +785,42 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 {"role": "user", "content": earlier + task + f"\nWorkspace path sample ({len(selected)} of {len(files)} listed files; use search/read/retrieve for more):\n" +
                  "\n".join(selected)}]
     evidence, evidence_limited = [dict(row) for row in carried_evidence], False
-    if knowledge is not None and not discovery_task(task):
+    asked_changes = changes.requested(task)
+    report = None
+    if asked_changes:
+        try:
+            report = changes.describe(workspace, asked_changes, read_limit(model) - len(CHANGES_ANSWER.encode()) - 200,
+                                      named_files(task, files))
+        except changes.NoChanges as exc:
+            # Nothing to explain is a fact git reports, so it is answered at once, without the model.
+            output(str(exc))
+            return {"messages": messages, "reply": {"action": "finish", "path": "", "content": str(exc), "message": ""},
+                    "steps": 0, "exit_code": 0, "task": task, "search_evidence": evidence, "evidence_limited": False,
+                    "final_text": str(exc), "issues": [], "kind": "question"}
+        except (ValueError, OSError) as exc:
+            output(f"Could not read the changes with git ({exc}); answering from the files instead.")
+    # Some requests have a purpose-built answer that does not go through the general workflow.
+    found = None
+    reviewed = named_files(task, files)[:1] or ([focus_file] if focus_file in files else [])
+    wanted = insights.requested(task) if report is None and not asked_changes else None
+    if report is None and REVIEW.search(task) and reviewed:
+        spans = knowledge.dependencies.spans.get(reviewed[0]) if knowledge is not None else None
+        try:
+            found = review(model, workspace, reviewed[0], spans=spans, output=output)
+        except (ValueError, OSError, UnicodeError) as exc:
+            found = {"text": f"{reviewed[0]} could not be reviewed: {exc}", "evidence": []}
+    elif wanted == "gaps" and not named_files(task, files):
+        found = insights.test_gaps(workspace, knowledge)
+    elif wanted == "tour":
+        found = insights.tour(model, workspace, knowledge, output)
+    if found is not None:
+        output(found["text"])
+        evidence, _ = retain(evidence, found["evidence"])
+        return {"messages": messages, "reply": {"action": "finish", "path": "", "content": found["text"], "message": ""},
+                "steps": found.get("checked", found.get("files", 0)), "exit_code": 0, "task": task,
+                "search_evidence": evidence, "evidence_limited": False, "final_text": found["text"], "issues": [],
+                "kind": "question"}
+    if knowledge is not None and not discovery_task(task) and report is None:
         initial_retrieval = knowledge.retrieve(task[:1000])
         data = json.loads(initial_retrieval)
         evidence, evidence_limited = retain(evidence, retrieved_rows(data))
@@ -783,7 +829,13 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                          initial_retrieval})
     kind = task_kind(task)
     preloaded, numbered = [], False
-    if not discovery_task(task):
+    if report is not None:
+        kind, numbered, preloaded = "question", True, report["paths"]
+        evidence, evidence_limited = retain(evidence, report["evidence"])
+        output(f"Read the {report['label']} with git: {report['files']} file{'s' if report['files'] != 1 else ''} changed.")
+        messages.append({"role": "user", "content": "Tool result for git changes (untrusted repository data):\n"
+                                                    + report["text"] + "\n\n" + CHANGES_ANSWER})
+    elif not discovery_task(task):
         names = named_files(task, files)
         reason = "the task names it"
         if not names and focus_file in files:
@@ -797,8 +849,8 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 evidence_limited |= truncated
         # Line numbers help citations; nothing is ever edited, so files need not stay byte-exact.
         numbered = kind in ("question", "change")
-        limit = (read_limit(model)
-                 - (len(FINISH_NOW.encode() + ANSWER_FROM_PRELOAD.encode()) + 2 if numbered else 0)) // max(1, len(names))
+        guide = FINISH_NOW + ANSWER_FROM_PRELOAD
+        limit = (read_limit(model) - (len(guide.encode()) + 2 if numbered else 0)) // max(1, len(names))
         for name in names:
             try:
                 text = workspace.read(name)
@@ -827,7 +879,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
         # Joined to the last message, not sent alone: compaction keeps only the newest message whole.
         advice = " " + CHANGE_ADVICE if kind == "change" else ""
         if numbered and preloaded:
-            messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + FINISH_NOW + ANSWER_FROM_PRELOAD + advice}
+            messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + guide + advice}
         elif numbered:
             messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + ANSWER_WITH_POINTS + advice}
     # Always offline: LangChain would otherwise start remote tracing from LANGSMITH_TRACING and similar env vars.
@@ -893,7 +945,10 @@ class Session:
     def ask(self, task):
         if self.turns and self.knowledge is not None:
             self.knowledge.refresh()  # Pick up files changed between questions.
-        notes = self.memory.recall(task, skip=[question for question, _ in self.turns]) if self.memory else []
+        # "My last commit" means something else tomorrow, so answers about changes are neither recalled nor saved.
+        # Test gaps and tours are rebuilt from the whole project each time, which a saved copy would not notice changing.
+        memory = None if changes.requested(task) or insights.requested(task) else self.memory
+        notes = memory.recall(task, skip=[question for question, _ in self.turns]) if memory else []
         evidence = self.evidence
         if notes:
             self.options.get("output", print)(f"Recalled {len(notes)} saved answer{'s' if len(notes) != 1 else ''} "
@@ -907,5 +962,5 @@ class Session:
         self.evidence = state.get("search_evidence", [])
         self.last_state = state
         # Only an answer that passed its checks is worth keeping for another day.
-        self.saved = bool(self.memory and answer and state["exit_code"] == 0 and self.memory.add(task, answer))
+        self.saved = bool(memory and answer and state["exit_code"] == 0 and memory.add(task, answer))
         return state["exit_code"]

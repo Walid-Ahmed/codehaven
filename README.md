@@ -4,13 +4,13 @@
 
 ![CodeHaven: working locally, with offline coding, privacy, and no API fees.](docs/assets/codehaven-working-preview.png)
 
-**CodeHaven helps you understand a codebase, entirely offline.** Open it in your browser, point it at a project, and ask how something works, where something is used, or what a file does. Answers cite the exact lines they rely on, and one click shows those lines. For one file or a group of files it can also draw a structure map and write study flashcards, and it remembers checked answers between sessions. It runs on a local Ollama model (`qwen2.5-coder:7b` by default), so your code never leaves your computer and there are no API fees.
+**CodeHaven helps you understand a codebase, entirely offline.** Open it in your browser, point it at a project, and ask how something works, where something is used, or what a file does. Answers cite the exact lines they rely on, and one click shows those lines. It can also explain your Git changes, review a file for likely bugs, list functions with no tests, suggest a reading order, draw a structure map, and write study flashcards, and it remembers checked answers and your chats between sessions. It runs on a local Ollama model (`qwen2.5-coder:7b` by default), so your code never leaves your computer and there are no API fees.
 
-> **CodeHaven is read-only.** It reads, searches, and explains, and it never changes, creates, or deletes your files. Ask it to fix something and it explains what to change and where, with cited lines and the new code, and leaves the edit to you. No code path in this version writes inside your project; the only file CodeHaven keeps is its own memory of checked answers, in `~/CodeHaven/memory`, which `--no-remember` turns off.
+> **CodeHaven is read-only.** It reads, searches, and explains, and it never changes, creates, or deletes your files. Ask it to fix something and it explains what to change and where, with cited lines and the new code, and leaves the edit to you. No code path in this version writes inside your project. What CodeHaven keeps is its own: checked answers, your chats, and search vectors, in `~/CodeHaven`, and `--no-remember` turns all three off.
 
 ![The CodeHaven page: a repository and model chosen in the sidebar, and an answer that explains how to fix Store.low_stock, citing inventory/store.py:27-29.](docs/assets/codehaven-gui.png)
 
-Version 0.9.1. No cloud inference, automatic downloads, or tracing: LangGraph runs the workflow locally and model requests go straight to Ollama on `127.0.0.1`. You can also use CodeHaven from the terminal.
+Version 0.10.0. No cloud inference, automatic downloads, or tracing: LangGraph runs the workflow locally and model requests go straight to Ollama on `127.0.0.1`. You can also use CodeHaven from the terminal.
 
 ## Get started
 
@@ -30,6 +30,12 @@ python -m pip install -e .
 
 # 4. Optional: install Tesseract, only if you want CodeHaven to read code from pictures
 brew install tesseract           # Ubuntu or Debian: sudo apt install tesseract-ocr
+
+# 5. Optional: download an embedding model, so search also works by meaning
+ollama pull nomic-embed-text
+
+# 6. Optional: a PDF reader, only if you want to chat about PDFs
+python -m pip install pypdf      # or: brew install poppler
 ```
 
 Step 4 is needed only for [pictures of code](#read-code-from-a-picture). Ollama runs the chat model; Tesseract is a second, separate local program that reads the text in a picture. It is not an Ollama model, so `ollama pull` does not install it. On Windows, use an installer from the [Tesseract installation page](https://tesseract-ocr.github.io/tessdoc/Installation.html) and make sure `tesseract --version` works in a new terminal.
@@ -49,14 +55,17 @@ codehaven --gui
    **Or upload a single file.** No folder needed for a quick question: click **Upload a file…** or drop a file anywhere on the page. Any UTF-8 text file up to 64 KB works, and every question is about that file, so "What does this file do?" works without naming it. The file is sent only to the local server, which reads a copy kept in a private temporary folder and deletes it when you open something else or stop the server; your original file is never touched. Hidden files such as `.env`, and names matched by `--exclude`, are refused. The paperclip button beside the question box and pasting a copied file do the same, and the conversation is kept when a file is opened this way.
    **Or download a GitHub repository (opt-in).** Start with `codehaven --gui --allow-clone` and the sidebar shows a box for an address such as `github.com/owner/repository`. This is the only time CodeHaven uses the internet, and only when you click **Download and index**: git on your computer downloads the latest snapshot (no history, tags, submodules, or Git LFS files; stopped after 3 minutes or 500 MB) into `~/CodeHaven/repos/owner/repository` (change it with `--clone-dir`). Nothing of yours is uploaded. The copy stays on your computer, so later it opens offline from **Recent**, and asking for the same address again opens it without downloading. Without `--allow-clone` the box is hidden, the server refuses to clone, and CodeHaven stays fully offline.
    **Private repositories.** CodeHaven never asks for, sees, or stores a GitHub password or token, and refuses addresses that contain one. A private repository downloads only if git on this computer is already signed in to an account that can read it: a credential helper (for example after `gh auth login`), or an SSH key with a `git@github.com:owner/repository.git` address. git is not allowed to prompt for a password or passphrase. Otherwise, clone it yourself with your usual tools and index the folder.
+   **Or upload a notebook or a PDF.** The same button and drop area take a Jupyter notebook (`.ipynb`) or a PDF, up to 8 MB. See [Notebooks and PDFs](#notebooks-and-pdfs).
    **Or upload a picture of code.** The same button and drop area take a screenshot or photo of code, which CodeHaven turns into a file you can chat about and save. See [Read code from a picture](#read-code-from-a-picture).
 2. **Pick a model.** The sidebar lists the chat models installed in Ollama on this computer, with `qwen2.5-coder:7b` selected when it is installed. That default is the model all of CodeHaven's tests were tuned and measured on; other models may answer differently, and the first answer after switching is slower while the model loads. Cloud-backed and embedding-only models are never offered.
 3. **Ask questions.** Answers stream in as they are written. Follow-up questions see your earlier questions and answers, and **New chat** starts over. Try "Explain this project", "Which function calls `checkout_total`?", or "Explain `src/app.py`".
 4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat.
 5. **See how it got there.** Each answer can show the steps CodeHaven took. If a citation could not be checked against what was actually read, a yellow **Unverified** box says so.
 6. **Study one file or a group of files.** The tabs above the chat add two study aids. Click **Choose files…** to tick the files they are about; with an uploaded file, that file is used.
-   - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, and TypeScript; up to 40 files per map.
+   - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust; up to 40 files per map. Go, Java, and Rust are read with line patterns rather than a full parser, so unusual layouts and macros can be missed.
    - **Flashcards** asks the local model for question-and-answer cards, 3 to 6 per file for up to 8 files, one file at a time. Click a card or press Space to turn it over, use the arrow keys to move, and **Shuffle** or **Copy all as text** when you want. Each answer links to the lines it is about; those line numbers are looked up in the file from the name the model gave, so they are never invented. A card whose named part cannot be found says so.
+
+7. **Come back to a chat.** Chats about a repository are saved on this computer and listed under **Saved chats** in the sidebar. Click one to reopen it: the page shows it again and follow-up questions remember it. See [Saved chats](#saved-chats).
 
 Tips for good answers: name files and functions exactly (`Store.low_stock`, not "the stock function"), and ask one thing at a time.
 
@@ -68,6 +77,53 @@ Options: `--workspace /path/to/repo` indexes a repository at startup, `--model N
 
 If every answer takes a minute or more, another program is probably using a different Ollama model at the same time; see [Local inference speed](#local-inference-speed).
 
+## Explain your Git changes
+
+Ask about your own work and CodeHaven reads the diff with git, then explains it with citations to the changed lines:
+
+```sh
+codehaven --workspace ~/dev/project 'Explain my uncommitted changes'
+codehaven --workspace ~/dev/project 'What changed in my last commit?'
+codehaven --workspace ~/dev/project 'Explain commit 8ec6e4f'
+codehaven --workspace ~/dev/project 'Explain the staged changes'
+```
+
+In the browser page, a Git repository gets **My changes** and **Last commit** buttons on the empty chat.
+
+- **Read-only.** Only `git diff`, `git log`, `git rev-parse`, and `git ls-files` are run. Nothing is staged, committed, checked out, or fetched, git is told not to refresh its index, and nothing uses the network.
+- **Hidden files stay hidden.** Changes to files the workspace rules hide, such as `.env` or `--exclude` patterns, are counted but never shown to the model.
+- **Large diffs.** The diff must fit in half the prompt budget. Files the question names come first, then the smallest changes; the answer says which files were not fully shown, and you can ask about one by name ("Explain the changes to `store.py` in my last commit").
+- **No changes, no model.** "There are no uncommitted changes" is answered at once from git.
+- **Not remembered.** "My last commit" means something else tomorrow, so these answers are never saved to long-term memory.
+- **Line numbers** are those of the file after the change. For an older commit the file may have changed since, and a citation that no longer matches is marked **Unverified**.
+
+## Review a file
+
+```sh
+codehaven --workspace ~/dev/project 'Review inventory/store.py'
+```
+
+CodeHaven checks the file one function at a time, up to 12 functions with one model call each, and lists likely bugs, missing checks, and unclear names, most serious first. Each finding cites the lines of the function it is about; those lines come from parsing the file, not from the model. With an uploaded file, the **Review** button does the same.
+
+Shown a whole file, a small model tends to answer "looks fine". Shown one function and asked to state what it promises and what it really does, it notices when the two differ, such as a docstring that says "at or below" above code that uses `<`. A review is still a list of leads to verify, not proof: the model can miss a bug or flag correct code, and it sees one function at a time, so it cannot judge how functions work together. Nothing is changed; fixes are described, never applied.
+
+## Test gaps and a project tour
+
+Two answers come from parsing the whole project rather than from searching it:
+
+- **Test gaps.** "Which functions have no tests?" lists every public function and method whose name appears in no test file, grouped so the files with the most gaps come first. No model is used, so it is instant. It is a name check, not coverage measurement: a function reached only through another function is still listed.
+- **Project tour.** "Give me a project tour" returns an ordered reading list of up to 8 files: the README, then the entry point (the file that reaches the most of the project through its imports), then what it imports, most widely used first. The order and the reason for each step come from the import graph; the local model adds one sentence per file. Tests are left out. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust.
+
+Both have buttons on the empty chat in the browser page, and neither is saved to long-term memory, because a saved copy would not notice a new test or file.
+
+## Notebooks and PDFs
+
+Upload, drop, attach, or paste a Jupyter notebook (`.ipynb`) or a PDF, up to 8 MB, and chat about it like any single file. It is read into a text file on this computer, which you can view and save from the page; your original is never changed.
+
+- **Notebook.** Code and Markdown cells become one file (`analysis.ipynb` becomes `analysis.py` for a Python notebook). Each cell starts with a `# %% Cell 3` line, Markdown becomes comments, and `%magic` and `!shell` lines are commented out so the file stays valid Python. Outputs and pictures are left out.
+- **PDF.** The text of each page is kept under a `===== Page 3 =====` line, with indentation preserved where the PDF allows. This needs either the `pypdf` package or the `pdftotext` program (Poppler) on this computer; if neither is there, CodeHaven says how to install one and everything else keeps working. Columns and tables can lose their layout. A scanned PDF holds pictures, not text: attach a screenshot of the page instead.
+- **Length.** CodeHaven reads 64 KB of text at once, so a longer document is cut at a cell or page boundary and the note says how much was kept.
+
 ## Read code from a picture
 
 CodeHaven can read the code in a screenshot or photo and turn it into a `.py` file, offline. This needs [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html) installed on this computer (step 4 of [Get started](#get-started)); check with `tesseract --version`. If it is missing, CodeHaven says so and shows the install command, and everything else keeps working.
@@ -75,7 +131,7 @@ CodeHaven can read the code in a screenshot or photo and turn it into a `.py` fi
 **In the browser page:**
 
 1. Start `codehaven --gui`.
-2. Give it the picture in any of four ways: click the paperclip button beside the question box, paste a copied screenshot with Cmd+V (Ctrl+V on Windows and Linux), drop the picture anywhere on the page, or click **Upload a file or picture…** in the sidebar. PNG and JPEG pictures up to 8 MB and 40 megapixels work.
+2. Give it the picture in any of four ways: click the paperclip button beside the question box, paste a copied screenshot with Cmd+V (Ctrl+V on Windows and Linux), drop the picture anywhere on the page, or click **Upload a file, notebook, PDF, or picture…** in the sidebar. PNG and JPEG pictures up to 8 MB and 40 megapixels work.
 3. After a few seconds a note in the chat and in the sidebar says how many lines were read, for example `Read 18 lines from the picture shot.png into shot.py`, and the chat is now about the new file `shot.py`. A pasted screenshot has no name of its own, so it becomes `image.py`.
 4. Check the text. The note lists the lines to compare with the picture; click a line number, or **View shot.py**, to see it. For Python it also says whether the file is valid Python and, if not, the first line that is wrong.
 5. Click **Save shot.py…** to save the file through your browser, or ask questions about it first ("What does this file do?"), draw its map, or make flashcards.
@@ -112,6 +168,34 @@ codehaven --gui --no-remember
 - **When it is used.** A new question brings back at most two saved answers that share its key words, shown to the model as notes from earlier sessions.
 - **When it is dropped.** Each saved answer records a fingerprint of the files it cites. If any of them has changed, the answer is deleted instead of being trusted. Up to 200 answers are kept per repository; the oldest go first.
 - **Forgetting.** Click **Forget this repository** in the page's sidebar, or run `codehaven --forget --workspace ~/dev/project`.
+
+## Saved chats
+
+The browser page keeps your chats about a repository on this computer, so a reloaded page or a restarted server does not lose them. It is on by default, and `--no-remember` saves nothing.
+
+- **Where.** One file per repository in `~/CodeHaven/chats` (change it with `--chats-dir`), readable by your user only. Up to 30 chats per repository, 60 questions each; the oldest go first.
+- **Reopening.** Click a chat under **Saved chats**. Follow-up questions remember it the same way as when it was live. A reloaded page still starts a new chat, so follow-ups never use context you cannot see.
+- **Stale code.** A saved chat records what was said, not a checked fact. The code may have changed since, so its citations open the files as they are now.
+- **Deleting.** The × beside a chat deletes it. **Forget this repository**, or `codehaven --forget`, deletes all of them along with the saved answers.
+- Chats about an uploaded file are never saved.
+
+## Search by meaning
+
+Key-word search finds "late fee" only where those words appear. With a local embedding model installed, CodeHaven also compares the meaning of your question with every indexed passage, so "what stops the model from repeating itself?" finds a class named `RepetitionGuard`. The two rankings are mixed, so exact names still win.
+
+```sh
+ollama pull nomic-embed-text     # once, while online
+codehaven --doctor               # prints "Meaning search: nomic-embed-text:latest"
+```
+
+- **Local.** The embedding model is a second, small Ollama model on this computer, reached over loopback like the chat model. Nothing leaves the machine. Cloud-backed models are never used.
+- **Automatic.** It is on when an embedding model is installed and off otherwise. `--no-semantic` turns it off, and `--embed-model NAME` picks one; without it, the first installed of `nomic-embed-text`, `embeddinggemma`, `mxbai-embed-large`, `bge-m3`, `snowflake-arctic-embed`, and `all-minilm` is used.
+- **First run.** Every passage is embedded once, at roughly 20 passages a second on a laptop, so a mid-sized project takes under a minute. The command waits up to 60 seconds and the page up to 15; the rest is prepared in the background while you ask questions, which use what is ready.
+- **Saved vectors.** Vectors are kept in `~/CodeHaven/index` (change it with `--index-dir`), one file per repository, readable by your user only, so later runs embed only changed passages. The file holds numbers and hashes, never code text. With `--no-remember` nothing is written and vectors live in memory only.
+- **Failure is harmless.** If the embedding model stops answering, a one-line note says so and search goes back to key words for the session.
+- **Memory.** A small embedding model (about 300 MB) normally fits beside the chat model. On a machine short of memory Ollama may swap the two, which slows every step; use `--no-semantic` there. See [Local inference speed](#local-inference-speed).
+
+The evaluation harness keeps using key-word search alone, so its results stay comparable from run to run.
 
 ## Use it from the terminal
 
@@ -180,7 +264,9 @@ Identical actions are caught anywhere in a task, not only back to back, so alter
 
 Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/python/langgraph/graph-api). Remote tracing is not supported. Every run is wrapped in [`tracing_context(enabled=False)`](https://docs.langchain.com/langsmith/trace-without-env-vars), so `LANGSMITH_TRACING`, `LANGCHAIN_TRACING_V2`, or an API key in your environment cannot turn uploads on. No tracing client is ever created. For timing and token details, use the local `Ollama metrics:` line printed after each model call.
 
-## What v0.9 does
+## What v0.10 does
+
+New in 0.10: explains Git changes, reviews a file one function at a time, lists functions with no tests, suggests a reading order, reads notebooks and PDFs, saves chats, searches by meaning with a local embedding model, and follows Go, Java, and Rust imports.
 
 - Never changes files. The only actions are `read`, `search`, `retrieve`, `run_tests`, and `finish`, and the workspace layer has no write method. The one file CodeHaven writes for you is the new file `--ocr` makes from a picture, and it refuses to replace an existing file.
 - Lists up to 1,000 visible project files and lets the model read selected UTF-8 files.

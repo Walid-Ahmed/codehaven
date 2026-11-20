@@ -71,6 +71,9 @@ body.dropping .main::after { content: "Drop a file to chat about it"; position: 
 .messages-inner { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 .empty-state { text-align: center; color: var(--muted); margin-top: 12vh; }
 .empty-state h2 { color: var(--text); font-size: 22px; margin-bottom: 6px; }
+.chat-row { display: flex; gap: 6px; }
+.chat-row button:first-child { flex: 1; min-width: 0; }
+.chat-row .chat-delete { width: auto; flex: none; padding-left: 9px; padding-right: 9px; }
 .suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
 .suggestions button { font-size: 13px; }
 
@@ -226,8 +229,8 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
     <div class="section">
       <h2>Or a single file</h2>
       <input type="file" id="file-input" hidden>
-      <div class="upload-row"><button id="upload">Upload a file or picture…</button></div>
-      <div class="index-status" id="upload-status">No folder needed: pick or drop one text file (up to 64 KB), or a picture of code such as a screenshot (PNG or JPEG, up to 8 MB), which is read into a file you can save. It stays on this computer, and the copy CodeHaven reads is deleted when you open something else.</div>
+      <div class="upload-row"><button id="upload">Upload a file, notebook, PDF, or picture…</button></div>
+      <div class="index-status" id="upload-status">No folder needed: pick or drop one text file (up to 64 KB), a Jupyter notebook or PDF (up to 8 MB), or a picture of code such as a screenshot (PNG or JPEG, up to 8 MB). Notebooks, PDFs, and pictures are read into a text file you can save. It stays on this computer, and the copy CodeHaven reads is deleted when you open something else.</div>
       <div class="index-status" id="picture-status" hidden></div>
       <div class="upload-row" id="save-row" hidden><button id="save-text">Save the file…</button></div>
     </div>
@@ -244,6 +247,11 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
       <h2>Chat</h2>
       <button id="new-chat" disabled>New chat</button>
       <div class="index-status" id="memory-status">Follow-up questions remember up to 8 earlier questions. Start a new chat when you change topic.</div>
+    </div>
+    <div class="section recent" id="chats-section" hidden>
+      <h2>Saved chats</h2>
+      <div id="chats"></div>
+      <div class="index-status">Kept on this computer only. Click one to reopen it; start with --no-remember to save none.</div>
     </div>
     <div class="section" id="saved-section" hidden>
       <h2>Long-term memory</h2>
@@ -277,7 +285,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
     </div>
     <div class="composer">
       <div class="composer-inner">
-        <button id="attach" title="Attach a file or a picture of code" aria-label="Attach a file or a picture of code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2"/></svg></button>
+        <button id="attach" title="Attach a file, notebook, PDF, or picture of code" aria-label="Attach a file, notebook, PDF, or picture of code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2"/></svg></button>
         <textarea id="question" rows="1" placeholder="Index a repository or upload a file first" disabled aria-label="Question"></textarea>
         <button id="send" class="primary" disabled>Ask</button>
       </div>
@@ -347,18 +355,32 @@ const $ = (id) => document.getElementById(id);
 let busy = false, indexed = false, uploaded = false, browsing = "";
 const UPLOAD_BYTES = 64000;  // The same limit as every file CodeHaven reads.
 const PICTURE_BYTES = 8000000;  // A picture of code is read into text by Tesseract on this computer.
+const isDocument = (file) => /\.(ipynb|pdf)$/i.test(file.name) || file.type === "application/pdf";
 const isPicture = (file) => /^image\/(png|jpeg)$/.test(file.type) || /\.(png|jpe?g)$/i.test(file.name);
 const REPOSITORY_SUGGESTIONS = [
   ["Explain this project", "Explain this project"],
   ["Explain README.md", "Explain README.md"],
   ["Main modules", "What are the main modules and what does each do?"],
   ["Tests", "Which tests are there and what do they check?"],
+  ["Project tour", "Give me a project tour: which files should I read first?"],
+  ["Test gaps", "Which functions have no tests?"],
 ];
+const GIT_SUGGESTIONS = [
+  ["My changes", "Explain my uncommitted changes"],
+  ["Last commit", "What changed in my last commit?"],
+];
+// Search by meaning uses a second local model; say whether it is on, and how far along it is.
+function meaningNote(meaning) {
+  if (!meaning) return " Search uses key words; install a local embedding model to also search by meaning.";
+  if (meaning.failed) return " Search by meaning stopped working, so answers use key words.";
+  return meaning.ready >= meaning.total ? " Search by meaning is on."
+    : ` Search by meaning is on: ${meaning.ready} of ${meaning.total} passages ready, the rest are being prepared.`;
+}
 function fileSuggestions(name) {
   return [
     [`Explain ${name}`, `Explain ${name}`],
     ["Main parts", `What are the main functions or sections in ${name}, and what does each do?`],
-    ["Risky parts", `Which parts of ${name} could fail or behave unexpectedly, and why?`],
+    ["Review", `Review ${name}`],
   ];
 }
 function setSuggestions(items) {
@@ -469,6 +491,7 @@ function setIndexed(summary) {
   $("model-name").textContent = summary.model || "a local model";
   setClone(Boolean(summary.clone));
   setSaved(summary);
+  setChats(summary.chats);
   if (!indexed) return;
   $("repo-label").classList.remove("empty");
   $("index-pill").hidden = false;
@@ -488,11 +511,12 @@ function setIndexed(summary) {
     $("repo-label").textContent = summary.repository;
     $("index-pill").textContent = `${summary.files} files indexed`;
     status.innerHTML = `<strong>${summary.files}</strong> files and ${summary.chunks} passages indexed.` +
-      (summary.limited ? " Index limits were reached, so some files are left out; answers can still search and read them." : "");
+      (summary.limited ? " Index limits were reached, so some files are left out; answers can still search and read them." : "") +
+      meaningNote(summary.meaning);
     upload.textContent = UPLOAD_HINT;
     $("path").value = summary.repository;
     $("empty-text").textContent = "Ask how something in this repository works. Answers cite the exact lines they rely on; click a citation to see the code.";
-    setSuggestions(REPOSITORY_SUGGESTIONS);
+    setSuggestions(REPOSITORY_SUGGESTIONS.concat(summary.git ? GIT_SUGGESTIONS : []));
   }
   $("suggestions").hidden = false;
   updateComposer();
@@ -532,9 +556,54 @@ function setSaved(summary, kept) {
   $("forget").disabled = busy || uploaded || !savedCount;
 }
 $("forget").addEventListener("click", async () => {
-  if (!confirm(`Delete the ${savedCount} saved answer${savedCount === 1 ? "" : "s"} for this repository? This cannot be undone.`)) return;
-  try { setSaved(await api("/api/forget", {method: "POST", body: "{}"})); } catch (error) { alert(error.message); }
+  if (!confirm(`Delete the ${savedCount} saved answer${savedCount === 1 ? "" : "s"} and all saved chats for this repository? This cannot be undone.`)) return;
+  try { const summary = await api("/api/forget", {method: "POST", body: "{}"}); setSaved(summary); setChats(summary.chats); } catch (error) { alert(error.message); }
 });
+
+// ---- Saved chats: earlier conversations about this repository, kept on this computer and reopened with a click.
+function setChats(chats) {
+  chats = chats || [];
+  $("chats-section").hidden = !chats.length || uploaded;
+  $("chats").replaceChildren(...chats.map((chat) => {
+    const row = document.createElement("div"); row.className = "chat-row";
+    const open = document.createElement("button");
+    open.textContent = chat.title;
+    open.title = `${chat.questions} question${chat.questions === 1 ? "" : "s"} · last used ${chat.updated.replace("T", " ")}`;
+    open.addEventListener("click", () => openChat(chat.id));
+    const remove = document.createElement("button"); remove.className = "chat-delete"; remove.textContent = "×";
+    remove.title = "Delete this saved chat"; remove.setAttribute("aria-label", `Delete the saved chat ${chat.title}`);
+    remove.addEventListener("click", async () => {
+      if (busy || !confirm(`Delete the saved chat "${chat.title}"? This cannot be undone.`)) return;
+      try { setChats((await api("/api/chat/delete", {method: "POST", body: JSON.stringify({id: chat.id})})).chats); } catch (error) { alert(error.message); }
+    });
+    row.append(open, remove);
+    return row;
+  }));
+}
+async function openChat(id) {
+  if (busy) return;
+  try {
+    const chat = await api("/api/chat", {method: "POST", body: JSON.stringify({id})});
+    setView("chat");
+    clearChat();
+    addMessage("note").textContent = `Saved chat, last used ${chat.updated.replace("T", " ")}. The code may have changed since: cited lines open the files as they are now.`;
+    for (const turn of chat.turns) {
+      addMessage("user").textContent = turn.question;
+      const card = addMessage("assistant");
+      const answer = document.createElement("div"); answer.className = "answer"; answer.innerHTML = render(turn.answer);
+      card.append(answer);
+      if (turn.issues.length) {
+        const checks = document.createElement("div"); checks.className = "checks";
+        const title = document.createElement("strong"); title.textContent = "Unverified: check the cited lines before relying on this answer.";
+        const list = document.createElement("ul");
+        for (const issue of turn.issues) { const item = document.createElement("li"); item.textContent = issue; list.append(item); }
+        checks.append(title, list); card.append(checks);
+      }
+    }
+    $("memory-status").textContent = `Reopened a saved chat. Remembering ${chat.remembered} earlier question${chat.remembered === 1 ? "" : "s"} (up to ${chat.memory}).`;
+    scrollDown();
+  } catch (error) { alert(error.message); }
+}
 
 // ---- GitHub, only when the server was started with --allow-clone: git on this computer downloads it once.
 let cloneOn = false;
@@ -591,9 +660,9 @@ function pictureNotes(summary) {
   return notes;
 }
 function setPicture(summary) {
-  $("picture-status").hidden = $("save-row").hidden = !summary.picture;
-  if (!summary.picture) return;
-  $("picture-status").replaceChildren(...pictureNotes(summary));
+  $("picture-status").hidden = $("save-row").hidden = !(summary.picture || summary.document);
+  if (!summary.picture && !summary.document) return;
+  $("picture-status").replaceChildren(...(summary.picture ? pictureNotes(summary) : [summary.document.note]));
   $("save-text").textContent = `Save ${summary.upload}…`;
 }
 async function saveText(name) {
@@ -609,9 +678,10 @@ $("save-text").addEventListener("click", () => saveText());
 // The note a file leaves in the chat when it is attached, pasted, or uploaded while a conversation is open.
 function uploadNote(summary, chatting) {
   const name = summary.upload;
-  const notes = summary.picture ? pictureNotes(summary) : ["Now chatting about ", Object.assign(document.createElement("strong"), {textContent: name}), "."];
+  const notes = summary.picture ? pictureNotes(summary)
+    : [summary.document ? summary.document.note + " " : "", "Now chatting about ", Object.assign(document.createElement("strong"), {textContent: name}), "."];
   if (chatting) notes.push(" The chat above is kept and follow-up questions still remember it, but its citations point to what was open before, so they no longer open.");
-  if (summary.picture) {
+  if (summary.picture || summary.document) {
     const save = Object.assign(document.createElement("button"), {textContent: `Save ${name}…`});
     save.addEventListener("click", () => saveText(name));
     notes.push(" ", lineLink(name, 1, `View ${name}`), save);
@@ -623,7 +693,7 @@ function uploadNote(summary, chatting) {
 // The chat is kept: a file attached or pasted in the composer (fromChat) reports its progress there as well.
 async function uploadFile(file, fromChat = false) {
   if (!file || busy) return;
-  const status = $("upload-status"), picture = isPicture(file), chatting = $("empty").hidden;
+  const status = $("upload-status"), picture = isPicture(file) || isDocument(file), chatting = $("empty").hidden;
   let note = null;
   const report = (text, failed = false) => {
     status.classList.toggle("error", failed); status.textContent = text;
@@ -632,12 +702,13 @@ async function uploadFile(file, fromChat = false) {
     note.classList.toggle("error", failed); note.textContent = text; scrollDown();
   };
   if (file.size > (picture ? PICTURE_BYTES : UPLOAD_BYTES)) {
-    report(picture ? `${file.name} is ${Math.ceil(file.size / 1000000)} MB; CodeHaven reads pictures up to 8 MB. Crop it to the code.`
+    report(isDocument(file) ? `${file.name} is ${Math.ceil(file.size / 1000000)} MB; CodeHaven reads notebooks and PDFs up to 8 MB.`
+      : picture ? `${file.name} is ${Math.ceil(file.size / 1000000)} MB; CodeHaven reads pictures up to 8 MB. Crop it to the code.`
       : `${file.name} is ${Math.ceil(file.size / 1000)} KB; CodeHaven reads text files up to 64 KB. Index its folder instead to ask about part of it.`, true);
     return;
   }
   busy = true; updateComposer();
-  report(picture ? `Reading the code in ${file.name}… this takes a few seconds.` : `Reading ${file.name}…`);
+  report(isDocument(file) ? `Reading ${file.name} into text…` : picture ? `Reading the code in ${file.name}… this takes a few seconds.` : `Reading ${file.name}…`);
   try {
     const response = await fetch("/api/upload?name=" + encodeURIComponent(file.name),
                                  {method: "POST", headers: {"Content-Type": "application/octet-stream", "X-CodeHaven-Token": TOKEN}, body: file});
@@ -854,6 +925,7 @@ async function ask(question) {
       checks.append(title, list); card.append(checks);
     }
     setSaved({saved: done.saved}, done.kept);
+    setChats(done.chats);
     $("memory-status").textContent = `Remembering ${done.remembered} earlier question${done.remembered === 1 ? "" : "s"} ` +
       `(up to ${done.memory}). The last two are kept in full, older ones as a short summary. Start a new chat when you change topic.`;
     const shownLines = new Set((done.answer || "").split("\n").map((line) => line.trim()).filter(Boolean));

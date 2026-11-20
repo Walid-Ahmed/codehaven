@@ -1,6 +1,6 @@
 # CodeHaven technical report
 
-CodeHaven (version 0.9.1) is a read-only, offline assistant for understanding code. It indexes a repository on your machine, answers questions about it with a local model served by Ollama (`qwen2.5-coder:7b` by default), and cites the lines it used. It never changes files and makes no network requests at runtime.
+CodeHaven (version 0.10.0) is a read-only, offline assistant for understanding code. It indexes a repository on your machine, answers questions about it with a local model served by Ollama (`qwen2.5-coder:7b` by default), and cites the lines it used. It never changes files and makes no network requests at runtime.
 
 This report describes how it works: the agent loop, how it finds relevant code (RAG), how answers are checked, and what the retrieval measurements show.
 
@@ -43,7 +43,7 @@ The model can also call `retrieve` later with its own query. Each passage carrie
 
 **Definition lookup.** When the index is built, CodeHaven records where each function, class, method and module constant is defined, using Python's `ast` module and Tree-sitter for JavaScript and TypeScript. A word in the question counts as a code name only when it is written like code (underscore, camelCase, `ALL_CAPS`, a dot, backticks or `()`), or when it sits next to "function", "method", "class" or "constant". Only names defined in one to three files are looked up, and at most three definitions are added. For a method, the passage is the method itself, not its whole class.
 
-**Import following.** For Python, JavaScript and TypeScript, CodeHaven adds the definitions that matched files import from other local files, up to two hops and four passages. Package imports and path aliases are not resolved.
+**Import following.** For Python, JavaScript, TypeScript, Go, Java and Rust, CodeHaven adds the definitions that matched files import from other local files, up to two hops and four passages. Package imports and path aliases are not resolved.
 
 **Whole functions.** Passages are widened to the complete function or class when it fits, and carry the values of up to three module constants it uses, such as `MAX_GUESTS = 4`.
 

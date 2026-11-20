@@ -106,7 +106,7 @@ def structure(workspace, knowledge, paths):
     """What to draw for the chosen files: each file's parts and calls, and the imports that link the files.
 
     Files outside the choice that import a chosen file, or are imported by one, are listed as neighbours.
-    Import links come from the index's static import analysis (Python, JavaScript, TypeScript).
+    Import links come from the index's static import analysis (Python, JavaScript, TypeScript, Go, Java, Rust).
     """
     texts = chosen(workspace, paths, MAP_FILES)
     dependencies = getattr(knowledge, "dependencies", None)

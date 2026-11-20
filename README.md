@@ -57,7 +57,7 @@ codehaven --gui
    **Private repositories.** CodeHaven never asks for, sees, or stores a GitHub password or token, and refuses addresses that contain one. A private repository downloads only if git on this computer is already signed in to an account that can read it: a credential helper (for example after `gh auth login`), or an SSH key with a `git@github.com:owner/repository.git` address. git is not allowed to prompt for a password or passphrase. Otherwise, clone it yourself with your usual tools and index the folder.
    **Or upload a notebook or a PDF.** The same button and drop area take a Jupyter notebook (`.ipynb`) or a PDF, up to 8 MB. See [Notebooks and PDFs](#notebooks-and-pdfs).
    **Or upload a picture of code.** The same button and drop area take a screenshot or photo of code, which CodeHaven turns into a file you can chat about and save. See [Read code from a picture](#read-code-from-a-picture).
-2. **Pick a model.** The sidebar lists the chat models installed in Ollama on this computer, with `qwen2.5-coder:7b` selected when it is installed. That default is the model all of CodeHaven's tests were tuned and measured on; other models may answer differently, and the first answer after switching is slower while the model loads. Cloud-backed and embedding-only models are never offered.
+2. **Pick a model.** **Settings** in the sidebar lists the chat models installed in Ollama on this computer, with `qwen2.5-coder:7b` selected when it is installed. That default is the model all of CodeHaven's tests were tuned and measured on; other models may answer differently, and the first answer after switching is slower while the model loads. Cloud-backed and embedding-only models are never offered.
 3. **Ask questions.** Answers stream in as they are written. Follow-up questions see your earlier questions and answers, and **New chat** starts over. Try "Explain this project", "Which function calls `checkout_total`?", or "Explain `src/app.py`".
 4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat.
 5. **See how it got there.** Each answer can show the steps CodeHaven took. If a citation could not be checked against what was actually read, a yellow **Unverified** box says so.
@@ -131,7 +131,7 @@ CodeHaven can read the code in a screenshot or photo and turn it into a `.py` fi
 **In the browser page:**
 
 1. Start `codehaven --gui`.
-2. Give it the picture in any of four ways: click the paperclip button beside the question box, paste a copied screenshot with Cmd+V (Ctrl+V on Windows and Linux), drop the picture anywhere on the page, or click **Upload a file, notebook, PDF, or picture…** in the sidebar. PNG and JPEG pictures up to 8 MB and 40 megapixels work.
+2. Give it the picture in any of four ways: click the paperclip button beside the question box, paste a copied screenshot with Cmd+V (Ctrl+V on Windows and Linux), drop the picture anywhere on the page, or click **Upload a file…** in the sidebar. PNG and JPEG pictures up to 8 MB and 40 megapixels work.
 3. After a few seconds a note in the chat and in the sidebar says how many lines were read, for example `Read 18 lines from the picture shot.png into shot.py`, and the chat is now about the new file `shot.py`. A pasted screenshot has no name of its own, so it becomes `image.py`.
 4. Check the text. The note lists the lines to compare with the picture; click a line number, or **View shot.py**, to see it. For Python it also says whether the file is valid Python and, if not, the first line that is wrong.
 5. Click **Save shot.py…** to save the file through your browser, or ask questions about it first ("What does this file do?"), draw its map, or make flashcards.
@@ -167,7 +167,7 @@ codehaven --gui --no-remember
 - **Where.** One file per repository in `~/CodeHaven/memory` (change it with `--memory-dir`), readable by your user only. Nothing is written inside the repository, and nothing leaves the computer.
 - **When it is used.** A new question brings back at most two saved answers that share its key words, shown to the model as notes from earlier sessions.
 - **When it is dropped.** Each saved answer records a fingerprint of the files it cites. If any of them has changed, the answer is deleted instead of being trusted. Up to 200 answers are kept per repository; the oldest go first.
-- **Forgetting.** Click **Forget this repository** in the page's sidebar, or run `codehaven --forget --workspace ~/dev/project`.
+- **Forgetting.** Click **Forget this project** under **Settings** in the page's sidebar, or run `codehaven --forget --workspace ~/dev/project`.
 
 ## Saved chats
 
@@ -176,7 +176,7 @@ The browser page keeps your chats about a repository on this computer, so a relo
 - **Where.** One file per repository in `~/CodeHaven/chats` (change it with `--chats-dir`), readable by your user only. Up to 30 chats per repository, 60 questions each; the oldest go first.
 - **Reopening.** Click a chat under **Saved chats**. Follow-up questions remember it the same way as when it was live. A reloaded page still starts a new chat, so follow-ups never use context you cannot see.
 - **Stale code.** A saved chat records what was said, not a checked fact. The code may have changed since, so its citations open the files as they are now.
-- **Deleting.** The × beside a chat deletes it. **Forget this repository**, or `codehaven --forget`, deletes all of them along with the saved answers.
+- **Deleting.** The × beside a chat deletes it. **Forget this project** under **Settings**, or `codehaven --forget`, deletes all of them along with the saved answers.
 - Chats about an uploaded file are never saved.
 
 ## Search by meaning

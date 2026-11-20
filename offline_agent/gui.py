@@ -171,13 +171,15 @@ class App:
             (folder / name).write_bytes(data)
             workspace = Workspace(folder, excludes=self.excludes)
             workspace.read(name)  # Refuses names the workspace rules hide, such as --exclude patterns.
-            self.load(workspace, None, upload=name, upload_folder=folder)
+            # A file attached in the middle of a chat continues it, so "explain the picture I just sent" works.
+            self.load(workspace, None, upload=name, upload_folder=folder, keep_chat=True)
             return self.summary()
         except BaseException:
             shutil.rmtree(folder, ignore_errors=True)
             raise
 
-    def load(self, workspace, references, *, upload=None, upload_folder=None):
+    def load(self, workspace, references, *, upload=None, upload_folder=None, keep_chat=False):
+        turns = self.session.turns if keep_chat and self.session is not None else []
         knowledge = KnowledgeBase(references, workspace=workspace, context_budget=self.retrieval_budget)
         self.discard_upload()
         self.workspace, self.knowledge = workspace, knowledge
@@ -188,6 +190,8 @@ class App:
                                memory=self.memory,
                                output=lambda line: self.emit({"type": "log", "text": str(line)}),
                                stream=lambda text: self.emit({"type": "text", "text": text}))
+        # Earlier questions and answers carry over; evidence does not, because it quotes files no longer open.
+        self.session.turns = list(turns)
 
     def discard_upload(self):
         """Delete the temporary copy of an uploaded file, if one is open."""

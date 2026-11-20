@@ -76,6 +76,12 @@ body.dropping .main::after { content: "Drop a file to chat about it"; position: 
 
 .msg.user { align-self: flex-end; max-width: 80%; background: var(--accent); color: var(--accent-text); padding: 9px 14px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.assistant { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; overflow-wrap: anywhere; }
+.msg.note { align-self: center; max-width: 90%; font-size: 13px; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 8px 14px; overflow-wrap: anywhere; }
+.msg.note strong { color: var(--text); }
+.msg.note.error { color: var(--error); border-color: var(--error); }
+.msg.note button { font-size: 12px; padding: 3px 10px; margin-left: 6px; }
+.composer #attach { flex: none; width: 44px; height: 44px; padding: 0; display: flex; align-items: center; justify-content: center; }
+.composer #attach svg { width: 20px; height: 20px; }
 .msg.assistant .status { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 8px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
@@ -271,10 +277,11 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
     </div>
     <div class="composer">
       <div class="composer-inner">
+        <button id="attach" title="Attach a file or a picture of code" aria-label="Attach a file or a picture of code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2"/></svg></button>
         <textarea id="question" rows="1" placeholder="Index a repository or upload a file first" disabled aria-label="Question"></textarea>
         <button id="send" class="primary" disabled>Ask</button>
       </div>
-      <div class="hint">Enter to send, Shift+Enter for a new line. Name files and functions exactly for the best answers.</div>
+      <div class="hint">Enter to send, Shift+Enter for a new line. Name files and functions exactly for the best answers. Attach or paste a picture of code to turn it into a file.</div>
     </div>
     </div>
     <div class="view" id="view-map" hidden>
@@ -569,64 +576,97 @@ $("github").addEventListener("keydown", (event) => { if (event.key === "Enter") 
 
 // ---- A picture of code: Tesseract on this computer read it into the uploaded file. Reading is never perfect,
 // so the lines to compare with the picture are listed, and the text can be saved as a file.
-function setPicture(summary) {
-  const picture = summary.picture, status = $("picture-status");
-  status.hidden = $("save-row").hidden = !picture;
-  if (!picture) return;
-  const name = summary.upload;
-  status.replaceChildren(`Read ${plural(picture.lines, "line")} from the picture ${picture.image}. Reading a picture can get characters wrong, so check the text before you run it.`);
-  if (picture.check.length) {
-    status.append(" Compare with the picture: line ");
-    picture.check.forEach((number, index) => {  // Opened by the same click handler as the citations in answers.
-      const link = Object.assign(document.createElement("a"), {href: "#", className: "cite", textContent: String(number)});
-      link.dataset.path = name; link.dataset.start = link.dataset.end = number;
-      status.append(index ? ", " : "", link);
-    });
-    status.append(".");
-  }
-  if (picture.syntax) status.append(Object.assign(document.createElement("strong"), {textContent: ` Not valid Python yet (${picture.syntax}).`}));
-  else if (name.endsWith(".py")) status.append(" It is valid Python.");
-  $("save-text").textContent = `Save ${name}…`;
+function lineLink(name, number, text) {  // Opened by the same click handler as the citations in answers.
+  const link = Object.assign(document.createElement("a"), {href: "#", className: "cite", textContent: text || String(number)});
+  link.dataset.path = name; link.dataset.start = link.dataset.end = number;
+  return link;
 }
-$("save-text").addEventListener("click", async () => {
+function pictureNotes(summary) {
+  const picture = summary.picture, name = summary.upload;
+  const notes = [`Read ${plural(picture.lines, "line")} from the picture ${picture.image} into `, Object.assign(document.createElement("strong"), {textContent: name}),
+    ". Reading a picture can get characters wrong, so check the text before you run it."];
+  if (picture.check.length) notes.push(" Compare with the picture: line ", ...picture.check.flatMap((number, index) => [index ? ", " : "", lineLink(name, number)]), ".");
+  if (picture.syntax) notes.push(Object.assign(document.createElement("strong"), {textContent: ` Not valid Python yet (${picture.syntax}).`}));
+  else if (name.endsWith(".py")) notes.push(" It is valid Python.");
+  return notes;
+}
+function setPicture(summary) {
+  $("picture-status").hidden = $("save-row").hidden = !summary.picture;
+  if (!summary.picture) return;
+  $("picture-status").replaceChildren(...pictureNotes(summary));
+  $("save-text").textContent = `Save ${summary.upload}…`;
+}
+async function saveText(name) {
   try {
     const file = await api("/api/text");
+    if (name && file.name !== name) throw new Error(`${name} is no longer open, so it cannot be saved. Attach the picture again.`);
     const link = Object.assign(document.createElement("a"), {href: URL.createObjectURL(new Blob([file.text], {type: "text/plain"})), download: file.name});
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   } catch (error) { alert(error.message); }
-});
+}
+$("save-text").addEventListener("click", () => saveText());
+// The note a file leaves in the chat when it is attached, pasted, or uploaded while a conversation is open.
+function uploadNote(summary, chatting) {
+  const name = summary.upload;
+  const notes = summary.picture ? pictureNotes(summary) : ["Now chatting about ", Object.assign(document.createElement("strong"), {textContent: name}), "."];
+  if (chatting) notes.push(" The chat above is kept and follow-up questions still remember it, but its citations point to what was open before, so they no longer open.");
+  if (summary.picture) {
+    const save = Object.assign(document.createElement("button"), {textContent: `Save ${name}…`});
+    save.addEventListener("click", () => saveText(name));
+    notes.push(" ", lineLink(name, 1, `View ${name}`), save);
+  }
+  return notes;
+}
 
 // ---- One uploaded file, for a quick question without a repository. The file goes only to this local server.
-async function uploadFile(file) {
+// The chat is kept: a file attached or pasted in the composer (fromChat) reports its progress there as well.
+async function uploadFile(file, fromChat = false) {
   if (!file || busy) return;
-  const status = $("upload-status");
-  status.classList.remove("error");
-  const picture = isPicture(file);
+  const status = $("upload-status"), picture = isPicture(file), chatting = $("empty").hidden;
+  let note = null;
+  const report = (text, failed = false) => {
+    status.classList.toggle("error", failed); status.textContent = text;
+    if (!fromChat) return;
+    note = note || addMessage("note");
+    note.classList.toggle("error", failed); note.textContent = text; scrollDown();
+  };
   if (file.size > (picture ? PICTURE_BYTES : UPLOAD_BYTES)) {
-    status.classList.add("error");
-    status.textContent = picture ? `${file.name} is ${Math.ceil(file.size / 1000000)} MB; CodeHaven reads pictures up to 8 MB. Crop it to the code.`
-      : `${file.name} is ${Math.ceil(file.size / 1000)} KB; CodeHaven reads text files up to 64 KB. Index its folder instead to ask about part of it.`;
+    report(picture ? `${file.name} is ${Math.ceil(file.size / 1000000)} MB; CodeHaven reads pictures up to 8 MB. Crop it to the code.`
+      : `${file.name} is ${Math.ceil(file.size / 1000)} KB; CodeHaven reads text files up to 64 KB. Index its folder instead to ask about part of it.`, true);
     return;
   }
   busy = true; updateComposer();
-  status.textContent = picture ? `Reading the code in ${file.name}… this takes a few seconds.` : `Reading ${file.name}…`;
+  report(picture ? `Reading the code in ${file.name}… this takes a few seconds.` : `Reading ${file.name}…`);
   try {
     const response = await fetch("/api/upload?name=" + encodeURIComponent(file.name),
                                  {method: "POST", headers: {"Content-Type": "application/octet-stream", "X-CodeHaven-Token": TOKEN}, body: file});
     const summary = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(summary.error || response.statusText);
-    clearChat(); resetStudy();
+    resetStudy();
     setIndexed(summary);
+    if (summary.picture || chatting || note) {
+      note = note || addMessage("note");
+      note.replaceChildren(...uploadNote(summary, chatting)); scrollDown();
+    }
   } catch (error) {
-    status.classList.add("error");
-    status.textContent = error.message;
+    report(error.message, true);
   } finally {
     busy = false; updateComposer();
   }
 }
-$("upload").addEventListener("click", () => $("file-input").click());
-$("file-input").addEventListener("change", () => { const file = $("file-input").files[0]; $("file-input").value = ""; uploadFile(file); });
+let attaching = false;  // Whether the file chooser was opened from the composer rather than the sidebar.
+$("upload").addEventListener("click", () => { attaching = false; $("file-input").click(); });
+$("attach").addEventListener("click", () => { attaching = true; $("file-input").click(); });
+$("file-input").addEventListener("change", () => { const file = $("file-input").files[0]; $("file-input").value = ""; uploadFile(file, attaching); });
+// A copied screenshot or file pasted anywhere on the page is attached. Pasted text is left alone, including text
+// copied from an app that also puts a picture of it on the clipboard.
+document.addEventListener("paste", (event) => {
+  const data = event.clipboardData;
+  if (!data || !data.files.length || data.getData("text/plain")) return;
+  event.preventDefault();
+  uploadFile(data.files[0], true);
+});
 let dragDepth = 0;
 const dragsFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
 document.addEventListener("dragenter", (event) => { if (!dragsFiles(event)) return; event.preventDefault(); dragDepth++; if (!busy) document.body.classList.add("dropping"); });
@@ -638,7 +678,7 @@ document.addEventListener("drop", (event) => {
   dragDepth = 0; document.body.classList.remove("dropping");
   const files = event.dataTransfer.files;
   if (files.length > 1) { $("upload-status").classList.add("error"); $("upload-status").textContent = "Drop one file at a time, or index the folder that holds them."; return; }
-  uploadFile(files[0]);
+  uploadFile(files[0], true);
 });
 
 // ---- Folder browser.
@@ -753,7 +793,7 @@ function updateComposer() {
   $("new-chat").disabled = !indexed || busy;
   $("model").disabled = busy;
   $("index").disabled = busy;
-  $("upload").disabled = busy;
+  $("upload").disabled = $("attach").disabled = busy;
   $("clone").disabled = busy;
   $("forget").disabled = busy || uploaded || !savedCount;
   $("tab-map").disabled = $("tab-cards").disabled = !indexed;

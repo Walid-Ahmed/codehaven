@@ -220,8 +220,10 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
     <div class="section">
       <h2>Or a single file</h2>
       <input type="file" id="file-input" hidden>
-      <div class="upload-row"><button id="upload">Upload a file…</button></div>
-      <div class="index-status" id="upload-status">No folder needed: pick or drop one text file (up to 64 KB). It stays on this computer, and the copy CodeHaven reads is deleted when you open something else.</div>
+      <div class="upload-row"><button id="upload">Upload a file or picture…</button></div>
+      <div class="index-status" id="upload-status">No folder needed: pick or drop one text file (up to 64 KB), or a picture of code such as a screenshot (PNG or JPEG, up to 8 MB), which is read into a file you can save. It stays on this computer, and the copy CodeHaven reads is deleted when you open something else.</div>
+      <div class="index-status" id="picture-status" hidden></div>
+      <div class="upload-row" id="save-row" hidden><button id="save-text">Save the file…</button></div>
     </div>
     <div class="section">
       <h2>Model</h2>
@@ -337,6 +339,8 @@ const TOKEN = new URLSearchParams(location.search).get("token") || "";
 const $ = (id) => document.getElementById(id);
 let busy = false, indexed = false, uploaded = false, browsing = "";
 const UPLOAD_BYTES = 64000;  // The same limit as every file CodeHaven reads.
+const PICTURE_BYTES = 8000000;  // A picture of code is read into text by Tesseract on this computer.
+const isPicture = (file) => /^image\/(png|jpeg)$/.test(file.type) || /\.(png|jpe?g)$/i.test(file.name);
 const REPOSITORY_SUGGESTIONS = [
   ["Explain this project", "Explain this project"],
   ["Explain README.md", "Explain README.md"],
@@ -471,7 +475,9 @@ function setIndexed(summary) {
       ". The copy CodeHaven reads is deleted when you open something else; your original is never touched.");
     $("empty-text").textContent = `Ask how something in ${summary.upload} works. Answers cite the exact lines they rely on; click a citation to see the code.`;
     setSuggestions(fileSuggestions(summary.upload));
+    setPicture(summary);
   } else {
+    setPicture({});
     $("repo-label").textContent = summary.repository;
     $("index-pill").textContent = `${summary.files} files indexed`;
     status.innerHTML = `<strong>${summary.files}</strong> files and ${summary.chunks} passages indexed.` +
@@ -561,18 +567,50 @@ async function cloneRepository() {
 $("clone").addEventListener("click", cloneRepository);
 $("github").addEventListener("keydown", (event) => { if (event.key === "Enter") cloneRepository(); });
 
+// ---- A picture of code: Tesseract on this computer read it into the uploaded file. Reading is never perfect,
+// so the lines to compare with the picture are listed, and the text can be saved as a file.
+function setPicture(summary) {
+  const picture = summary.picture, status = $("picture-status");
+  status.hidden = $("save-row").hidden = !picture;
+  if (!picture) return;
+  const name = summary.upload;
+  status.replaceChildren(`Read ${plural(picture.lines, "line")} from the picture ${picture.image}. Reading a picture can get characters wrong, so check the text before you run it.`);
+  if (picture.check.length) {
+    status.append(" Compare with the picture: line ");
+    picture.check.forEach((number, index) => {  // Opened by the same click handler as the citations in answers.
+      const link = Object.assign(document.createElement("a"), {href: "#", className: "cite", textContent: String(number)});
+      link.dataset.path = name; link.dataset.start = link.dataset.end = number;
+      status.append(index ? ", " : "", link);
+    });
+    status.append(".");
+  }
+  if (picture.syntax) status.append(Object.assign(document.createElement("strong"), {textContent: ` Not valid Python yet (${picture.syntax}).`}));
+  else if (name.endsWith(".py")) status.append(" It is valid Python.");
+  $("save-text").textContent = `Save ${name}…`;
+}
+$("save-text").addEventListener("click", async () => {
+  try {
+    const file = await api("/api/text");
+    const link = Object.assign(document.createElement("a"), {href: URL.createObjectURL(new Blob([file.text], {type: "text/plain"})), download: file.name});
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  } catch (error) { alert(error.message); }
+});
+
 // ---- One uploaded file, for a quick question without a repository. The file goes only to this local server.
 async function uploadFile(file) {
   if (!file || busy) return;
   const status = $("upload-status");
   status.classList.remove("error");
-  if (file.size > UPLOAD_BYTES) {
+  const picture = isPicture(file);
+  if (file.size > (picture ? PICTURE_BYTES : UPLOAD_BYTES)) {
     status.classList.add("error");
-    status.textContent = `${file.name} is ${Math.ceil(file.size / 1000)} KB; CodeHaven reads text files up to 64 KB. Index its folder instead to ask about part of it.`;
+    status.textContent = picture ? `${file.name} is ${Math.ceil(file.size / 1000000)} MB; CodeHaven reads pictures up to 8 MB. Crop it to the code.`
+      : `${file.name} is ${Math.ceil(file.size / 1000)} KB; CodeHaven reads text files up to 64 KB. Index its folder instead to ask about part of it.`;
     return;
   }
   busy = true; updateComposer();
-  status.textContent = `Reading ${file.name}…`;
+  status.textContent = picture ? `Reading the code in ${file.name}… this takes a few seconds.` : `Reading ${file.name}…`;
   try {
     const response = await fetch("/api/upload?name=" + encodeURIComponent(file.name),
                                  {method: "POST", headers: {"Content-Type": "application/octet-stream", "X-CodeHaven-Token": TOKEN}, body: file});

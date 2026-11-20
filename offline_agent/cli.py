@@ -4,6 +4,7 @@ import sys
 from functools import partial
 from pathlib import Path
 
+from . import ocr
 from .agent import Session, run
 from .knowledge import KnowledgeBase
 from .memory import Memory
@@ -43,6 +44,35 @@ def interactive(session, first_task=None, prompt=input):
             except KeyboardInterrupt:
                 print("\nStopped this task.", file=sys.stderr, flush=True)
         task = None
+
+
+def read_picture(picture, out=None):
+    """Write the code in a picture to a new file beside it. Needs Tesseract, not the model."""
+    try:
+        source = Path(picture).expanduser()
+        if source.stat().st_size > ocr.IMAGE_BYTES:
+            raise ValueError(f"Only pictures up to {ocr.IMAGE_BYTES // 1_000_000} MB can be read.")
+        target = Path(out).expanduser() if out else None
+        found = ocr.read_code(source.name, source.read_bytes(), target.name if target else None)
+        target = target or source.with_name(found["name"])
+        try:
+            with open(target, "x", encoding="utf-8") as handle:  # "x" refuses to replace a file that is there.
+                handle.write(found["text"])
+        except FileExistsError:
+            raise ValueError(f"{target} already exists, and CodeHaven never changes your files. "
+                             "Choose a new name with --out.") from None
+    except (ValueError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Read {found['lines']} lines from {source.name} into {target}.\n"
+          "Reading a picture can get characters wrong, so check the text before you run it.")
+    if found["check"]:
+        print("Compare with the picture: line " + ", ".join(map(str, found["check"])) + ".")
+    if found["syntax"]:
+        print(f"Not valid Python yet ({found['syntax']}).")
+    elif target.suffix == ".py":
+        print("It is valid Python.")
+    return 0
 
 
 def main(argv=None):
@@ -86,7 +116,13 @@ def main(argv=None):
                         help="Where saved answers are kept (default ~/CodeHaven/memory)")
     parser.add_argument("--forget", action="store_true",
                         help="Delete the answers saved for this workspace, then exit")
+    parser.add_argument("--ocr", metavar="PICTURE",
+                        help="Read the code in a PNG or JPEG picture, such as a screenshot, into a new file beside it, "
+                             "then exit. Offline; needs Tesseract installed on this computer")
+    parser.add_argument("--out", metavar="FILE", help="With --ocr, the file to write (default: the picture's name with .py)")
     args = parser.parse_args(argv)
+    if args.ocr:
+        return read_picture(args.ocr, args.out)
     if args.forget:
         try:
             memory = Memory(Workspace(args.workspace or ".", excludes=args.exclude), args.memory_dir)

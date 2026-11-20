@@ -9,6 +9,9 @@ A single file can be uploaded instead of choosing a folder. The page sends it to
 kept in a private temporary folder, which is the workspace for that chat, and deleted when another repository
 or file is opened or the server stops. The original file is never touched.
 
+The uploaded file can also be a picture of code, such as a screenshot. Tesseract, a program installed on this
+computer, reads it into a text file in that same temporary folder, which the page offers to save. See ocr.py.
+
 Besides chat, the page offers two study aids for one file or a group of files: a structure map, drawn from
 static analysis without the model, and flashcards, written by the local model with looked-up line citations.
 
@@ -37,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import study
+from . import ocr, study
 from .agent import Session
 from .knowledge import KnowledgeBase
 from .memory import Memory
@@ -74,6 +77,7 @@ class App:
         self.busy = False
         self.workspace = self.knowledge = self.session = None
         self.upload = self.upload_folder = None  # The uploaded file's name and its private temporary folder.
+        self.picture = None  # When the upload was a picture: how reading it went, for the page to show.
         self.sink = None
 
     def claim(self):
@@ -130,17 +134,38 @@ class App:
             self.release()
 
     def open_file(self, name, data):
-        """Chat about one uploaded file: a copy in a private temporary folder becomes the workspace."""
+        """Chat about one uploaded file: a copy in a private temporary folder becomes the workspace.
+
+        A picture of code is first read into text by Tesseract on this computer; the chat is about that text.
+        """
+        if ocr.image_suffix(data):
+            return self.open_picture(upload_name(name), data)
         if len(data) > MAX_BYTES:
             raise ValueError(f"Only UTF-8 text files up to {MAX_BYTES // 1000} KB can be uploaded.")
         if b"\0" in data:
-            raise ValueError("Only text files can be uploaded; this file looks binary.")
+            raise ValueError("Only text files and PNG or JPEG pictures of code can be uploaded; this file looks binary.")
         try:
             data.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise ValueError("Only UTF-8 text files can be uploaded.") from exc
         name = upload_name(name)
         self.claim()
+        try:
+            return self.open_copy(name, data)
+        finally:
+            self.release()
+
+    def open_picture(self, name, data):
+        self.claim()  # Before reading, so two pictures are never read at once.
+        try:
+            found = ocr.read_code(name, data)
+            summary = self.open_copy(found["name"], found["text"].encode("utf-8"))
+            self.picture = {key: found[key] for key in ("image", "lines", "check", "syntax")}
+            return {**summary, "picture": self.picture}  # The summary was made before the picture's notes were kept.
+        finally:
+            self.release()
+
+    def open_copy(self, name, data):
         folder = Path(tempfile.mkdtemp(prefix="codehaven-upload-"))  # Readable by this user only.
         try:
             (folder / name).write_bytes(data)
@@ -151,8 +176,6 @@ class App:
         except BaseException:
             shutil.rmtree(folder, ignore_errors=True)
             raise
-        finally:
-            self.release()
 
     def load(self, workspace, references, *, upload=None, upload_folder=None):
         knowledge = KnowledgeBase(references, workspace=workspace, context_budget=self.retrieval_budget)
@@ -170,7 +193,7 @@ class App:
         """Delete the temporary copy of an uploaded file, if one is open."""
         if self.upload_folder is not None:
             shutil.rmtree(self.upload_folder, ignore_errors=True)
-            self.upload = self.upload_folder = None
+            self.upload = self.upload_folder = self.picture = None
 
     def close(self):
         self.discard_upload()
@@ -201,13 +224,13 @@ class App:
                 "saved": len(self.memory.notes) if self.memory is not None else 0}
         workspace, knowledge = self.workspace, self.knowledge
         if workspace is None or knowledge is None:
-            return {**base, "repository": None, "upload": None}
+            return {**base, "repository": None, "upload": None, "picture": None}
         counts = knowledge.documents_by_source
         if self.upload is not None:
             # The temporary folder means nothing to the user; the file is readable even if its type is not indexed.
-            return {**base, "repository": None, "upload": self.upload, "files": 1,
+            return {**base, "repository": None, "upload": self.upload, "picture": self.picture, "files": 1,
                     "references": 0, "chunks": len(knowledge.entries), "limited": False}
-        return {**base, "repository": str(workspace.root), "upload": None, "files": counts["repo"],
+        return {**base, "repository": str(workspace.root), "upload": None, "picture": None, "files": counts["repo"],
                 "references": counts["user"], "chunks": len(knowledge.entries), "limited": knowledge.limited}
 
     def forget(self):
@@ -273,6 +296,12 @@ class App:
         last = min(len(lines), end + FILE_CONTEXT, first + FILE_LINES - 1)
         return {"path": path.removeprefix("repo/"), "start": start, "end": end, "total": len(lines),
                 "first": first, "lines": lines[first - 1:last]}
+
+    def text(self):
+        """The whole uploaded file, so the page can save the text read from a picture."""
+        if self.workspace is None or self.upload is None:
+            raise ValueError("Upload a file first.")
+        return {"name": self.upload, "text": self.workspace.read(self.upload)}
 
     def opened(self):
         if self.workspace is None:
@@ -524,6 +553,8 @@ def make_handler(app, token, port_holder):
                     self.send(200, app.models())
                 elif url.path == "/api/files":
                     self.send(200, app.files())
+                elif url.path == "/api/text":
+                    self.send(200, app.text())
                 elif url.path == "/api/dirs":
                     self.send(200, directories(query.get("path", [""])[0]))
                 elif url.path == "/api/file":
@@ -536,9 +567,10 @@ def make_handler(app, token, port_holder):
 
         def upload(self):
             length = int(self.headers.get("Content-Length") or 0)
-            if not 0 <= length <= MAX_BYTES:
+            if not 0 <= length <= ocr.IMAGE_BYTES:  # Text files have a smaller limit, checked once the bytes are seen.
                 self.close_connection = True  # The body is not read, so the connection cannot be reused.
-                raise ValueError(f"Only UTF-8 text files up to {MAX_BYTES // 1000} KB can be uploaded.")
+                raise ValueError(f"Only text files up to {MAX_BYTES // 1000} KB, and pictures up to "
+                                 f"{ocr.IMAGE_BYTES // 1_000_000} MB, can be uploaded.")
             return self.rfile.read(length)
 
         def do_POST(self):

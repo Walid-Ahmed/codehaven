@@ -10,3 +10,5 @@ dist/
 knowledge/
 # Local eval reports.
 evals/results/
+# Narration clips recorded by docs/demo-video/build.py.
+docs/demo-video/voice/

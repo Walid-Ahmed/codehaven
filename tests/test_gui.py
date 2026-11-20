@@ -297,6 +297,25 @@ class GuiServerTests(unittest.TestCase):
         self.assertTrue(original.exists())
         self.assertIsNone(self.json("GET", "/api/status")[1]["upload"])
 
+    def test_an_upload_keeps_the_conversation_and_a_repository_starts_a_new_one(self):
+        self.open_repo()
+        self.model.replies = [action("finish", content="It applies a discount.")]
+        self.request("POST", "/api/ask", {"question": "What does pkg/pricing.py do?"})
+        self.assertEqual(self.upload("notes.py", b"def greet(name):\n    return name\n")[0], 200)
+        session = self.app.session
+        self.assertEqual([question for question, _ in session.turns], ["What does pkg/pricing.py do?"])
+        self.assertIn("What does pkg/pricing.py do?", session.history())
+        self.assertEqual(session.evidence, [])  # It quoted files that are no longer open.
+        self.model.replies = [action("finish", content="It returns the name.")]
+        self.request("POST", "/api/ask", {"question": "And this file?"})
+        self.assertEqual(len(self.app.session.turns), 2)
+        self.json("POST", "/api/reset", {})
+        self.assertEqual(self.app.session.turns, [])
+        self.model.replies = [action("finish", content="It returns the name.")]
+        self.request("POST", "/api/ask", {"question": "What does it do?"})
+        self.open_repo()
+        self.assertEqual(self.app.session.turns, [])
+
     def test_uploads_must_be_small_named_utf8_text_and_need_the_token(self):
         self.assertEqual(self.upload("a.py", b"x = 1\n", token=False)[0], 403)
         for name, data, message in [("big.txt", b"a" * 64_001, "64 KB"), ("image.png", b"\x89PNG\0\0", "binary"),

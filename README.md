@@ -27,7 +27,12 @@ ollama pull qwen2.5-coder:7b
 python3 -m venv .venv
 source .venv/bin/activate        # Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install -e .
+
+# 4. Optional: install Tesseract, only if you want CodeHaven to read code from pictures
+brew install tesseract           # Ubuntu or Debian: sudo apt install tesseract-ocr
 ```
+
+Step 4 is needed only for [pictures of code](#read-code-from-a-picture). Ollama runs the chat model; Tesseract is a second, separate local program that reads the text in a picture. It is not an Ollama model, so `ollama pull` does not install it. On Windows, use an installer from the [Tesseract installation page](https://tesseract-ocr.github.io/tessdoc/Installation.html) and make sure `tesseract --version` works in a new terminal.
 
 After that, everything works offline. Each time, activate the environment and open the browser page:
 
@@ -41,9 +46,10 @@ codehaven --gui
 `codehaven --gui` opens a page in your browser:
 
 1. **Pick a repository.** Type its path or click **Browse…** (Git repositories are marked), then click **Index**. Indexing a typical project takes a few seconds, and the page shows how many files it indexed. Recent repositories are listed for one-click reopening.
-   **Or upload a single file.** No folder needed for a quick question: click **Upload a file…** or drop a file anywhere on the page. Any UTF-8 text file up to 64 KB works, and every question is about that file, so "What does this file do?" works without naming it. The file is sent only to the local server, which reads a copy kept in a private temporary folder and deletes it when you open something else or stop the server; your original file is never touched. Hidden files such as `.env`, and names matched by `--exclude`, are refused.
+   **Or upload a single file.** No folder needed for a quick question: click **Upload a file…** or drop a file anywhere on the page. Any UTF-8 text file up to 64 KB works, and every question is about that file, so "What does this file do?" works without naming it. The file is sent only to the local server, which reads a copy kept in a private temporary folder and deletes it when you open something else or stop the server; your original file is never touched. Hidden files such as `.env`, and names matched by `--exclude`, are refused. The paperclip button beside the question box and pasting a copied file do the same, and the conversation is kept when a file is opened this way.
    **Or download a GitHub repository (opt-in).** Start with `codehaven --gui --allow-clone` and the sidebar shows a box for an address such as `github.com/owner/repository`. This is the only time CodeHaven uses the internet, and only when you click **Download and index**: git on your computer downloads the latest snapshot (no history, tags, submodules, or Git LFS files; stopped after 3 minutes or 500 MB) into `~/CodeHaven/repos/owner/repository` (change it with `--clone-dir`). Nothing of yours is uploaded. The copy stays on your computer, so later it opens offline from **Recent**, and asking for the same address again opens it without downloading. Without `--allow-clone` the box is hidden, the server refuses to clone, and CodeHaven stays fully offline.
    **Private repositories.** CodeHaven never asks for, sees, or stores a GitHub password or token, and refuses addresses that contain one. A private repository downloads only if git on this computer is already signed in to an account that can read it: a credential helper (for example after `gh auth login`), or an SSH key with a `git@github.com:owner/repository.git` address. git is not allowed to prompt for a password or passphrase. Otherwise, clone it yourself with your usual tools and index the folder.
+   **Or upload a picture of code.** The same button and drop area take a screenshot or photo of code, which CodeHaven turns into a file you can chat about and save. See [Read code from a picture](#read-code-from-a-picture).
 2. **Pick a model.** The sidebar lists the chat models installed in Ollama on this computer, with `qwen2.5-coder:7b` selected when it is installed. That default is the model all of CodeHaven's tests were tuned and measured on; other models may answer differently, and the first answer after switching is slower while the model loads. Cloud-backed and embedding-only models are never offered.
 3. **Ask questions.** Answers stream in as they are written. Follow-up questions see your earlier questions and answers, and **New chat** starts over. Try "Explain this project", "Which function calls `checkout_total`?", or "Explain `src/app.py`".
 4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat.
@@ -61,6 +67,37 @@ Tips for good answers: name files and functions exactly (`Store.low_stock`, not 
 Options: `--workspace /path/to/repo` indexes a repository at startup, `--model NAME` picks the starting model, `--port 8737` sets a fixed port, `--no-browser` prints the link instead of opening it, and `--allow-clone` (with optional `--clone-dir FOLDER`) turns on downloading GitHub repositories. Ctrl+C in the terminal stops the server.
 
 If every answer takes a minute or more, another program is probably using a different Ollama model at the same time; see [Local inference speed](#local-inference-speed).
+
+## Read code from a picture
+
+CodeHaven can read the code in a screenshot or photo and turn it into a `.py` file, offline. This needs [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html) installed on this computer (step 4 of [Get started](#get-started)); check with `tesseract --version`. If it is missing, CodeHaven says so and shows the install command, and everything else keeps working.
+
+**In the browser page:**
+
+1. Start `codehaven --gui`.
+2. Give it the picture in any of four ways: click the paperclip button beside the question box, paste a copied screenshot with Cmd+V (Ctrl+V on Windows and Linux), drop the picture anywhere on the page, or click **Upload a file or picture…** in the sidebar. PNG and JPEG pictures up to 8 MB and 40 megapixels work.
+3. After a few seconds a note in the chat and in the sidebar says how many lines were read, for example `Read 18 lines from the picture shot.png into shot.py`, and the chat is now about the new file `shot.py`. A pasted screenshot has no name of its own, so it becomes `image.py`.
+4. Check the text. The note lists the lines to compare with the picture; click a line number, or **View shot.py**, to see it. For Python it also says whether the file is valid Python and, if not, the first line that is wrong.
+5. Click **Save shot.py…** to save the file through your browser, or ask questions about it first ("What does this file do?"), draw its map, or make flashcards.
+
+The picture is read as soon as it arrives; you do not need to ask for it in the chat, and typing "I will send a picture" does nothing by itself. The conversation is kept: earlier questions and answers stay on the page and follow-up questions still remember them. Because the picture's file replaces what was open before, citations in those earlier answers no longer open, and questions are now answered from the new file. Click **New chat** to start over.
+
+**From the terminal**, without the browser or the model:
+
+```sh
+codehaven --ocr /path/to/shot.png                      # writes /path/to/shot.py
+codehaven --ocr /path/to/shot.png --out ~/code/area.py # choose the file to write
+```
+
+The command prints the lines to check and never replaces a file: if the target exists, it stops and asks for another name with `--out`.
+
+What to expect:
+
+- **The file name.** `shot.png` becomes `shot.py`. A picture named after its code, such as `cart.js.png`, keeps that name (`cart.js`); only `.py` files get the Python check.
+- **Indentation is kept.** Tesseract returns each word with its position, and CodeHaven rebuilds the leading spaces, the spacing between words, and blank lines from those positions. An editor's line-number column is dropped.
+- **Mistakes happen.** Reading a picture is never perfect: a quote, colon, or look-alike character (`l` and `1`, `O` and `0`) can be wrong, so compare the listed lines before running the code. Two common misreadings are repaired and listed: curly quotes and long dashes become plain ones, and `@` becomes `0`, because coding fonts draw zero with a slash (decorators such as `@property` are left alone).
+- **Best results.** Use a sharp screenshot cropped to the code, light or dark theme. Photos of a screen, small text, and pictures with menus or several columns read poorly. Only English letters and code symbols are read.
+- **Private.** Tesseract runs on this computer on a temporary copy of the picture, which is deleted as soon as it is read. In the browser page the text is kept in the same private temporary folder as any uploaded file and deleted when you open something else. Your picture is never changed.
 
 ## Long-term memory
 
@@ -118,7 +155,7 @@ The [startup script](scripts/start_ollama.py) sets `OLLAMA_NO_CLOUD=1` and binds
 
 If Ollama is already running, the script checks its local API, prints a friendly message, and exits successfully without launching a second server. It cannot change or verify that server's cloud setting. To enforce `OLLAMA_NO_CLOUD=1`, quit the existing desktop app or stop its service, then run the script again. An unrecognized listener on the port still produces an error. These environment settings apply only to a server launched by the script.
 
-After downloading a model, disconnect from the internet to use it offline. Disabling cloud features does not block model downloads or all network traffic. CodeHaven checks that the model is installed and rejects remote-backed and cloud models; a loopback URL alone cannot guarantee how a separately configured server performs inference. Installation downloads LangGraph and its dependencies; runtime does not require internet access.
+After downloading a model, disconnect from the internet to use it offline. Disabling cloud features does not block model downloads or all network traffic. CodeHaven checks that the model is installed and rejects remote-backed and cloud models; a loopback URL alone cannot guarantee how a separately configured server performs inference. Installation downloads LangGraph and its dependencies; runtime does not require internet access. Reading code from a picture runs Tesseract, a separate program installed once; it works offline and makes no network connection.
 
 ## LangGraph workflow
 
@@ -145,7 +182,7 @@ Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/
 
 ## What v0.9 does
 
-- Never changes files. The only actions are `read`, `search`, `retrieve`, `run_tests`, and `finish`, and the workspace layer has no write method.
+- Never changes files. The only actions are `read`, `search`, `retrieve`, `run_tests`, and `finish`, and the workspace layer has no write method. The one file CodeHaven writes for you is the new file `--ocr` makes from a picture, and it refuses to replace an existing file.
 - Lists up to 1,000 visible project files and lets the model read selected UTF-8 files.
 - Reads long files in pages. Content such as `120-180` asks for a line range. A read that would not fit in half the prompt budget returns whole lines up to that size and names the next range to request, so evidence is never silently truncated.
 - Preloads up to two files that your task names, such as `explain chapter-06/gateway/app/main.py`, with line numbers for citing. The model starts with the file's lines instead of spending steps finding and reading it, and those lines count as evidence for citations. A file too long to fit shows its start, its end, and the lines around any code-like name in the task, such as `SKU-0042`, because the answer is often not on the first page. A plain file name like `store.py` counts only if exactly one file has that name. Hidden and excluded files are never preloaded.
@@ -154,6 +191,7 @@ Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/
 - Search results name the enclosing function or class of each match and mark definitions.
 - Draws a structure map of one file (its parts and which call which) or of several files (which imports which) by parsing the code, without the model.
 - Writes flashcards about chosen files with the local model, and looks up the lines each answer is about instead of trusting the model's numbers.
+- Reads the code in a PNG or JPEG picture into a new file with Tesseract on this computer, rebuilding indentation and listing the lines to check.
 - Remembers checked, cited answers per repository between sessions, and deletes a saved answer as soon as a file it cites changes.
 - Runs unittest or pytest in isolated Docker containers after approval, with networking disabled, read-only project snapshots, a 30-second timeout, and bounded output. Tests cannot change your project.
 - Keeps long tasks within the prompt budget by first replacing older tool results and file contents with one-line stubs, oldest first, such as `Tool result for read big.py … [Older result compacted: 9,412 bytes omitted]`. Older messages are dropped only if that is not enough.

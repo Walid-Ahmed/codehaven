@@ -90,14 +90,17 @@ class OtherDependencies:
     """Edges, definitions, and spans for the Go, Java, and Rust files among files, shaped like the Python analyser's."""
 
     def __init__(self, files, manifests=None):
+        """files maps paths to text. manifests maps go.mod paths to their text, which names each Go module's import prefix."""
         self.edges, self.definitions, self.spans = {}, {}, {}
         self.parse_failures = 0
         self.files = {name: text for name, text in files.items() if PurePosixPath(name).suffix in SUFFIXES}
         self.names = set(self.files)
         for name, text in self.files.items():
             self.outline(name, text)
+        # (folder, module path) for each go.mod, longest folder first.
         go_modules = sorted(((posixpath.dirname(name), match[1]) for name, text in (manifests or {}).items()
                              if (match := re.search(r"^module\s+(\S+)", text, re.M))), key=lambda row: -len(row[0]))
+        # The package of every Java file; "" is the default package.
         java = {}
         for name, text in self.files.items():
             if name.endswith(".java"):
@@ -114,6 +117,8 @@ class OtherDependencies:
         lines = text.splitlines()
         cleaned = [clean(line) for line in lines]
         suffix = PurePosixPath(name).suffix
+        # owners is a stack of (name, brace depth of its body) for the enclosing class, trait, or impl block;
+        # depth is the brace depth at the start of the current line.
         definitions, spans, owners, depth = {}, [], [], 0
         for index, line in enumerate(cleaned):
             while owners and depth < owners[-1][1]:
@@ -129,15 +134,18 @@ class OtherDependencies:
                     symbol = kind[1]
             elif suffix == ".java":
                 kind = JAVA_TYPE.match(line)
+                # Methods are looked for only directly inside a type's body, not inside nested blocks.
                 method = JAVA_METHOD.match(line) if owners and depth == owners[-1][1] else None
                 if kind:
                     symbol, opens_owner = (owner + "." if owner else "") + kind[1], True
+                # Not statements that look like a method, such as "return find(...)", nor declarations without a body.
                 elif method and method[1] not in JAVA_WORDS and line.split("(")[0].split()[0] not in JAVA_WORDS \
                         and not line.rstrip().endswith(";"):
                     symbol = owner + "." + method[1]
             elif suffix == ".rs":
                 implementation = RUST_IMPL.match(line)
                 item = RUST_ITEM.match(line)
+                # An impl block defines nothing itself; it names the type that the functions inside belong to.
                 if implementation and not item:
                     owners.append((implementation[1].rsplit("::", 1)[-1], depth + 1))
                 elif item and (depth == 0 or (owners and depth == owners[-1][1])):
@@ -147,8 +155,10 @@ class OtherDependencies:
             if symbol:
                 end = block_end(cleaned, index)
                 short = symbol.rsplit(".", 1)[-1]
+                # definitions holds what another file can use by name: top-level items, and Go methods under their short name.
                 if "." not in symbol or suffix == ".go":
                     definitions.setdefault(symbol if "." not in symbol else short, index + 1)
+                # Rust type aliases, statics, and constants are definitions, but not spans to show as a block.
                 if suffix != ".rs" or not re.match(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:type|static|const)\s", line):
                     spans.append({"name": symbol, "start": index + 1, "end": end + 1})
                 if opens_owner:
@@ -157,16 +167,19 @@ class OtherDependencies:
         self.definitions[name], self.spans[name] = definitions, spans
 
     def package_files(self, folder, suffix):
+        """The indexed files directly in folder with this suffix, Go test files left out: for Go, the files of one package."""
         return [name for name in self.names if name.endswith(suffix) and posixpath.dirname(name) == folder
                 and not name.endswith("_test.go")]
 
     def go_imports(self, name, text, modules):
+        """{file: names used} for the files of this project's packages that one Go file imports."""
         found = {}
         imports = []
         for match in GO_IMPORT.finditer(text):
             imports += GO_IMPORT_LINE.findall(match[1]) if match[1] is not None else [(match[2] or "", match[3])]
         folders = {posixpath.dirname(other) for other in self.names if other.endswith(".go")}
         for alias, path in imports:
+            # Under a known module, the rest of the import path is the folder inside that module.
             folder = next((posixpath.normpath(posixpath.join(base, path[len(module):].lstrip("/")))
                            for base, module in modules if path == module or path.startswith(module + "/")), None)
             if folder is None:  # No go.mod was indexed: accept a folder that the import path ends with.
@@ -178,6 +191,8 @@ class OtherDependencies:
             targets = self.package_files(folder, ".go") if folder is not None else []
             if not targets or posixpath.dirname(name) == folder:
                 continue
+            # Without a usable alias, the package is referred to by the last part of its path. Uses such as store.New then
+            # tell which files of the package are needed.
             alias = alias if alias not in ("", "_", ".") else path.rsplit("/", 1)[-1]
             used = set(re.findall(rf"\b{re.escape(alias)}\.([A-Za-z_]\w*)", "\n".join(clean(line) for line in text.splitlines())))
             linked = False
@@ -192,6 +207,7 @@ class OtherDependencies:
         return found
 
     def java_imports(self, name, text, packages):
+        """{file: names used} for the project classes one Java file imports or, within its own package, mentions."""
         found = {}
         by_class = {(package + "." if package else "") + PurePosixPath(other).stem: other for other, package in packages.items()}
         for path, wildcard in JAVA_IMPORT.findall(text):
@@ -207,6 +223,7 @@ class OtherDependencies:
                 if target:
                     found.setdefault(target, set()).add(parts[size] if size < len(parts) else parts[size - 1])
                     break
+        # Classes of the same package need no import, so their names are looked for in the code itself.
         body = "\n".join(clean(line) for line in text.splitlines())
         for other, package in packages.items():
             stem = PurePosixPath(other).stem
@@ -215,20 +232,24 @@ class OtherDependencies:
         return found
 
     def module_file(self, base, segments):
+        """The indexed file of a Rust module path under base: a/b.rs or a/b/mod.rs. None when not indexed or outside the repo."""
         stem = posixpath.normpath(posixpath.join(base, *segments)) if segments else None
         if not stem or stem.startswith(".."):
             return None
         return next((candidate for candidate in (stem + ".rs", stem + "/mod.rs") if candidate in self.names), None)
 
     def rust_imports(self, name, text):
+        """{file: names used} for the files one Rust file reaches through mod declarations and crate/super/self use paths."""
         found = {}
         folder, stem = posixpath.dirname(name), PurePosixPath(name).stem
+        # Where this file's child modules live: beside main.rs, lib.rs, or mod.rs; otherwise in a folder named after the file.
         children = folder if stem in ("main", "lib", "mod") else posixpath.join(folder, stem)
         for module in RUST_MOD.findall(text):
             target = self.module_file(children, [module])
             if target:
                 found.setdefault(target, set()).add("")
         parts = folder.split("/") if folder else []
+        # crate:: paths start at the nearest src folder above this file, or at the file's own folder when there is none.
         root = "/".join(parts[:len(parts) - parts[::-1].index("src")]) if "src" in parts else folder
         for tree in RUST_USE.findall(text):
             for path in expand(tree):
@@ -241,6 +262,7 @@ class OtherDependencies:
                     base = posixpath.dirname(children) if stem in ("main", "lib", "mod") else folder
                     while rest and rest[0] == "super":
                         base, rest = posixpath.dirname(base), rest[1:]
+                # The longest leading part of the path that is a file wins; the segment after it is the name taken from that file.
                 for size in range(len(rest), 0, -1):
                     target = self.module_file(base, rest[:size])
                     if target:

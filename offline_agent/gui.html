@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CodeHaven</title>
 <style>
+/* ---- Colours and fonts: the light theme, then the dark one ---- */
 :root {
   color-scheme: light dark;  /* So the browser's own parts, such as menus and scroll bars, follow the theme. */
   --bg: #f6f5f1; --panel: #ffffff; --panel-2: #f0eee8; --text: #1d1d1b; --muted: #6b6a64; --line: #e2dfd6;
@@ -20,6 +21,7 @@
     --error: #f28b82; --error-soft: #3d2220; --code-bg: #262723; --mark: #4a4220;
   }
 }
+/* ---- Base elements: buttons, inputs, code ---- */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
@@ -38,6 +40,7 @@ input[type=text], textarea { width: 100%; border: 1px solid var(--line); backgro
 input[type=text]:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 code, pre { font-family: var(--mono); font-size: 13px; }
 
+/* ---- Page layout and sidebar (a few chat and upload rules added later sit here too) ---- */
 .app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
 .sidebar { border-right: 1px solid var(--line); background: var(--panel); padding: 18px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
 .brand { display: flex; align-items: center; gap: 12px; }
@@ -75,6 +78,7 @@ body.dropping .main::after { content: "Drop a file to chat about it"; position: 
 .recent button { display: block; width: 100%; text-align: left; margin-bottom: 6px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .privacy { margin-top: auto; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
 
+/* ---- Main column and top bar ---- */
 .main { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
 .topbar { display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .topbar .repo { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -82,6 +86,7 @@ body.dropping .main::after { content: "Drop a file to chat about it"; position: 
 .topbar .spacer { flex: 1; }
 .pill { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
 
+/* ---- Chat area, empty state, and suggested questions ---- */
 .messages { flex: 1; overflow-y: auto; padding: 22px; }
 .messages-inner { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 .empty-state { text-align: center; color: var(--muted); margin-top: 12vh; }
@@ -93,6 +98,7 @@ body.dropping .main::after { content: "Drop a file to chat about it"; position: 
 .suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 10px; }
 .suggestions button { font-size: 13px; border-radius: 999px; padding: 6px 14px; color: var(--text); }
 
+/* ---- Messages, answers, citations, and the unverified-answer box ---- */
 .msg.user { align-self: flex-end; max-width: 80%; background: var(--accent); color: var(--accent-text); padding: 9px 14px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.assistant { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; overflow-wrap: anywhere; }
 .msg.note { align-self: center; max-width: 90%; font-size: 13px; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 8px 14px; overflow-wrap: anywhere; }
@@ -123,11 +129,13 @@ details.steps { margin-top: 12px; font-size: 13px; color: var(--muted); }
 details.steps summary { cursor: pointer; }
 details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 8px 10px; border-radius: 8px; max-height: 320px; overflow-y: auto; margin: 6px 0 0; }
 
+/* ---- Composer: the question box ---- */
 .composer { border-top: 1px solid var(--line); background: var(--panel); padding: 14px 22px 16px; }
 .composer-inner { max-width: 860px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
 .composer textarea { resize: none; min-height: 44px; max-height: 200px; }
 .composer .hint { max-width: 860px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
 
+/* ---- View tabs, structure map, flashcards, and the file picker's rows ---- */
 .tabs { display: flex; gap: 4px; background: var(--panel-2); border-radius: 10px; padding: 3px; }
 .tabs button { border: 0; background: none; padding: 5px 12px; border-radius: 7px; font-size: 13px; }
 .tabs button[aria-pressed=true] { background: var(--panel); font-weight: 600; box-shadow: 0 0 0 1px var(--line); }
@@ -175,6 +183,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
 .modal .list label:hover { background: var(--panel-2); }
 .modal footer .note { flex: 1; font-size: 12px; color: var(--muted); align-self: center; }
 
+/* ---- Overlay and dialogs: folder browser and file picker ---- */
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; z-index: 10; }
 .overlay.open { display: block; }
 .modal { position: fixed; z-index: 11; top: 8vh; left: 50%; transform: translateX(-50%); width: min(640px, calc(100vw - 32px)); max-height: 80vh; display: none; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
@@ -187,6 +196,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
 .modal footer { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
 .tag { font-size: 11px; color: var(--accent); }
 
+/* ---- Drawer that shows cited code ---- */
 .drawer { position: fixed; z-index: 11; top: 0; right: 0; bottom: 0; width: min(720px, 100vw); background: var(--panel); border-left: 1px solid var(--line); display: none; flex-direction: column; }
 .drawer.open { display: flex; }
 .drawer header { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: center; }
@@ -196,6 +206,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
 .drawer .line .n { color: var(--muted); width: 48px; flex: none; text-align: right; padding-right: 14px; user-select: none; }
 .drawer .line.hit { background: var(--mark); }
 
+/* ---- Small screens ---- */
 @media (max-width: 760px) {
   /* The sidebar slides in over the chat, so the chat is the first thing on a small screen. */
   .app { grid-template-columns: 1fr; }
@@ -377,8 +388,11 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
 
 <script nonce="__NONCE__">
 "use strict";
+// ---- Setup: shared state, limits, and suggested questions.
+// The secret token from the link the server printed; every request sends it back, or the server refuses.
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
 const $ = (id) => document.getElementById(id);
+// busy: a request is running; indexed: something is open; uploaded: it is one uploaded file; browsing: the folder browser's folder.
 let busy = false, indexed = false, uploaded = false, browsing = "";
 const UPLOAD_BYTES = 64000;  // The same limit as every file CodeHaven reads.
 const PICTURE_BYTES = 8000000;  // A picture of code is read into text by Tesseract on this computer.
@@ -396,7 +410,6 @@ const GIT_SUGGESTIONS = [
   ["My changes", "Explain my uncommitted changes"],
   ["Last commit", "What changed in my last commit?"],
 ];
-// Search by meaning uses a second local model; say whether it is on, and how far along it is.
 // A short message that goes away by itself, for errors that do not belong to one part of the page.
 let toastTimer = null;
 function toast(message) {
@@ -405,12 +418,14 @@ function toast(message) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { box.hidden = true; }, 6000);
 }
+// Search by meaning uses a second local model; say whether it is on, and how far along it is.
 function meaningNote(meaning) {
   if (!meaning) return "";
   if (meaning.failed) return " Search by meaning stopped, so answers use key words.";
   return meaning.ready >= meaning.total ? " Search by meaning is on."
     : ` Search by meaning: ${meaning.ready} of ${meaning.total} passages ready, the rest are being prepared.`;
 }
+// Suggested questions for one uploaded file, as [button label, question] pairs.
 function fileSuggestions(name) {
   return [
     [`Explain ${name}`, `Explain ${name}`],
@@ -418,6 +433,7 @@ function fileSuggestions(name) {
     ["Review", `Review ${name}`],
   ];
 }
+// Show the suggestions as buttons; clicking one asks its question.
 function setSuggestions(items) {
   $("suggestions").replaceChildren(...items.map(([label, question]) => {
     const button = document.createElement("button");
@@ -427,6 +443,8 @@ function setSuggestions(items) {
   }));
 }
 
+// ---- Talking to the server.
+// One JSON request. A refused one throws the server's own error message.
 async function api(path, options = {}) {
   const response = await fetch(path, {...options, headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN}});
   const data = await response.json().catch(() => ({}));
@@ -434,6 +452,7 @@ async function api(path, options = {}) {
   return data;
 }
 
+// ---- Streaming answers from the server.
 // Events of a streamed reply: the server sends one JSON object per line.
 async function* streamEvents(path, body) {
   const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN},
@@ -458,7 +477,9 @@ async function* streamEvents(path, body) {
 function esc(text) {
   return text.replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 }
+// A citation such as src/app.py:12 or src/app.py:12-20, with or without repo/ in front.
 const CITE = /(^|[\s(\[>,;:])((?:repo\/)?[\w./-]+\.[A-Za-z]\w*):(\d+)(?:-(\d+))?(?![\w/])/g;
+// One line of text as safe HTML: code spans, bold, and clickable citations.
 function inline(text) {
   let html = esc(text);
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
@@ -466,6 +487,7 @@ function inline(text) {
   return html.replace(CITE, (m, pre, path, start, end) =>
     `${pre}<a href="#" class="cite" data-path="${path}" data-start="${start}" data-end="${end || start}">${path}:${start}${end ? "-" + end : ""}</a>`);
 }
+// A whole answer as safe HTML: paragraphs, lists, headings, and fenced code blocks.
 function render(text) {
   const out = [];
   let list = null, para = [];
@@ -520,6 +542,7 @@ function showRecent() {
 
 // ---- Indexing.
 const UPLOAD_HINT = $("upload-status").textContent;
+// Update the whole page from the server's summary of what is open.
 function setIndexed(summary) {
   indexed = Boolean(summary.repository || summary.upload);
   uploaded = Boolean(summary.upload);
@@ -561,6 +584,7 @@ function setIndexed(summary) {
   $("suggestions").hidden = false;
   updateComposer();
 }
+// Index the folder typed or chosen in the sidebar, and start an empty chat about it.
 async function indexRepository() {
   const path = $("path").value.trim();
   if (!path || busy) return;
@@ -585,6 +609,7 @@ async function indexRepository() {
 
 // ---- Long-term memory, unless the server was started with --no-remember: checked answers kept on this computer.
 let remembering = false, savedCount = 0;
+// Show how many answers are saved. kept is true when the answer just given was added.
 function setSaved(summary, kept) {
   remembering = Boolean(summary.remember ?? remembering);
   savedCount = summary.saved || 0;
@@ -604,6 +629,7 @@ $("forget").addEventListener("click", async () => {
 
 // ---- Saved chats: earlier conversations about this repository, kept on this computer and reopened with a click.
 let chatCount = 0;
+// Rebuild the sidebar's list of saved chats, each with a delete button.
 function setChats(chats) {
   chats = chats || [];
   chatCount = chats.length;
@@ -625,6 +651,7 @@ function setChats(chats) {
     return row;
   }));
 }
+// Reopen a saved chat: its questions and answers are shown again, and the server remembers them for follow-ups.
 async function openChat(id) {
   if (busy) return;
   try {
@@ -652,6 +679,7 @@ async function openChat(id) {
 
 // ---- GitHub, only when the server was started with --allow-clone: git on this computer downloads it once.
 let cloneOn = false;
+// Show the GitHub section and change the offline wording, the first time the server says cloning is on.
 function setClone(on) {
   if (on === cloneOn) return;
   cloneOn = on;
@@ -695,6 +723,7 @@ function lineLink(name, number, text) {  // Opened by the same click handler as 
   link.dataset.path = name; link.dataset.start = link.dataset.end = number;
   return link;
 }
+// What to say about a picture that was read: how many lines, which to compare, and whether it is valid Python.
 function pictureNotes(summary) {
   const picture = summary.picture, name = summary.upload;
   const notes = [`Read ${plural(picture.lines, "line")} from the picture ${picture.image} into `, Object.assign(document.createElement("strong"), {textContent: name}),
@@ -704,12 +733,14 @@ function pictureNotes(summary) {
   else if (name.endsWith(".py")) notes.push(" It is valid Python.");
   return notes;
 }
+// The sidebar note and Save button for a picture, notebook, or PDF that was read into text.
 function setPicture(summary) {
   $("picture-status").hidden = $("save-row").hidden = !(summary.picture || summary.document);
   if (!summary.picture && !summary.document) return;
   $("picture-status").replaceChildren(...(summary.picture ? pictureNotes(summary) : [summary.document.note]));
   $("save-text").textContent = `Save ${summary.upload}…`;
 }
+// Save the text read from the upload as a file, through a download link that exists only for the click.
 async function saveText(name) {
   try {
     const file = await api("/api/text");
@@ -783,6 +814,8 @@ document.addEventListener("paste", (event) => {
   event.preventDefault();
   uploadFile(data.files[0], true);
 });
+// Dragging a file over the page. dragenter and dragleave fire for every element crossed, so a count tells when the
+// file has really left the page.
 let dragDepth = 0;
 const dragsFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
 document.addEventListener("dragenter", (event) => { if (!dragsFiles(event)) return; event.preventDefault(); dragDepth++; if (!busy) document.body.classList.add("dropping"); });
@@ -798,6 +831,7 @@ document.addEventListener("drop", (event) => {
 });
 
 // ---- Folder browser.
+// List the folders inside path in the folder browser; clicking one goes into it.
 async function browse(path) {
   try {
     const data = await api("/api/dirs?path=" + encodeURIComponent(path || ""));
@@ -820,6 +854,7 @@ async function browse(path) {
     $("browser-path").textContent = error.message;
   }
 }
+// Opening and closing the dialogs, the drawer, and (on a small screen) the sidebar.
 function openBrowser() { document.body.classList.remove("menu-open"); $("overlay").classList.add("open"); $("browser").classList.add("open"); browse($("path").value.trim()); }
 function closeOverlays() { document.body.classList.remove("menu-open"); for (const id of ["overlay", "browser", "picker", "drawer"]) $(id).classList.remove("open"); }
 $("menu").addEventListener("click", () => { document.body.classList.add("menu-open"); $("overlay").classList.add("open"); });
@@ -827,6 +862,7 @@ $("start-folder").addEventListener("click", openBrowser);
 $("start-file").addEventListener("click", () => { attaching = false; $("file-input").click(); });
 
 // ---- Cited code.
+// Open the drawer on a file with the cited lines highlighted and a few lines around them.
 async function showCitation(path, start, end) {
   $("drawer-title").textContent = `${path}:${start}${end !== start ? "-" + end : ""}`;
   $("drawer-code").textContent = "Loading…";
@@ -849,6 +885,7 @@ async function showCitation(path, start, end) {
     $("drawer-code").textContent = error.message;
   }
 }
+// A click on any citation link, wherever it is on the page, opens the drawer.
 document.addEventListener("click", (event) => {
   const link = event.target.closest("a.cite");
   if (!link) return;
@@ -877,6 +914,7 @@ async function loadModels() {
     $("model-status").textContent = error.message;
   }
 }
+// Choosing another model: the server checks it is installed before using it.
 $("model").addEventListener("change", async () => {
   const name = $("model").value;
   busy = true; updateComposer();
@@ -895,6 +933,7 @@ function clearChat() {
   $("messages-inner").replaceChildren($("empty"));
   $("empty").hidden = false;
 }
+// Add an empty message box of one kind (user, assistant, or note) and return it to be filled.
 function addMessage(kind) {
   $("empty").hidden = true;
   const element = document.createElement("div");
@@ -903,6 +942,7 @@ function addMessage(kind) {
   return element;
 }
 function scrollDown() { const box = $("messages"); box.scrollTop = box.scrollHeight; }
+// Enable or disable every control to match the state: nothing open, busy, or ready.
 function updateComposer() {
   const ready = indexed && !busy;
   $("question").disabled = !ready;
@@ -922,10 +962,12 @@ function updateComposer() {
   showChosen();
   for (const button of $("suggestions").querySelectorAll("button")) button.disabled = !ready;
 }
+// Shorten a step line from the server's log for the status shown while waiting.
 function statusText(line) {
   return line.replace(/^\s+/, "").replace(/\s*\(loading and prompt processing can take time\)\.\.\.$/, "…");
 }
 
+// Send one question and show the answer as it streams in; then its checks, the steps taken, and a Copy button.
 async function ask(question) {
   question = question.trim();
   if (!question || busy || !indexed) return;
@@ -999,6 +1041,8 @@ async function ask(question) {
   }
 }
 
+// ---- Wiring: the question box, the sidebar buttons, the dialogs, and the Escape key.
+// The question box grows with its text, up to its largest height.
 function resize() { const box = $("question"); box.style.height = "auto"; box.style.height = Math.min(box.scrollHeight, 200) + "px"; }
 $("question").addEventListener("input", () => { resize(); updateComposer(); });
 $("question").addEventListener("keydown", (event) => {
@@ -1022,6 +1066,7 @@ $("new-chat").addEventListener("click", async () => {
 });
 
 // ---- Views: chat, and two study aids for one file or a group of files.
+// Show one view and mark its tab as pressed.
 function setView(name) {
   for (const view of ["chat", "map", "cards"]) {
     $("view-" + view).hidden = view !== name;
@@ -1032,6 +1077,7 @@ for (const view of ["chat", "map", "cards"]) $("tab-" + view).addEventListener("
 
 // ---- The files a map or flashcards are about. An uploaded file is always the choice.
 let selected = [], fileList = null, picking = new Set();
+// Show the chosen files in the bar above the map and above the flashcards.
 function showChosen() {
   const text = uploaded ? $("repo-label").textContent : !selected.length ? "No files chosen"
     : selected.length === 1 ? selected[0] : `${selected.length} files: ${selected.map((path) => path.split("/").pop()).join(", ")}`;
@@ -1041,6 +1087,7 @@ function showChosen() {
     label.classList.toggle("none", !uploaded && !selected.length);
   }
 }
+// Forget the chosen files, the map, and the cards when something else is opened.
 function resetStudy() {
   selected = []; fileList = null; mapData = null; cards = [];
   drawGraph([], []);
@@ -1048,6 +1095,7 @@ function resetStudy() {
   $("deck").hidden = true;
   for (const id of ["map-status", "cards-status"]) { $(id).classList.remove("error"); $(id).textContent = STUDY_HINTS[id]; }
 }
+// List the files that match the filter, the first 300 at most, each with a checkbox.
 function showPicker() {
   const filter = $("picker-filter").value.trim().toLowerCase();
   const shown = fileList.files.filter((path) => path.toLowerCase().includes(filter));
@@ -1067,6 +1115,7 @@ function showPickerNote() {
   const limits = fileList.limits;
   $("picker-note").textContent = `${picking.size} chosen. A map takes up to ${limits.map} files, flashcards up to ${limits.flashcards}.`;
 }
+// Open the file picker. The file list is fetched once and kept until something else is opened.
 async function openPicker() {
   $("overlay").classList.add("open"); $("picker").classList.add("open");
   picking = new Set(selected);
@@ -1089,12 +1138,14 @@ function studyError(id, message) { $(id).classList.add("error"); $(id).textConte
 const SVG = $("map-svg").namespaceURI;  // Taken from the page, so no web address is written anywhere in it.
 const BOX = {width: 214, height: 46, gapX: 70, gapY: 14, pad: 8};
 let mapData = null;
+// Make one SVG element with its attributes and, if given, its text.
 function svg(tag, attributes = {}, text) {
   const element = document.createElementNS(SVG, tag);
   for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
   if (text !== undefined) element.textContent = text;
   return element;
 }
+// A label that is too long keeps its end, which for a path is the file name.
 function shorten(text, width = 27) { return text.length <= width ? text : "…" + text.slice(text.length - width + 1); }
 // Columns from left to right: a box sits one column after the last box that points at it. Arrows that close a
 // loop are drawn dashed and do not move anything, so two files that import each other still fit in a picture.
@@ -1140,6 +1191,8 @@ function layout(nodes, edges) {
   loose.forEach((node, index) => place.set(node.id, {x: BOX.pad + (index % across) * (BOX.width + 16), y: top + Math.floor(index / across) * step}));
   return {place, back};
 }
+// Draw the boxes and arrows, and return how many arrows there are. Repeated arrows, arrows from a box to itself,
+// and arrows to a box that is not drawn are left out.
 function drawGraph(nodes, edges) {
   const picture = $("map-svg");
   const known = new Set(nodes.map((node) => node.id)), seen = new Set();
@@ -1192,6 +1245,7 @@ function drawGraph(nodes, edges) {
   return edges.length;
 }
 function plural(count, word) { return `${count} ${word}${count === 1 ? "" : "s"}`; }
+// The map inside one file: its functions and classes, and which calls which.
 function showFileMap(file) {
   const nodes = file.parts.map((part) => ({id: part.name, label: part.name, kind: part.kind, title: `${part.name} · click to see the code`,
     sub: `${part.kind === "part" ? "" : part.kind + " · "}lines ${part.start}-${part.end}`, open: () => showCitation(file.path, part.start, part.end)}));
@@ -1200,6 +1254,7 @@ function showFileMap(file) {
   $("map-status").textContent = !nodes.length ? `${file.path} has ${plural(file.lines, "line")} but no functions or classes CodeHaven can name, so there is nothing to draw.`
     : `${file.path}: ${plural(nodes.length, "part")}, ${plural(calls, "call")} between them${file.parts_limited ? " (only the first parts are shown)" : ""}. An arrow points from the caller to what it calls. Click a box to see its code.`;
 }
+// The map of several files: which imports which. Clicking a file shows the map inside it.
 function showFilesMap() {
   const nodes = mapData.files.map((file) => ({id: file.path, label: file.path, kind: "file", title: `${file.path} · click to see inside`,
     sub: `${plural(file.parts.length, "part")} · ${plural(file.lines, "line")}`, open: () => showFileMap(file)}));
@@ -1208,6 +1263,7 @@ function showFilesMap() {
   $("map-back").hidden = true;
   $("map-status").textContent = `${plural(mapData.files.length, "file")}, ${plural(links, "import")}${mapData.limited ? " (limits reached, so some are left out)" : ""}. An arrow points from a file to the file it imports; dashed boxes are files you did not choose. Click a file to see inside it.`;
 }
+// Ask the server for the structure of the chosen files and draw it.
 async function drawMap() {
   if (!uploaded && !selected.length) { openPicker(); return; }
   $("map-status").classList.remove("error");
@@ -1225,6 +1281,7 @@ $("map-back").addEventListener("click", showFilesMap);
 
 // ---- Flashcards: the local model writes them one file at a time; the lines behind each answer are looked up, not guessed.
 let cards = [], cardAt = 0, cardAnswer = false;
+// Show the current card, on its question side or its answer side.
 function showCard() {
   $("deck").hidden = !cards.length;
   if (!cards.length) return;
@@ -1242,6 +1299,7 @@ function showCard() {
 }
 function moveCard(step) { cardAt = Math.min(cards.length - 1, Math.max(0, cardAt + step)); cardAnswer = false; showCard(); }
 function flipCard() { cardAnswer = !cardAnswer; showCard(); }
+// Ask the model for cards. They arrive one file at a time and are shown as they come.
 async function makeCards() {
   if (busy || !indexed) return;
   if (!uploaded && !selected.length) { openPicker(); return; }
@@ -1288,14 +1346,17 @@ $("cards-copy").addEventListener("click", async () => {
   catch { $("cards-copy").textContent = "Copying is blocked by the browser"; }
   setTimeout(() => { $("cards-copy").textContent = "Copy all as text"; }, 2000);
 });
+// Keys in the flashcards view: Space or Enter turns the card over, the arrow keys move between cards.
 document.addEventListener("keydown", (event) => {
   if ($("view-cards").hidden || !cards.length || $("overlay").classList.contains("open") || event.target.closest("input, select, textarea, button")) return;
   if (event.key === " " || event.key === "Enter") { event.preventDefault(); flipCard(); }
   else if (event.key === "ArrowRight") moveCard(1);
   else if (event.key === "ArrowLeft") moveCard(-1);
 });
+// The choices for cards per file.
 $("cards-count").replaceChildren(...[3, 4, 5, 6].map((count) => Object.assign(document.createElement("option"), {value: count, textContent: count, selected: count === 5})));
 
+// ---- Start-up: show what the server already has open.
 showRecent();
 loadModels();
 // A reloaded page shows no earlier messages, so the server forgets them too: follow-ups never use hidden context.

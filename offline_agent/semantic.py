@@ -38,10 +38,12 @@ FLOOR = 0.2  # Below this similarity a passage is unrelated, whatever its rank.
 SAVE_EVERY = 480
 FOLLOW_UP_WAIT = 3  # Seconds a question waits for passages changed since the last one.
 
+# math.sumprod exists from Python 3.12; older versions use the slower plain sum.
 dot = getattr(math, "sumprod", None) or (lambda a, b: sum(map(mul, a, b)))
 
 
 def base_name(model):
+    """A model's plain name, without registry path or tag: "library/nomic-embed-text:latest" gives "nomic-embed-text"."""
     return model.split(":", 1)[0].rsplit("/", 1)[-1].lower()
 
 
@@ -65,6 +67,7 @@ def choose_model(client, wanted=None):
         if not isinstance(name, str) or cloud_name(name) or item.get("remote_host") or item.get("remote_model"):
             continue
         capabilities = item.get("capabilities")
+        # A server that does not list capabilities leaves only the model's name to judge by.
         embeds = "embedding" in capabilities if isinstance(capabilities, list) else bool(re.search(r"embed|minilm|bge", name))
         installed.append((name, embeds))
     if wanted:
@@ -80,6 +83,7 @@ def choose_model(client, wanted=None):
 
 
 def normalised(vector):
+    """The vector scaled to length 1, as compact 32-bit floats, so the dot product of two is their cosine similarity."""
     length = math.sqrt(sum(value * value for value in vector)) or 1.0
     return array("f", (value / length for value in vector))
 
@@ -88,12 +92,16 @@ class Semantic:
     """Vectors for one repository's passages, built in the background and ranked against a question."""
 
     def __init__(self, client, model, *, cache=None, output=None):
+        """Set up for one embedding model and load the vectors saved at cache (a file path; None keeps nothing on disk)."""
         self.client, self.model = client, model
         self.cache = Path(cache) if cache else None
         self.output = output or (lambda *_: None)
         self.document_prefix, self.query_prefix = PREFIXES.get(base_name(model), ("", ""))
+        # vectors: passage key -> vector, for every passage embedded so far. keys: the current passages' keys, in index order.
         self.vectors, self.keys = {}, []
         self.failed = None
+        # generation counts index rebuilds, so an outdated background build can tell it was replaced. done is set while
+        # no build is running.
         self.generation, self.thread, self.done = 0, None, threading.Event()
         self.done.set()
         self.lock = threading.Lock()
@@ -103,14 +111,17 @@ class Semantic:
 
     @staticmethod
     def cache_path(workspace, model, folder=None):
+        """The vectors file for one repository and model: a readable folder name plus a hash of the full path and model."""
         name = re.sub(r"[^\w.-]", "_", workspace.root.name, flags=re.ASCII)[:40] or "repository"
         mark = hashlib.sha256(f"{workspace.root}\0{model}".encode()).hexdigest()[:12]
         return (Path(folder).expanduser() if folder else INDEX_FOLDER) / f"{name}-{mark}.vectors"
 
     def key(self, text):
+        """A passage's identity: a hash of the model and the text, so changed text or another model is embedded afresh."""
         return hashlib.sha256(f"{self.model}\0{text}".encode()).hexdigest()[:24]
 
     def embed(self, texts):
+        """Unit-length vectors for the texts, in order, from the local embedding model. ValueError for an unusable reply."""
         result = self.client.request("/api/embed", {"model": self.model, "input": texts, "truncate": True, "keep_alive": "30m"})
         vectors = result.get("embeddings")
         if (not isinstance(vectors, list) or len(vectors) != len(texts)
@@ -126,6 +137,7 @@ class Semantic:
             for entry in entries:
                 entry["vector_key"] = self.key(entry["text"])
             self.keys = [entry["vector_key"] for entry in entries]
+            # Keyed by hash, so identical passages are embedded once.
             missing = {}
             for entry in entries:
                 if entry["vector_key"] not in self.vectors:
@@ -138,6 +150,7 @@ class Semantic:
         self.thread.start()
 
     def build(self, generation, missing):
+        """Background thread: embed the missing passages in batches, saving now and then so a stopped run keeps its work."""
         added = 0
         try:
             for offset in range(0, len(missing), BATCH):
@@ -172,6 +185,7 @@ class Semantic:
         return True
 
     def coverage(self):
+        """(passages that have a vector, all passages) for the current index; used in progress messages."""
         keys = self.keys
         return sum(1 for key in keys if key in self.vectors), len(keys)
 
@@ -190,6 +204,7 @@ class Semantic:
         for index, entry in enumerate(entries):
             vector = self.vectors.get(entry.get("vector_key"))
             if vector is not None and len(vector) == len(wanted):
+                # Both vectors have length 1, so their dot product is the cosine similarity.
                 similarity = dot(wanted, vector)
                 if similarity >= FLOOR:
                     scored.append((similarity, index))
@@ -202,6 +217,7 @@ class Semantic:
             return
         try:
             with open(self.cache, "rb") as handle:
+                # Layout: one JSON header line (model, dimensions, keys), then every vector as raw 32-bit floats, in key order.
                 header = json.loads(handle.readline(4_000_000))
                 raw = handle.read()
             keys, size = header["keys"], header["dimensions"]
@@ -222,6 +238,7 @@ class Semantic:
         keys = [key for key in dict.fromkeys(self.keys) if key in self.vectors]
         if not keys:
             return
+        # The flat layout needs every vector to have the same length.
         size = len(self.vectors[keys[0]])
         keys = [key for key in keys if len(self.vectors[key]) == size]
         try:
@@ -241,6 +258,7 @@ class Semantic:
             pass  # A cache that cannot be written only costs time on the next start.
 
     def forget(self):
+        """Delete the saved vectors file, if there is one."""
         with contextlib.suppress(OSError):
             if self.cache is not None:
                 self.cache.unlink()

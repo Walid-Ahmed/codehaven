@@ -19,6 +19,7 @@ EXIT_WORDS = {"exit", "quit", "/exit", "/quit"}
 
 
 def write_stream(text):
+    """Print a piece of the streamed answer at once, without waiting for the end of the line."""
     sys.stdout.write(text)
     sys.stdout.flush()
 
@@ -79,6 +80,7 @@ def read_picture(picture, out=None):
 
 
 def main(argv=None):
+    """Parse the command line and run the chosen mode. Returns the exit code."""
     parser = argparse.ArgumentParser(description=f"CodeHaven — Your code. Your machine. No API fees. A read-only assistant for "
                                                  f"understanding code with a local model ({MODEL} by default). "
                                                  "It never changes your files.")
@@ -136,6 +138,7 @@ def main(argv=None):
                              "then exit. Offline; needs Tesseract installed on this computer")
     parser.add_argument("--out", metavar="FILE", help="With --ocr, the file to write (default: the picture's name with .py)")
     args = parser.parse_args(argv)
+    # --ocr and --forget do not use the model, so they are handled before Ollama is contacted.
     if args.ocr:
         return read_picture(args.ocr, args.out)
     if args.forget:
@@ -184,6 +187,7 @@ def main(argv=None):
                        "ollama pull nomic-embed-text")
             return 0
         if args.gui:
+            # Imported only here, so the web server is loaded only when --gui asks for it.
             from .gui import serve
             return serve(model, port=args.port, open_browser=not args.no_browser, repository=args.workspace,
                          max_steps=args.max_steps, retrieval_budget=args.retrieval_budget, excludes=args.exclude,
@@ -233,4 +237,5 @@ def main(argv=None):
         return 1
     except KeyboardInterrupt:
         print("\nStopped.", file=sys.stderr)
+        # The usual exit code for a program stopped by Ctrl+C (128 + SIGINT's number, 2).
         return 130

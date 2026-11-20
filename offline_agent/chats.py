@@ -25,11 +25,13 @@ CHAT_ID = re.compile(r"[0-9a-f]{12}")
 
 
 def clip(text, limit):
+    """Cut text to about limit UTF-8 bytes without splitting a character; a cut is marked with an ellipsis."""
     raw = text.encode()
     return text if len(raw) <= limit else raw[:limit].decode("utf-8", "ignore") + " …"
 
 
 def new_id():
+    """A random id for a new chat: 12 hex characters, the shape CHAT_ID checks."""
     return secrets.token_hex(6)
 
 
@@ -37,13 +39,16 @@ class Chats:
     """The saved chats for one repository."""
 
     def __init__(self, workspace, folder=None):
+        """Work out this repository's chat file and load what it holds."""
         self.root = str(workspace.root)
         self.folder = Path(folder).expanduser() if folder else CHATS_FOLDER
+        # The file name is the folder's name, for people, plus a hash of its full path, so same-named folders never share a file.
         name = re.sub(r"[^\w.-]", "_", workspace.root.name, flags=re.ASCII)[:40] or "repository"
         self.path = self.folder / f"{name}-{hashlib.sha256(self.root.encode()).hexdigest()[:12]}.json"
         self.chats = self.load()
 
     def load(self):
+        """The chats saved on disk. Only a file for this repository counts, and entries not shaped like a chat are dropped."""
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -79,6 +84,7 @@ class Chats:
             raise
 
     def get(self, chat_id):
+        """The saved chat with this id, or ValueError if it is gone."""
         chat = next((chat for chat in self.chats if chat["id"] == chat_id), None)
         if chat is None:
             raise ValueError("That saved chat no longer exists.")
@@ -100,10 +106,12 @@ class Chats:
         self.save()
 
     def listing(self):
+        """The chats as the sidebar lists them, newest first: id, title, last use, and number of questions."""
         return [{"id": chat["id"], "title": chat["title"], "updated": chat["updated"], "questions": len(chat["turns"])}
                 for chat in self.chats]
 
     def delete(self, chat_id):
+        """Delete one saved chat; an id that is not there is ignored."""
         self.chats = [chat for chat in self.chats if chat["id"] != chat_id]
         self.save()
 

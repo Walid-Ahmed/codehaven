@@ -25,6 +25,7 @@ from .workspace import Workspace
 
 EVALS = Path(__file__).resolve().parents[1] / "evals"
 RETRIEVAL_BUDGET = 4000  # The CLI default, so evaluation measures what users actually run.
+# A model load this long on a later call means Ollama had unloaded the model and loaded it again.
 RELOAD_SECONDS = 5
 RAW_REPLY_CHARS = 4000  # Raw replies show what a rejected action actually said.
 
@@ -33,6 +34,7 @@ class Metered:
     """Wrap a model and add up the calls, tokens, and model time Ollama reports."""
 
     def __init__(self, model):
+        """Start every counter at zero. prompt_budget is copied because the agent reads it from its model."""
         self.model = model
         self.prompt_budget = getattr(model, "prompt_budget", PROMPT_BUDGET)
         self.last_metrics = {}
@@ -41,6 +43,7 @@ class Metered:
         self.replies = []
 
     def chat(self, messages, schema):
+        """Pass one call through, recording its metrics and raw reply even when the reply is rejected."""
         self.calls += 1
         try:
             return self.model.chat(messages, schema)
@@ -51,11 +54,13 @@ class Metered:
             self.prompt_tokens += self.last_metrics.get("prompt_tokens") or 0
             self.generated_tokens += self.last_metrics.get("generated_tokens") or 0
             self.model_seconds += self.last_metrics.get("total_seconds") or 0
+            # The first call always loads the model, so only later long loads count as reloads.
             if self.calls > 1 and (self.last_metrics.get("load_seconds") or 0) >= RELOAD_SECONDS:
                 self.reloads += 1
 
 
 def load_tasks(path):
+    """Read and validate the task file: unique ids, a question for every turn, and answer regexes that compile."""
     tasks = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(tasks, list) or not tasks:
         raise ValueError("Task file must hold a non-empty JSON list")
@@ -88,6 +93,7 @@ def score(task, answer):
 def changed_files(before, after):
     """Relative paths whose content differs between two directory trees."""
     def tree(root):
+        """Every file under root mapped to its bytes, leaving out Python bytecode caches."""
         return {path.relative_to(root).as_posix(): path.read_bytes() for path in Path(root).rglob("*")
                 if path.is_file() and "__pycache__" not in path.parts}
     old, new = tree(before), tree(after)
@@ -102,6 +108,7 @@ def evaluate_task(task, model, repo):
         workspace = Workspace(root)
         metered, log = Metered(model), []
         started = time.monotonic()
+        # confirm_tests always answers no, so a task can never start a Docker test run.
         session = Session(metered, workspace, knowledge=KnowledgeBase(None, workspace=workspace, context_budget=RETRIEVAL_BUDGET),
                           max_steps=task.get("max_steps", 12), confirm_tests=lambda: False, output=log.append)
         turns = [task] + task.get("followups", [])
@@ -132,6 +139,7 @@ def evaluate_task(task, model, repo):
 
 
 def summarize(results):
+    """Totals over all task results. verified counts tasks whose answers also passed CodeHaven's own checks (exit 0)."""
     count = len(results)
     return {"tasks": count, "passed": sum(r["passed"] for r in results),
             "verified": sum(r["exit_code"] == 0 for r in results), "reloads": sum(r.get("reloads", 0) for r in results),
@@ -142,6 +150,7 @@ def summarize(results):
 
 
 def table(results):
+    """Plain-text results table, one row per task, with each row's failure notes cut to 120 characters."""
     width = max([len("TASK")] + [len(r["id"]) for r in results])
     lines = [f"{'TASK':<{width}}  PASS  EXIT  STEPS  PROMPT TOK  GEN TOK  SECONDS  NOTES"]
     for r in results:
@@ -152,6 +161,7 @@ def table(results):
 
 
 def evaluate(tasks, model, repo, output=print):
+    """Run every task in turn, reporting progress through output, and return the list of results."""
     results = []
     for number, task in enumerate(tasks, 1):
         output(f"[{number}/{len(tasks)}] {task['id']}: {task['task']}")
@@ -163,6 +173,7 @@ def evaluate(tasks, model, repo, output=print):
 
 
 def main(argv=None):
+    """Command-line entry point. Returns 0 only when every task passed, 1 otherwise, 130 when interrupted."""
     parser = argparse.ArgumentParser(description="Score a local model on fixed CodeHaven tasks (offline)")
     parser.add_argument("--tasks", default=str(EVALS / "tasks.json"))
     parser.add_argument("--repo", default=str(EVALS / "sample_repo"))

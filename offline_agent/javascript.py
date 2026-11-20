@@ -11,6 +11,7 @@ JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts'}
 
 
 def walk(root):
+    """Every named node under root, parents before children, in source order. A stack, not recursion, so depth is no limit."""
     stack = [root]
     while stack:
         node = stack.pop()
@@ -19,7 +20,9 @@ def walk(root):
 
 
 class JavaScriptDependencies:
+    """Imports, definitions, and symbol spans of JavaScript and TypeScript files, shaped like the Python analyser's."""
     def __init__(self, files):
+        """Parse each JS/TS file in files (path -> text) with Tree-sitter. Only relative imports of indexed files become edges."""
         self.edges, self.definitions, self.spans = {}, {}, {}
         self.parse_failures = 0
         parsers = {
@@ -31,6 +34,7 @@ class JavaScriptDependencies:
             suffix = PurePosixPath(name).suffix
             if suffix not in JS_EXTENSIONS:
                 continue
+            # TypeScript and TSX have their own grammars; everything else, JSX included, is parsed as JavaScript.
             parser = parsers['tsx' if suffix == '.tsx' else 'ts' if suffix in {'.ts', '.mts', '.cts'} else 'js']
             raw = text.encode('utf-8')
             root = parser.parse(raw).root_node
@@ -39,6 +43,7 @@ class JavaScriptDependencies:
                 continue
             found, definitions, spans, exported_aliases = defaultdict(set), {}, [], []
             for node in walk(root):
+                # Both import ... from "x" and a re-export (export ... from "x") carry a source string.
                 if node.type in {'import_statement', 'export_statement'}:
                     source = node.child_by_field_name('source')
                     target = self.resolve(name, self.string(source), files)
@@ -46,9 +51,12 @@ class JavaScriptDependencies:
                         symbols = [self.text(n.child_by_field_name('name')) for n in walk(node)
                                    if n.type in {'import_specifier', 'export_specifier'}]
                         clause = next((n for n in node.named_children if n.type == 'import_clause'), None)
+                        # A bare identifier in the import clause is the default import, as in: import thing from "./x".
                         if clause and any(n.type == 'identifier' for n in clause.named_children):
                             symbols.append('default')
                         found[target].update(symbols or [''])
+                    # A local export. "export { local as alias }" and "export default ..." are remembered, so the exported name
+                    # can be given the line of its local definition.
                     if node.type == 'export_statement' and source is None:
                         for specifier in walk(node):
                             if specifier.type == 'export_specifier':
@@ -61,6 +69,7 @@ class JavaScriptDependencies:
                             spans.append({'name': 'default', 'start': start, 'end': end})
                         elif value and value.type == 'identifier':
                             exported_aliases.append(('default', self.text(value)))
+                # CommonJS: require("./x") with exactly one plain string argument.
                 elif node.type == 'call_expression':
                     function = node.child_by_field_name('function')
                     args = node.child_by_field_name('arguments')
@@ -78,8 +87,10 @@ class JavaScriptDependencies:
                         continue
                     symbol = self.text(identifier)
                     start, end = node.start_point.row + 1, node.end_point.row + 1
+                    # Tree-sitter counts rows from 0; lines here count from 1. The first definition of a name wins.
                     definitions.setdefault(symbol, start)
                     value = node.child_by_field_name('value')
+                    # A variable gets a span, a body worth showing whole, only when it holds a function.
                     is_callable = node.type != 'variable_declarator' or (value and value.type in {
                         'arrow_function', 'function_expression', 'generator_function'})
                     if is_callable:
@@ -87,6 +98,7 @@ class JavaScriptDependencies:
                     parent = node.parent
                     if parent and parent.type == 'export_statement' and self.text(parent).lstrip().startswith('export default '):
                         definitions['default'] = start
+            # Every definition of the file is known now, so each exported alias can point at its local definition.
             for exported, local in exported_aliases:
                 if exported and local in definitions:
                     definitions[exported] = definitions[local]
@@ -95,10 +107,12 @@ class JavaScriptDependencies:
 
     @staticmethod
     def text(node):
+        """A node's source text, or "" for a missing node."""
         return node.text.decode('utf-8') if node else ''
 
     @classmethod
     def string(cls, node):
+        """A string literal node's content without its quotes, or "" when the node is not a plain string."""
         if not node or node.type != 'string':
             return ''
         text = cls.text(node)
@@ -107,9 +121,11 @@ class JavaScriptDependencies:
 
     @staticmethod
     def resolve(importer, specifier, files):
+        """The indexed file a relative import points to, trying the usual extensions and index files. None for packages."""
         if not specifier.startswith(('./', '../')):
             return None
         stem = posixpath.normpath(posixpath.join(str(PurePosixPath(importer).parent), specifier))
+        # An import that climbs out of the repository is not followed.
         if stem == '..' or stem.startswith('../') or stem.startswith('/'):
             return None
         candidates = [stem]

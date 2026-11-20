@@ -20,8 +20,10 @@ from .workspace import MAX_BYTES
 
 IMAGE_BYTES = 8_000_000
 IMAGE_PIXELS = 40_000_000  # A small file can unpack to a huge picture; larger ones are refused unread.
+# The longest Tesseract may run on one picture.
 SECONDS = 60
 UNSURE = 60  # Tesseract's confidence, 0..100, below which a word's line is listed for checking.
+# The most line numbers reported for checking.
 CHECK_LINES = 40
 # A picture named cart.js.png holds JavaScript; any other picture is saved as Python.
 CODE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".c", ".h", ".cpp", ".cs", ".go", ".rs", ".rb", ".php",
@@ -42,11 +44,13 @@ def image_suffix(data):
 
 def pixels(data):
     """Width times height from the picture's header, or None when the header cannot be read."""
+    # PNG: the header chunk comes first, with the width in bytes 16-19 and the height in bytes 20-23.
     if data.startswith(b"\x89PNG") and len(data) >= 24:
         return int.from_bytes(data[16:20], "big") * int.from_bytes(data[20:24], "big")
     position = 2
     while position + 9 <= len(data) and data[position] == 0xFF:  # JPEG: walk the segments to the frame header.
         marker = data[position + 1]
+        # A frame header holds the height, then the width. C4, C8, and CC lie in the same range but are other segments.
         if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
             return int.from_bytes(data[position + 5:position + 7], "big") * int.from_bytes(data[position + 7:position + 9], "big")
         position += 2 + int.from_bytes(data[position + 2:position + 4], "big")
@@ -84,6 +88,7 @@ def words(table):
     lines, last = [], None
     for row in table.splitlines()[1:]:
         cells = row.split("\t", 11)  # Not the csv module: the text column holds bare quotes.
+        # Level 5 rows are single words; the other levels describe pages, blocks, paragraphs, and lines.
         if len(cells) < 12 or cells[0] != "5" or not cells[11].strip():
             continue
         key = tuple(cells[1:5])  # Page, block, paragraph, line.
@@ -107,6 +112,8 @@ def without_line_numbers(lines):
 
 def character_width(lines):
     """Pixels per character of the fixed-width font, measured between the starts of neighbouring words."""
+    # First a rough value: a word's width over its number of characters. Then a better one: the distance between
+    # the starts of two neighbouring words over the characters between those starts (the first word plus one space).
     rough = statistics.median(word[2] / len(word[5]) for line in lines for word in line)
     steps = [(after[0] - before[0]) / (len(before[5]) + 1) for line in lines for before, after in zip(line, line[1:])
              if after[0] - before[0] - before[2] < 2 * rough]  # Only pairs one space apart.
@@ -123,11 +130,14 @@ def layout(lines):
     # Blank lines are found from the distance between line centres; the commonest distance is one line.
     centres = [statistics.median(word[1] + word[3] / 2 for word in line) for line in lines]
     gaps = [later - earlier for earlier, later in zip(centres, centres[1:]) if later > earlier]
+    # Gaps of 1.5 times the smallest or more already hold blank lines, so they are left out of the measurement.
     pitch = statistics.median(gap for gap in gaps if gap < 1.5 * min(gaps)) if gaps else 0
     text, unsure = [], []
     for index, line in enumerate(lines):
         if index and pitch:
+            # A step of n line heights means n - 1 blank lines; at most 3 are kept.
             text.extend([""] * min(3, max(0, round((centres[index] - centres[index - 1]) / pitch) - 1)))
+        # Indentation: how many character widths the first word starts to the right of the leftmost line.
         written = " " * max(0, round((line[0][0] - margin) / width)) + line[0][5]
         for before, after in zip(line, line[1:]):
             # Measured between the starts of the two words, so a narrow comma does not look like a wide gap.
@@ -160,6 +170,7 @@ def tidy(text, python):
     text = re.sub(r"-?[—–]-?", "-", text)
     text = re.sub(r"(?m)(?<=[)\]\w]) :$", ":", text)  # A colon that ends a line was read as a word of its own.
     zero = re.sub(r"@(?![A-Za-z_])", "0", text)
+    # Keep every @ when there was none to repair, or when the text was valid Python and the repair would break it.
     if zero == text or (python and parses(text) is None and parses(zero) is not None):
         return text, []
     repaired = [number for number, (old, new) in enumerate(zip(text.splitlines(), zero.splitlines()), 1) if old != new]

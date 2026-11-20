@@ -11,6 +11,7 @@ from .model import InvalidReply
 from .study import parts
 
 REVIEW_PARTS = 12  # Functions checked per review, one model call each.
+# The most of one function shown to the model, and the longest finding the model may write.
 PART_BYTES = 3500
 FINDING_CHARS = 300
 VERDICTS = ("bug", "missing check", "unclear name", "ok")
@@ -38,6 +39,7 @@ def reviewable(path, text, spans=None):
     Returns (parts, total), where total counts every part, including those beyond REVIEW_PARTS.
     """
     found, _ = parts(path, text, spans)
+    # A part that contains another part is a class or an outer function: its inner parts are reviewed instead.
     leaves = [part for part in found
               if not any(other is not part and part["start"] <= other["start"] and other["end"] <= part["end"] for other in found)]
     if not leaves and text.strip():
@@ -86,8 +88,10 @@ def review(model, workspace, path, *, spans=None, output=print):
         if verdict == "ok" or not finding:
             fine.append(f"`{part['name']}`")
         else:
+            # A verdict's place in VERDICTS is its severity, so bugs are listed first.
             problems.append((VERDICTS.index(verdict), f"- {where} `{part['name']}` {LABELS[verdict]}: {finding}"))
     count = len(problems)
+    # Say "functions" only when every checked part is one.
     kinds = "part" if any(part["kind"] not in ("function", "method") for part in chosen) else "function"
     summary = (f"Reviewed {len(chosen) - len(failed)} {kinds}{'s' if len(chosen) - len(failed) != 1 else ''} of {path}: "
                + (f"{count} likely problem{'s' if count != 1 else ''} found." if count else "no likely problems found.")
@@ -100,5 +104,6 @@ def review(model, workspace, path, *, spans=None, output=print):
         report.append("Could not be checked: " + ", ".join(failed) + ".")
     if total > len(chosen):
         report.append(f"Only the first {len(chosen)} of {total} {kinds}s were checked; ask about a later one by name to check it.")
+    # The "No problem found" line cites the whole file, so that range needs an evidence row too.
     evidence.append({"path": path, "line": 1, "end_line": len(lines), "text": lines[0]})
     return {"text": "\n".join(report), "evidence": evidence, "problems": count, "checked": len(chosen) - len(failed)}

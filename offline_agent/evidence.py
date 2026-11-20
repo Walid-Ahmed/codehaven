@@ -4,14 +4,18 @@ import re
 from collections import Counter
 from pathlib import PurePosixPath
 
+# The most bytes of retained evidence, as JSON, carried from step to step.
 LIMIT = 4000
 # Start at a token boundary and require an alphabetic extension, so URLs and host:port pairs are not citations.
 CITATION = re.compile(r"(?<![\w./:-])(?:repo/)?([\w./-]+\.[A-Za-z]\w*):(\d+)(?:-(\d+))?(?![\d/])")
+# Phrases such as "do not edit or change" are removed before looking for edit verbs, so a request that
+# rules out editing is not mistaken for an edit request.
 EDIT_VERB = r"(?:edit|modif|chang|creat|fix|implement|add|writ|delet)\w*"
 NEGATED_EDIT = re.compile(rf"\b(?:do\s+not|don['’]?t|never|without)\s+{EDIT_VERB}(?:\s*(?:,|/|or|and)\s*{EDIT_VERB})*")
 
 
 def classify(path, snippet=""):
+    """Heuristic kind of a file, from its path and one matching line: test, stub, reference, service, or source."""
     parts = PurePosixPath(path).parts
     name = parts[-1].lower() if parts else ""
     if "tests" in parts or "test" in parts or name.startswith("test_") or name.endswith("_test.py"):
@@ -38,6 +42,7 @@ def retain(previous, matches):
         if match.get("in"):
             item["in"] = match["in"]
         old = next((old for old in records if (old["path"], old["line"]) == (item["path"], item["line"])), None)
+        # Already retained: keep one row per (path, line), taking the newer end line.
         if old is not None:
             if "end_line" in item:
                 old["end_line"] = item["end_line"]
@@ -46,6 +51,7 @@ def retain(previous, matches):
             limited = True
             break
         records.append(item)
+    # Over the byte limit: blank the snippets first, oldest first, and only then drop the newest rows.
     while len(json.dumps(records, ensure_ascii=False).encode()) > LIMIT:
         with_snippet = next((row for row in records if row.get("snippet")), None)
         if with_snippet is not None:
@@ -77,6 +83,7 @@ def check_answer(answer, evidence, *, discovery=False, require_citation=True):
     and flagging those made every such report look unverified.
     """
     issues = []
+    # Only lines of 40 or more characters count, so short lines that repeat naturally (braces, list markers) do not.
     repeated = Counter(line.strip() for line in answer.splitlines() if len(line.strip()) >= 40)
     if any(count >= 3 for count in repeated.values()):
         issues.append("The answer repeats the same substantial text three or more times.")
@@ -90,6 +97,7 @@ def check_answer(answer, evidence, *, discovery=False, require_citation=True):
     for path, start, end in citations:
         path = path.removeprefix("repo/")
         start, end = int(start), int(end or start)
+        # A citation is supported only when its whole line range lies inside one retained evidence row for that file.
         if any(row["path"].removeprefix("repo/") == path and row["line"] <= start <= end <= row.get("end_line", row["line"])
                for row in evidence):
             valid.add(path)
@@ -101,6 +109,7 @@ def check_answer(answer, evidence, *, discovery=False, require_citation=True):
         missing = services - valid
         if missing:
             issues.append(f"Missing supported citations for {len(missing)} discovered service candidate(s).")
+        # Follow which heading each bullet sits under; any other line that is not a bullet ends the section.
         section = None
         for line in answer.splitlines():
             heading = line.strip().strip('#*: ').lower()
@@ -120,6 +129,7 @@ def check_answer(answer, evidence, *, discovery=False, require_citation=True):
 
 
 def inventory(evidence, limited=False):
+    """A plain list of the observed candidates by kind, shown instead of a discovery answer that failed its checks."""
     lines = ["Observed source candidates (heuristic classification; not proof of deployment):"]
     for kind in ('service', 'test', 'stub', 'source', 'reference'):
         records = [row for row in evidence if row['kind'] == kind]

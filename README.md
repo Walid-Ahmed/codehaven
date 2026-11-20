@@ -1,16 +1,48 @@
 # CodeHaven
 
+**Ask your codebase anything. Nothing leaves your machine.**
+
 *Your code. Your machine. No API fees.*
 
 ![CodeHaven: working locally, with offline coding, privacy, and no API fees.](docs/assets/codehaven-working-preview.png)
 
-**CodeHaven helps you understand a codebase, entirely offline.** Open it in your browser, point it at a project, and ask how something works, where something is used, or what a file does. Answers cite the exact lines they rely on, and one click shows those lines. It can also explain your Git changes, review a file for likely bugs, list functions with no tests, suggest a reading order, draw a structure map, and write study flashcards, and it remembers checked answers and your chats between sessions. It runs on a local Ollama model (`qwen2.5-coder:7b` by default), so your code never leaves your computer and there are no API fees.
+CodeHaven is a read-only assistant for understanding code. Point it at a project, ask a question in plain English, and get an answer that cites the exact lines it relies on. One click shows you those lines. It runs on a local [Ollama](https://ollama.com/) model (`qwen2.5-coder:7b` by default), so there is no cloud service, no account, and no bill.
 
-> **CodeHaven is read-only.** It reads, searches, and explains, and it never changes, creates, or deletes your files. Ask it to fix something and it explains what to change and where, with cited lines and the new code, and leaves the edit to you. No code path in this version writes inside your project. What CodeHaven keeps is its own: checked answers, your chats, and search vectors, in `~/CodeHaven`, and `--no-remember` turns all three off.
+| | |
+|---|---|
+| **Private** | Your code is sent only to Ollama on `127.0.0.1`. No cloud inference, no telemetry, no tracing. |
+| **Read-only** | It never changes, creates, or deletes your files. Ask for a fix and it explains what to change and where. |
+| **Checked** | Line numbers are looked up in the real file, never taken from the model. An answer it cannot back up is marked **Unverified**. |
+| **Free** | It runs on a model you download once. After that it works with the network unplugged. |
 
 ![The CodeHaven page: a repository and model chosen in the sidebar, and an answer that explains how to fix Store.low_stock, citing inventory/store.py:27-29.](docs/assets/codehaven-gui.png)
 
-Version 0.10.0. No cloud inference, automatic downloads, or tracing: LangGraph runs the workflow locally and model requests go straight to Ollama on `127.0.0.1`. You can also use CodeHaven from the terminal.
+Watch the [narrated demo video](docs/assets/codehaven-demo.mp4), or read on.
+
+## What you can ask
+
+| You ask | You get |
+|---|---|
+| "Explain this project" | An overview with citations to the code behind each point |
+| "Which function calls `checkout_total`?" | Every caller, with the function each one is in |
+| "Fix `Store.low_stock` so items at the threshold are included" | The lines to change and the new code. Your file is left untouched |
+| "Explain my uncommitted changes" | [Your Git diff, explained](#explain-your-git-changes) with citations to the changed lines |
+| "Review `inventory/store.py`" | [Likely bugs](#review-a-file), one function at a time, most serious first |
+| "Which functions have no tests?" | [A list of test gaps](#test-gaps-and-a-project-tour), instantly, with no model |
+| "Give me a project tour" | An ordered reading list of up to 8 files |
+
+In the browser page you can also draw a **structure map** of your files, make **flashcards** to study them, chat about a [notebook or PDF](#notebooks-and-pdfs), and turn a [screenshot of code](#read-code-from-a-picture) into a file. CodeHaven [remembers checked answers](#long-term-memory) and [your chats](#saved-chats) between sessions, on your computer only.
+
+## Contents
+
+- [Get started](#get-started)
+- [How it is built](#how-it-is-built)
+- [Chat in your browser](#chat-in-your-browser)
+- [Use it from the terminal](#use-it-from-the-terminal)
+- Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning)
+- Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.10 does](#what-v010-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
+- [Development](#development)
+- [Technical report](docs/TECHNICAL_REPORT.md)
 
 ## Get started
 
@@ -46,6 +78,76 @@ After that, everything works offline. Each time, activate the environment and op
 source .venv/bin/activate
 codehaven --gui
 ```
+
+## How it is built
+
+![CodeHaven architecture: the browser page and terminal feed a request router, which sends a request to a purpose-built helper or to the LangGraph agent loop with its five actions; local knowledge supplies passages; answer checks run before the cited answer is shown.](docs/assets/codehaven-architecture.svg)
+
+CodeHaven is one agent, five tools, and a set of purpose-built helpers. The [technical report](docs/TECHNICAL_REPORT.md) covers each part in depth.
+
+### The workflow
+
+1. **You ask**, in the browser page or the terminal.
+2. **A router picks the path.** This is plain code, not a model. A request with a known shape, such as "explain my last commit", goes to a helper built for it. Every other question goes to the agent.
+3. **Plain code gathers context first.** It retrieves relevant passages, preloads files the question names, and searches for the code names it mentions. A small model often skips these steps when left alone.
+4. **The agent loops.** The local model picks one action per step. The tool runs, and its result goes back to the model, until the model returns `finish`.
+5. **The answer is checked.** Line numbers are looked up in the real file, and every citation must match code that was actually read.
+6. **You get a cited answer.** Checked answers are saved for later sessions.
+
+### The agent
+
+There is one agent, not several. It is a [LangGraph](https://docs.langchain.com/oss/python/langgraph/graph-api) loop around a single local model. A small model that plans, delegates, and merges results spends its steps on coordination, so CodeHaven keeps the model's job narrow: pick the next action, then explain what the evidence shows.
+
+### The tools
+
+| Tool | What it does |
+|---|---|
+| `read` | Reads a project file, in pages for long files |
+| `search` | Finds exact text and names the function each match is in |
+| `retrieve` | Fetches ranked passages from the local index |
+| `run_tests` | Runs unittest or pytest in a Docker container with networking off, after you approve |
+| `finish` | Returns the answer and the code parts it relies on |
+
+No tool writes files. `edit` and `write` do not exist, and the model is corrected if it asks for them.
+
+### The helpers
+
+| Helper | Uses the model | How it works |
+|---|---|---|
+| Git changes | Yes | Reads the diff with read-only git commands, then explains it |
+| File review | Yes | One function per model call, because a small model shown a whole file says "looks fine" |
+| Project tour | Yes | The order comes from the import graph; the model adds one sentence per file |
+| Flashcards | Yes | The model writes the cards; the lines each answer is about are looked up |
+| Test gaps | No | Lists public functions that no test file mentions |
+| Structure map | No | Draws calls and imports from parsed code |
+| Picture to code | No | Tesseract reads the picture and indentation is rebuilt |
+
+### Local knowledge
+
+Passages reach the model four ways: keyword ranking (BM25), definition lookup for names in the question, import following across Python, JavaScript, TypeScript, Go, Java, and Rust, and optional [search by meaning](#search-by-meaning) with a local embedding model.
+
+### The agent loop in detail
+
+![How CodeHaven works: your task and local RAG passages build the prompt; the local model picks one tool per step (retrieve, search, read, run_tests) and each result loops back until it finishes with a checked answer, all on your machine. CodeHaven is read-only and never changes files.](docs/assets/how-codehaven-works.svg)
+
+A high-resolution [PNG version](docs/assets/how-codehaven-works.png) is available for slides.
+
+```text
+START -> model -> read, search, retrieve, or run_tests -> model
+             |-> invalid reply -> correction message -> model (once)
+             \-> finish -> END
+                    tool at action limit -> limit -> END
+```
+
+The graph holds conversation messages, the current action, the action count, and the exit code in memory. It uses conditional edges to dispatch actions. There is no node that writes files. The action limit counts model responses, not internal graph nodes. Graph recursion has a separate guard sized to that limit. This version does not add persistent checkpoints.
+
+If the model returns invalid JSON, an unknown action (including `edit` or `write`, which do not exist), missing fields, or a reply cut off at the token limit, no tool runs. The model gets one correction message explaining what was wrong, and the retry counts as a step. A second invalid reply in a row stops the task with exit code 1. Failures to reach Ollama are never retried.
+
+Small models at temperature 0 sometimes repeat the same sentences until they hit the token limit. Replies are always streamed from Ollama, so a final answer that keeps repeating a phrase is stopped as soon as the loop is detected. The text before the repetition is kept as the answer, marked with a note. An answer that reaches its length limit ends at its last complete sentence, also with a note.
+
+Identical actions are caught anywhere in a task, not only back to back, so alternating lookups stop early instead of using every step. An action may be repeated after compaction has removed its earlier result.
+
+Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/python/langgraph/graph-api). Remote tracing is not supported. Every run is wrapped in [`tracing_context(enabled=False)`](https://docs.langchain.com/langsmith/trace-without-env-vars), so `LANGSMITH_TRACING`, `LANGCHAIN_TRACING_V2`, or an API key in your environment cannot turn uploads on. No tracing client is ever created. For timing and token details, use the local `Ollama metrics:` line printed after each model call.
 
 ## Chat in your browser
 
@@ -240,29 +342,6 @@ The [startup script](scripts/start_ollama.py) sets `OLLAMA_NO_CLOUD=1` and binds
 If Ollama is already running, the script checks its local API, prints a friendly message, and exits successfully without launching a second server. It cannot change or verify that server's cloud setting. To enforce `OLLAMA_NO_CLOUD=1`, quit the existing desktop app or stop its service, then run the script again. An unrecognized listener on the port still produces an error. These environment settings apply only to a server launched by the script.
 
 After downloading a model, disconnect from the internet to use it offline. Disabling cloud features does not block model downloads or all network traffic. CodeHaven checks that the model is installed and rejects remote-backed and cloud models; a loopback URL alone cannot guarantee how a separately configured server performs inference. Installation downloads LangGraph and its dependencies; runtime does not require internet access. Reading code from a picture runs Tesseract, a separate program installed once; it works offline and makes no network connection.
-
-## LangGraph workflow
-
-![How CodeHaven works: your task and local RAG passages build the prompt; the local model picks one tool per step (retrieve, search, read, run_tests) and each result loops back until it finishes with a checked answer, all on your machine. CodeHaven is read-only and never changes files.](docs/assets/how-codehaven-works.svg)
-
-A high-resolution [PNG version](docs/assets/how-codehaven-works.png) is available for slides.
-
-```text
-START -> model -> read, search, retrieve, or run_tests -> model
-             |-> invalid reply -> correction message -> model (once)
-             \-> finish -> END
-                    tool at action limit -> limit -> END
-```
-
-The graph holds conversation messages, the current action, the action count, and the exit code in memory. It uses conditional edges to dispatch actions. There is no node that writes files. The action limit counts model responses, not internal graph nodes. Graph recursion has a separate guard sized to that limit. This version does not add persistent checkpoints.
-
-If the model returns invalid JSON, an unknown action (including `edit` or `write`, which do not exist), missing fields, or a reply cut off at the token limit, no tool runs. The model gets one correction message explaining what was wrong, and the retry counts as a step. A second invalid reply in a row stops the task with exit code 1. Failures to reach Ollama are never retried.
-
-Small models at temperature 0 sometimes repeat the same sentences until they hit the token limit. Replies are always streamed from Ollama, so a final answer that keeps repeating a phrase is stopped as soon as the loop is detected. The text before the repetition is kept as the answer, marked with a note. An answer that reaches its length limit ends at its last complete sentence, also with a note.
-
-Identical actions are caught anywhere in a task, not only back to back, so alternating lookups stop early instead of using every step. An action may be repeated after compaction has removed its earlier result.
-
-Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/python/langgraph/graph-api). Remote tracing is not supported. Every run is wrapped in [`tracing_context(enabled=False)`](https://docs.langchain.com/langsmith/trace-without-env-vars), so `LANGSMITH_TRACING`, `LANGCHAIN_TRACING_V2`, or an API key in your environment cannot turn uploads on. No tracing client is ever created. For timing and token details, use the local `Ollama metrics:` line printed after each model call.
 
 ## What v0.10 does
 

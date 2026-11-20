@@ -43,8 +43,10 @@ def chunks(text):
     buffer, start, end = [], 1, 1
     size = 0
     for number, line in enumerate(text.splitlines(), 1):
+        # A line over 1,600 characters is cut into pieces; max(1, ...) keeps an empty line as one empty piece.
         for offset in range(0, max(1, len(line)), 1600):
             piece = line[offset:offset + 1600]
+            # Close the chunk before it passes about 1,800 characters or 30 lines, so every passage stays small.
             if buffer and (size + len(piece) + 1 > 1800 or number - start >= 30):
                 yield start, end, "\n".join(buffer)
                 buffer, size = [], 0
@@ -58,7 +60,9 @@ def chunks(text):
 
 
 class KnowledgeBase:
+    """A BM25 index over the bundled notes, an optional reference folder, and the repository, with its import graph."""
     def __init__(self, directory=None, *, workspace=None, context_budget=16_000, excludes=(), semantic=None):
+        """Read and chunk every allowed file once. The limits below keep memory and start-up time bounded."""
         if not 2000 <= context_budget <= 16_000:
             raise ValueError("Retrieval budget must be between 2000 and 16000 bytes")
         self.context_budget = context_budget
@@ -79,6 +83,7 @@ class KnowledgeBase:
         self.limited = False
         self.entries = []
         self.frequencies = Counter()
+        # Three sources, in this order: the bundled notes, the user's reference folder, then the repository itself.
         roots = [("builtin", Path(__file__).parent / "references", EXTENSIONS)]
         if directory is not None:
             directory = Path(directory).expanduser()
@@ -93,6 +98,7 @@ class KnowledgeBase:
         code_files, manifests = {}, {}
         for label, root, extensions in roots:
             root = Path(root).resolve(strict=True)
+            # A reference folder inside the repository must obey the repository's own hide and exclude rules.
             if label == "user" and repository is not None and root.is_relative_to(repository.root):
                 relative = root.relative_to(repository.root)
                 if relative.parts:
@@ -115,6 +121,7 @@ class KnowledgeBase:
                 if (Path(name).suffix.lower() not in extensions
                         and not (label == "repo" and Path(name).name in CODE_NAMES)):
                     continue
+                # The resolved path identifies a file, so one reached from two roots, or through a link, is indexed once.
                 identity = workspace.path(name).resolve()
                 if label == "user" and repository is not None and identity.is_relative_to(repository.root):
                     try:
@@ -125,6 +132,7 @@ class KnowledgeBase:
                         continue
                 if identity in seen:
                     continue
+                # At most 8,000 passages and 5 MB of text are indexed; index_limited tells the caller when a limit cut in.
                 if self.documents >= MAX_DOCUMENTS or len(self.entries) >= 8000:
                     self.limited = True
                     break
@@ -145,6 +153,7 @@ class KnowledgeBase:
                     self.source_texts["repo/" + name] = text
                     code_files[name] = text
                 for start, end, passage in chunks(text):
+                    # BM25 needs each passage's term counts and length, and for each term how many passages hold it (frequencies).
                     counts = Counter(tokens(passage))
                     if not counts:
                         continue
@@ -159,6 +168,7 @@ class KnowledgeBase:
                                if self.entries else 1)
         self.dependencies = PythonDependencies({name: text for name, text in code_files.items()
                                                 if Path(name).suffix in {".py", ".pyi"}})
+        # One import graph for all languages: the other analysers' results are merged into the Python one.
         js = JavaScriptDependencies(code_files)
         self.dependencies.edges.update(js.edges)
         self.dependencies.definitions.update(js.definitions)
@@ -210,6 +220,7 @@ class KnowledgeBase:
                 choices.append((overlap, -(span["end"] - span["start"]), span, text))
         if not choices:
             return None
+        # Most query terms wins; on a tie the shortest span, which is the innermost symbol.
         _, _, span, text = max(choices, key=lambda row: row[:2])
         expanded = dict(entry, start_line=span["start"], end_line=span["end"], text=text,
                         symbol=span["name"], symbol_complete=True)
@@ -223,6 +234,7 @@ class KnowledgeBase:
         """Values of the file's module constants a symbol uses, since the answer is often the value, not the name."""
         found = []
         for name in dict.fromkeys(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", text)):
+            # An assignment at the start of a line (Python, or JavaScript const/let/var/export), not an == comparison.
             definition = re.compile(rf"(?:export\s+)?(?:const\s+|let\s+|var\s+)?{name}\s*(?::[^=]+)?=(?!=)")
             number = next((number for number, line in enumerate(lines, 1) if definition.match(line) and len(line) <= 160), None)
             if number and lines[number - 1] not in text:
@@ -257,6 +269,11 @@ class KnowledgeBase:
         return found[:3]
 
     def retrieve(self, query):
+        """The passages to show the model for a query, as a JSON string that fits the context budget.
+
+        In order: definitions of names the question mentions, the best-ranked matches (at most 4), passages of the
+        files those matches import (2 levels deep), then further matches if space is left. Ranking is BM25 over
+        key words, mixed with the meaning-search ranking when one is available."""
         if not isinstance(query, str) or not query.strip() or len(query) > 1000:
             raise ValueError("Retrieval query must contain 1 to 1000 characters")
         terms = set(tokens(query))
@@ -268,6 +285,8 @@ class KnowledgeBase:
                 frequency = entry["counts"].get(term, 0)
                 if not frequency:
                     continue
+                # BM25 with the usual k1 = 1.2 and b = 0.75: a rare term weighs more (inverse), repeats of a term add less
+                # and less, and a passage longer than average is scaled down. 2.2 is k1 + 1.
                 df = self.frequencies[term]
                 inverse = math.log(1 + (count - df + 0.5) / (df + 0.5))
                 norm = frequency + 1.2 * (0.25 + 0.75 * entry["length"] / self.average_length)
@@ -280,6 +299,8 @@ class KnowledgeBase:
             # on different scales. A passage near the top of both lists beats one that leads only one of them.
             scored.sort(key=lambda pair: (-pair[0], pair[1]["source"], pair[1]["start_line"]))
             fused = {}
+            # 60 is the customary fusion constant: it evens out the gap between neighbouring places. Only the top 64
+            # keyword matches take part.
             for place, (_, entry) in enumerate(scored[:64]):
                 fused[id(entry)] = [1 / (60 + place), entry]
             for place, (_, index) in enumerate(near):
@@ -309,7 +330,9 @@ class KnowledgeBase:
         identities, selected = set(), []
 
         def accept(entry, metadata, limit, definition_line=None):
+            """Add one passage to the result if it fits within limit bytes. Returns "added", "duplicate", or "budget"."""
             expanded = self._expanded(entry, terms, definition_line)
+            # Try the whole symbol first; if it is too big for the budget, fall back to the plain chunk.
             variants = [expanded, dict(entry, symbol_complete=False)] if expanded else [entry]
             for variant in variants:
                 if variant is None:
@@ -321,6 +344,7 @@ class KnowledgeBase:
                 passage.update({key: variant[key] for key in ("symbol", "symbol_complete", "constants") if key in variant})
                 passage.update(metadata)
                 result["results"].append(passage)
+                # Measured as real JSON with the passage in place; 128 bytes stay free for the counters filled in at the end.
                 if len(json.dumps(result, ensure_ascii=False).encode()) <= limit - 128:
                     identities.add(identity)
                     if metadata["kind"] == "match":
@@ -330,6 +354,7 @@ class KnowledgeBase:
             result["budget_limited"] = True
             return "budget"
 
+        # When the top matches import other files, 40% of the budget is held back for those dependencies.
         has_dependencies = any(self.dependencies.edges.get(e["source"].removeprefix("repo/"))
                                for _, e in candidates[:4] if e["source"].startswith("repo/"))
         primary_budget = int(self.context_budget * 0.6) if has_dependencies else self.context_budget
@@ -340,6 +365,7 @@ class KnowledgeBase:
             if passage is not None:
                 accept(passage, {"score": 0.0, "kind": "definition", "via": "question", "name": name},
                        primary_budget, line)
+        # At most 4 keyword matches at first; the others wait in deferred until the dependencies have had their share.
         deferred = []
         for score, entry in candidates:
             if len(selected) >= 4:
@@ -348,6 +374,7 @@ class KnowledgeBase:
             status = accept(entry, {"score": round(score, 4), "kind": "match"}, primary_budget)
             if status == "budget":
                 deferred.append((score, entry))
+        # Breadth-first walk of the import graph from the matched files: 2 levels deep, at most 4 passages. [5:] drops "repo/".
         queue = [(entry["source"][5:], 0) for entry in selected if entry["source"].startswith("repo/")]
         visited = {name for name, _ in queue}
         added = 0
@@ -361,6 +388,7 @@ class KnowledgeBase:
                 if not passages:
                     continue
                 definitions = self.dependencies.definitions.get(target, {})
+                # Show the passage holding each imported name's definition; when no name is known, the file's first passage.
                 definition_lines = list(dict.fromkeys(definitions[s] for s in symbols if s in definitions)) or [None]
                 for line in definition_lines:
                     passage = next((p for p in passages if line is not None

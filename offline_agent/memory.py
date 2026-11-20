@@ -31,11 +31,13 @@ code file function method class project repository thi wa ha""".split())
 
 
 def clip(text, limit):
+    """Cut text to at most limit UTF-8 bytes without splitting a character, marking the cut with an ellipsis."""
     raw = text.encode()
     return text if len(raw) <= limit else raw[:limit].decode("utf-8", "ignore") + " …"
 
 
 def terms(text):
+    """The meaningful stemmed words of a text, used to match a new question against saved notes."""
     return {word for word in tokens(text) if word not in COMMON and len(word) > 1}
 
 
@@ -53,14 +55,18 @@ class Memory:
     """The saved notes for one repository."""
 
     def __init__(self, workspace, folder=None):
+        """Work out this repository's notes file and load what it holds."""
         self.workspace = workspace
         self.folder = Path(folder).expanduser() if folder else MEMORY_FOLDER
         root = str(workspace.root)
+        # The file is named after the folder plus a hash of its full path, so two repositories with the same
+        # folder name never share notes.
         name = re.sub(r"[^\w.-]", "_", workspace.root.name, flags=re.ASCII)[:40] or "repository"
         self.path = self.folder / f"{name}-{hashlib.sha256(root.encode()).hexdigest()[:12]}.json"
         self.notes = self.load(root)
 
     def load(self, root):
+        """Read the notes file, keeping only well-formed notes that were saved for this exact repository path."""
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -114,6 +120,10 @@ class Memory:
         return True
 
     def fresh(self, note, marks):
+        """Whether every file a note cites still has the fingerprint saved with the note.
+
+        marks caches the current fingerprints, so one recall hashes each file once however many notes cite it.
+        """
         for path, mark in note["files"].items():
             if path not in marks:
                 marks[path] = self.fingerprint(path)
@@ -139,6 +149,7 @@ class Memory:
             if len(shared) >= 2 or (shared and len(shared) * 2 >= len(wanted)):
                 scored.append((len(shared) + len(wanted & asked), index, note))  # Words in the old question count twice.
         marks, kept, stale, size = {}, [], [], 0
+        # Best score first; between equal scores, the newer note.
         for note in (row[2] for row in sorted(scored, key=lambda row: (-row[0], -row[1]))):
             if not self.fresh(note, marks):
                 stale.append(note)
@@ -157,6 +168,7 @@ class Memory:
         rows = []
         for note in notes:
             for path, start, end in citations(note["answer"]):
+                # Only files that were fingerprinted with the note, and so just checked as unchanged, may be cited again.
                 if path not in note["files"]:
                     continue
                 try:
@@ -169,6 +181,7 @@ class Memory:
 
     @staticmethod
     def text(notes):
+        """Recalled notes as the Q:/A: text that is placed in the prompt."""
         return "\n".join(f"Q: {note['question']}\nA: {note['answer']}" for note in notes)
 
     def forget(self):

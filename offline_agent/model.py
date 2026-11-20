@@ -7,8 +7,11 @@ import urllib.parse
 import urllib.request
 
 MODEL = "qwen2.5-coder:7b"  # The default, and the model the evals were tuned and measured on.
+# The characters an Ollama model name may use; anything else is refused before it reaches a request.
 MODEL_NAME = re.compile(r"[\w.:/@-]{1,200}")
+# The most bytes accepted in one model reply, so a misbehaving server cannot fill memory.
 MAX_RESPONSE_BYTES = 2_000_000
+# Messages this small are left as they are when compacting: a stub would save almost nothing.
 STUB_MIN_BYTES = 400
 PROMPT_BUDGET = 12_000  # Default conversation budget in UTF-8 bytes; --prompt-budget changes it.
 
@@ -31,6 +34,7 @@ class RepeatedAnswer(InvalidReply):
     """A finish answer began looping and generation was stopped. answer holds the text before the loop."""
 
     def __init__(self, answer):
+        """Keep the usable part of the answer, and word the error as a correction the model can act on."""
         super().__init__("the final answer kept repeating the same text, so generation was stopped; "
                          "answer briefly and state each point only once")
         self.answer = answer
@@ -42,13 +46,18 @@ class RepetitionGuard:
     Checked on every streamed piece, so the window slides across a loop's shared phrase even when
     the surrounding words drift. A global repeat penalty is avoided because answers quote code, which must be copied exactly.
     """
+    # A loop is the latest WINDOW characters having appeared TIMES times; that tail must hold at least
+    # DISTINCT different characters to count.
     WINDOW, TIMES, DISTINCT = 60, 3, 8
 
     def __init__(self):
+        """Start with no answer text seen."""
         self.text = ""
 
     def feed(self, piece):
+        """Add one streamed piece of the answer; raise RepeatedAnswer once it is looping."""
         self.text += piece
+        # Too short to hold TIMES copies of a window.
         if len(self.text) < self.WINDOW * self.TIMES:
             return
         tail = self.text[-self.WINDOW:]
@@ -69,15 +78,18 @@ class FinishContent:
     ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f"}
 
     def __init__(self, emit):
+        """position is the buffer index of the next undecoded character, or None until the content string opens."""
         self.emit = emit
         self.buffer = ""
         self.position = None
         self.done = False
 
     def feed(self, text):
+        """Add raw streamed JSON text and emit whatever more of the finish content can now be decoded."""
         self.buffer += text
         if self.done:
             return
+        # Emit nothing until the reply is known to be a finish action and its content string has opened.
         if self.position is None:
             content = re.search(r'"content"\s*:\s*"', self.buffer)
             if not content or not re.search(r'"action"\s*:\s*"finish"', self.buffer):
@@ -86,6 +98,7 @@ class FinishContent:
         decoded, index, buffer = [], self.position, self.buffer
         while index < len(buffer):
             char = buffer[index]
+            # An unescaped quote closes the content string.
             if char == '"':
                 self.done = True
                 break
@@ -99,6 +112,7 @@ class FinishContent:
                 decoded.append(self.ESCAPES.get(buffer[index + 1], buffer[index + 1]))
                 index += 2
                 continue
+            # A \uXXXX escape: wait until all four hex digits have arrived.
             if index + 6 > len(buffer):
                 break
             code = int(buffer[index + 2:index + 6], 16)
@@ -107,6 +121,7 @@ class FinishContent:
                     break
                 low = int(buffer[index + 8:index + 12], 16)
                 code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)
+                # Step over the high half here; the shared code below steps over the low half.
                 index += 6
             decoded.append(chr(code))
             index += 6
@@ -116,11 +131,17 @@ class FinishContent:
 
 
 def response_metrics(result):
+    """Turn the counters in Ollama's final chunk into seconds, token counts, and tokens per second.
+
+    Missing or malformed counters are left out rather than guessed. bool is excluded explicitly because
+    it is a kind of int in Python.
+    """
     metrics = {}
     for source, label in (("load_duration", "load_seconds"), ("prompt_eval_duration", "prompt_seconds"),
                           ("eval_duration", "generation_seconds"), ("total_duration", "total_seconds")):
         value = result.get(source)
         if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+            # Ollama reports durations in nanoseconds.
             metrics[label] = round(value / 1_000_000_000, 3)
     for source, label in (("prompt_eval_count", "prompt_tokens"), ("eval_count", "generated_tokens"),
                           ("prompt_eval_cached_count", "cached_tokens")):
@@ -130,6 +151,7 @@ def response_metrics(result):
     duration = result.get("eval_duration")
     if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0 and "generated_tokens" in metrics:
         metrics["tokens_per_second"] = round(metrics["generated_tokens"] / (duration / 1e9), 2)
+    # Not every Ollama version reports cached tokens; None says unknown, which is different from zero.
     if metrics and "cached_tokens" not in metrics:
         metrics["cached_tokens"] = None
     return metrics
@@ -141,6 +163,7 @@ def stub(message):
     size = len(content.encode("utf-8"))
     if size <= STUB_MIN_BYTES:
         return message
+    # An old assistant action keeps its JSON shape; only a long content field is replaced.
     if message["role"] == "assistant":
         try:
             reply = json.loads(content)
@@ -150,6 +173,7 @@ def stub(message):
         if not isinstance(body, str) or len(body) <= 200:
             return message
         return {**message, "content": json.dumps({**reply, "content": f"[{len(body.encode()):,} bytes omitted]"})}
+    # Other messages are compacted only when they are tool results or reference excerpts, never user text.
     header = content.split("\n", 1)[0][:200]
     if not header.startswith(("Tool result for", "Local reference excerpts")):
         return message
@@ -166,12 +190,15 @@ def compact_messages(messages, budget=PROMPT_BUDGET):
     Never mutate the graph's complete in-memory conversation.
     """
     def size(message):
+        """Bytes a message costs in the prompt, allowing 64 for its role and framing."""
         return len(message["content"].encode("utf-8")) + 64
 
     if sum(map(size, messages)) <= budget:
         return messages
     if len(messages) < 2:
         raise ValueError("Prompt exceeds budget; shorten the task or increase --prompt-budget")
+    # The system instructions and the original task are never compacted.
+    # 160 bytes are held back for the "Earlier context omitted" notice added at the end.
     fixed = messages[:2]
     remaining = budget - sum(map(size, fixed)) - 160
     if remaining < 512:
@@ -183,6 +210,7 @@ def compact_messages(messages, budget=PROMPT_BUDGET):
         history[index] = stub(history[index])
     if sum(map(size, fixed + history)) <= budget:
         return fixed + history
+    # Stubs were not enough: keep the newest messages that fit, and cut the newest one if even it does not fit.
     recent = []
     for message in reversed(history):
         if size(message) <= remaining:
@@ -201,14 +229,20 @@ def compact_messages(messages, budget=PROMPT_BUDGET):
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every HTTP redirect, so a reply can never send the prompt (and the code in it) to another host."""
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """Called by urllib for any 3xx reply; raising here stops the redirect from being followed."""
         raise ValueError("Model server redirects are disabled")
 
 
 class Ollama:
+    """Client for one local Ollama server. Only plain HTTP on a numeric loopback address is accepted."""
+
     # Waiting on a local model is normal: loading plus prompt processing alone can take minutes on a busy machine.
     def __init__(self, model=MODEL, endpoint="http://127.0.0.1:11434", timeout=600,
                  max_output_tokens=1024, prompt_budget=PROMPT_BUDGET):
+        """Validate the limits, the endpoint, and the model name. Nothing is sent until a request is made."""
         if not 256 <= max_output_tokens <= 8192:
             raise ValueError("--max-output-tokens must be between 256 and 8192")
         if not 8000 <= prompt_budget <= 64_000:
@@ -218,12 +252,14 @@ class Ollama:
         self.last_metrics = {}
         self.last_raw = ""
         self.companions = set()  # Other models CodeHaven itself uses, such as the embedding model.
+        # The host must be a numeric loopback IP: a name such as localhost could be pointed somewhere else.
         url = urllib.parse.urlsplit(endpoint)
         try:
             local = ipaddress.ip_address(url.hostname).is_loopback
             url.port  # Validate the optional port before making a request.
         except (ValueError, TypeError):
             local = False
+        # Credentials, a path, a query, or a fragment are refused too, so the endpoint is exactly an origin.
         if (not local or url.scheme != "http" or url.username or url.password
                 or url.path not in ("", "/") or url.query or url.fragment):
             raise ValueError("Endpoint must be an HTTP numeric loopback origin, e.g. http://127.0.0.1:11434")
@@ -232,14 +268,18 @@ class Ollama:
         self.endpoint = endpoint.rstrip("/")
         self.model = model
         self.timeout = timeout
+        # An empty ProxyHandler ignores the proxy environment variables, and NoRedirect refuses redirects,
+        # so every request goes straight to the loopback address and nowhere else.
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def request(self, path, payload=None):
+        """Send one request (GET without a payload, POST with one) and return the JSON object in the reply."""
         data = None if payload is None else json.dumps(payload).encode()
         req = urllib.request.Request(self.endpoint + path, data=data,
                                      headers={"Content-Type": "application/json"})
         try:
             with self.opener.open(req, timeout=self.timeout) as response:
+                # Reading one byte past the cap tells an oversized reply from one exactly at the cap.
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
                 if len(raw) > MAX_RESPONSE_BYTES:
                     raise ValueError("Model response exceeds 2 MB")
@@ -260,6 +300,7 @@ class Ollama:
         guard = RepetitionGuard()
 
         def answer_text(text):
+            """Check each decoded piece of the finish answer for looping, then show it."""
             guard.feed(text)
             if on_text is not None:
                 on_text(text)
@@ -268,6 +309,7 @@ class Ollama:
         pieces, received, final = [], 0, {}
         try:
             with self.opener.open(req, timeout=self.timeout) as response:
+                # Ollama streams one JSON object per line.
                 for raw in response:
                     received += len(raw)
                     if received > MAX_RESPONSE_BYTES:
@@ -297,6 +339,7 @@ class Ollama:
         return {**final, "message": {"content": "".join(pieces)}}
 
     def check_model(self):
+        """Raise ValueError unless the chosen model is installed, runs on this machine, and can chat."""
         models = self.request("/api/tags").get("models", [])
         names = {m.get("name") for m in models}
         if self.model not in names:
@@ -347,6 +390,8 @@ class Ollama:
         with on_text, the finish answer is also shown as it is generated."""
         self.last_metrics = {}
         self.last_raw = ""
+        # Temperature 0 keeps actions repeatable, and keep_alive holds the model in memory between steps.
+        # num_ctx is in tokens while the budget is in bytes: half the budget plus the reply, and never below 8192.
         payload = {"model": self.model, "messages": compact_messages(messages, self.prompt_budget),
                    "stream": True, "format": schema,
                    "keep_alive": "30m",

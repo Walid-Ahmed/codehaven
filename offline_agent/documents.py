@@ -25,6 +25,7 @@ from pathlib import Path
 from .workspace import MAX_BYTES
 
 DOCUMENT_BYTES = 8_000_000  # The largest notebook or PDF accepted; the text read from it is far smaller.
+# The most pages read from one PDF, and the longest pdftotext may run.
 PDF_PAGES, PDF_SECONDS = 300, 60
 EXTENSIONS = {"python": ".py", "javascript": ".js", "typescript": ".ts", "r": ".r", "julia": ".jl", "ruby": ".rb",
               "scala": ".scala", "bash": ".sh", "go": ".go", "rust": ".rs", "java": ".java", "kotlin": ".kt"}
@@ -43,11 +44,13 @@ def kind(name, data):
 
 
 def stem(name):
+    """The upload's name without .ipynb or .pdf, or "document" when nothing usable is left."""
     base = re.sub(r"\.(?:ipynb|pdf)$", "", name, flags=re.I)
     return base if base.strip("._") else "document"
 
 
 def source(cell):
+    """A cell's text; a notebook stores it as one string or as a list of lines."""
     text = cell.get("source", "")
     text = "".join(part for part in text if isinstance(part, str)) if isinstance(text, list) else text
     return text if isinstance(text, str) else ""
@@ -66,6 +69,7 @@ def read_notebook(name, data):
         raise ValueError("This does not look like a Jupyter notebook (.ipynb): it holds no list of cells.")
     metadata = notebook.get("metadata") if isinstance(notebook.get("metadata"), dict) else {}
     language = ""
+    # The notebook's language decides the copy's file extension and comment marker; a notebook that names none is taken as Python.
     for section in ("kernelspec", "language_info"):
         info = metadata.get(section)
         if isinstance(info, dict) and isinstance(info.get("language") or info.get("name"), str):
@@ -130,6 +134,7 @@ def pdf_pages(data):
         copy = Path(folder, "document.pdf")
         copy.write_bytes(data)
         try:
+            # -layout keeps columns and indentation, -l stops after PDF_PAGES pages, and the final "-" writes to standard output.
             done = subprocess.run([program, "-layout", "-enc", "UTF-8", "-l", str(PDF_PAGES), str(copy), "-"],
                                   capture_output=True, stdin=subprocess.DEVNULL, timeout=PDF_SECONDS)
         except subprocess.TimeoutExpired as exc:
@@ -177,6 +182,7 @@ def read_pdf(name, data):
 
 
 def read_document(name, data):
+    """Read an uploaded notebook or PDF, whichever kind() finds. ValueError for any other file."""
     found = kind(name, data)
     if found is None:
         raise ValueError("Only notebooks (.ipynb) and PDFs can be read as documents.")

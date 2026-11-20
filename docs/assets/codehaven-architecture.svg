@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="910" viewBox="0 0 1280 910" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>CodeHaven architecture: interfaces, the request router, purpose-built helpers, the LangGraph agent and its tools, local knowledge, and answer checks</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ea580c"/></marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#15803d"/></marker>
+    <marker id="at" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0f766e"/></marker>
+    <style>
+      .title { font-size: 28px; font-weight: 700; fill: #0b3b2c; }
+      .sub { font-size: 15px; fill: #4b5563; }
+      .h { font-size: 16px; font-weight: 700; fill: #111827; }
+      .n { font-size: 14px; font-weight: 600; fill: #111827; }
+      .t { font-size: 13px; fill: #374151; }
+      .s { font-size: 12px; fill: #4b5563; }
+      .tool { font-size: 14px; font-weight: 700; fill: #1e3a8a; font-family: Menlo, Consolas, monospace; }
+      .mono { font-size: 13px; fill: #1f2937; font-family: Menlo, Consolas, monospace; }
+      .pm { font-size: 11px; font-weight: 600; fill: #9a3412; }
+      .pn { font-size: 11px; font-weight: 600; fill: #0f766e; }
+      .lo { font-size: 12px; font-weight: 600; fill: #ea580c; }
+      .lg { font-size: 12px; font-weight: 600; fill: #15803d; }
+      .f { stroke: #374151; stroke-width: 2; fill: none; }
+    </style>
+  </defs>
+  <rect width="1280" height="910" fill="#ffffff"/>
+
+  <text x="40" y="48" class="title">How CodeHaven is built</text>
+  <text x="40" y="76" class="sub">One read-only agent, five tools, and a set of purpose-built helpers. Every box runs on your machine.</text>
+
+  <!-- Interfaces -->
+  <rect x="340" y="100" width="280" height="62" rx="12" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="480" y="126" class="h" text-anchor="middle">Browser page</text>
+  <text x="480" y="147" class="mono" text-anchor="middle">codehaven --gui</text>
+  <rect x="660" y="100" width="280" height="62" rx="12" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="800" y="126" class="h" text-anchor="middle">Terminal</text>
+  <text x="800" y="147" class="mono" text-anchor="middle">codehaven 'your question'</text>
+  <path d="M480,162 V196" class="f" marker-end="url(#a)"/>
+  <path d="M800,162 V196" class="f" marker-end="url(#a)"/>
+
+  <!-- Router -->
+  <rect x="340" y="200" width="600" height="62" rx="12" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="640" y="226" class="h" text-anchor="middle">Request router  ·  plain code, no model</text>
+  <text x="640" y="247" class="t" text-anchor="middle">Reads the question, recalls saved answers, and picks the path that fits</text>
+  <path d="M420,262 V283 H190 V301" class="f" marker-end="url(#a)"/>
+  <text x="200" y="277" class="s">a request with its own helper</text>
+  <path d="M640,262 V301" class="f" marker-end="url(#a)"/>
+  <text x="650" y="287" class="s">every other question</text>
+
+  <!-- Helpers -->
+  <rect x="40" y="305" width="300" height="300" rx="14" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/>
+  <text x="58" y="331" class="h">Purpose-built helpers</text>
+  <g>
+    <text x="58" y="360" class="n">Git changes</text><text x="58" y="376" class="s">reads the diff with git, then explains it</text>
+    <text x="58" y="398" class="n">File review</text><text x="58" y="414" class="s">one function per model call</text>
+    <text x="58" y="436" class="n">Project tour</text><text x="58" y="452" class="s">import order, one sentence per file</text>
+    <text x="58" y="474" class="n">Flashcards</text><text x="58" y="490" class="s">model writes cards, lines are looked up</text>
+    <text x="58" y="512" class="n">Test gaps</text><text x="58" y="528" class="s">public functions no test mentions</text>
+    <text x="58" y="550" class="n">Structure map</text><text x="58" y="566" class="s">calls and imports, parsed not run</text>
+    <text x="58" y="588" class="n">Picture to code</text><text x="180" y="588" class="s">Tesseract OCR</text>
+  </g>
+  <g text-anchor="middle">
+    <rect x="262" y="348" width="62" height="18" rx="9" fill="#ffedd5"/><text x="293" y="361" class="pm">model</text>
+    <rect x="262" y="386" width="62" height="18" rx="9" fill="#ffedd5"/><text x="293" y="399" class="pm">model</text>
+    <rect x="262" y="424" width="62" height="18" rx="9" fill="#ffedd5"/><text x="293" y="437" class="pm">model</text>
+    <rect x="262" y="462" width="62" height="18" rx="9" fill="#ffedd5"/><text x="293" y="475" class="pm">model</text>
+    <rect x="262" y="500" width="62" height="18" rx="9" fill="#ccfbf1"/><text x="293" y="513" class="pn">no model</text>
+    <rect x="262" y="538" width="62" height="18" rx="9" fill="#ccfbf1"/><text x="293" y="551" class="pn">no model</text>
+    <rect x="262" y="576" width="62" height="18" rx="9" fill="#ccfbf1"/><text x="293" y="589" class="pn">no model</text>
+  </g>
+
+  <!-- Agent loop -->
+  <rect x="380" y="305" width="520" height="300" rx="14" fill="#fafafa" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="400" y="331" class="h">The agent  ·  a LangGraph loop</text>
+  <rect x="420" y="346" width="440" height="62" rx="12" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="640" y="372" class="h" text-anchor="middle">Local model  ·  qwen2.5-coder:7b</text>
+  <text x="640" y="393" class="t" text-anchor="middle">picks one action per step, as JSON</text>
+  <path d="M640,408 V451" class="f" marker-end="url(#a)"/>
+  <text x="650" y="434" class="s">action</text>
+  <g>
+    <rect x="420" y="455" width="98" height="62" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="469" y="481" class="tool" text-anchor="middle">read</text><text x="469" y="501" class="s" text-anchor="middle">a file, in pages</text>
+    <rect x="534" y="455" width="98" height="62" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="583" y="481" class="tool" text-anchor="middle">search</text><text x="583" y="501" class="s" text-anchor="middle">exact text</text>
+    <rect x="648" y="455" width="98" height="62" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="697" y="481" class="tool" text-anchor="middle">retrieve</text><text x="697" y="501" class="s" text-anchor="middle">ranked passages</text>
+    <rect x="762" y="455" width="98" height="62" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="811" y="481" class="tool" text-anchor="middle">run_tests</text><text x="811" y="501" class="s" text-anchor="middle">in Docker</text>
+  </g>
+  <!-- result loops back to the model -->
+  <path d="M420,486 H400 V377 H416" fill="none" stroke="#ea580c" stroke-width="2.5" marker-end="url(#ao)"/>
+  <text x="394" y="432" class="lo" text-anchor="middle" transform="rotate(-90 394 432)">result</text>
+  <!-- finish -->
+  <path d="M860,377 H880 V558 H864" fill="none" stroke="#15803d" stroke-width="2.5" marker-end="url(#ag)"/>
+  <rect x="420" y="535" width="440" height="46" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="640" y="563" class="t" text-anchor="middle"><tspan class="tool" fill="#166534">finish</tspan>   the answer, and the code parts it relies on</text>
+  <text x="640" y="597" class="s" text-anchor="middle">Guards: 12-step limit · repeated actions skipped · a bad reply is corrected once</text>
+
+  <!-- Local knowledge -->
+  <rect x="940" y="305" width="300" height="300" rx="14" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="958" y="331" class="h">Local knowledge</text>
+  <text x="958" y="350" class="s">built when a project opens, refreshed per question</text>
+  <g>
+    <text x="958" y="380" class="n">Keyword index</text><text x="958" y="396" class="s">BM25 over code, docs and config</text>
+    <text x="958" y="420" class="n">Definition lookup</text><text x="958" y="436" class="s">where each function and class is defined</text>
+    <text x="958" y="460" class="n">Import graph</text><text x="958" y="476" class="s">Python, JS/TS, Go, Java, Rust</text>
+    <text x="958" y="500" class="n">Meaning search (optional)</text><text x="958" y="516" class="s">local embedding model</text>
+    <text x="958" y="540" class="n">Long-term memory</text><text x="958" y="556" class="s">checked answers from earlier sessions</text>
+    <text x="958" y="580" class="n">Your reference notes</text><text x="1100" y="580" class="mono">knowledge/</text>
+  </g>
+  <path d="M936,486 H904" fill="none" stroke="#0f766e" stroke-width="2" marker-start="url(#at)" marker-end="url(#at)"/>
+
+  <!-- Answer checks -->
+  <path d="M190,605 V641" class="f" marker-end="url(#a)"/>
+  <path d="M640,605 V641" class="f" marker-end="url(#a)"/>
+  <rect x="40" y="645" width="1200" height="62" rx="12" fill="#fef2f2" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="640" y="671" class="h" text-anchor="middle">Answer checks  ·  plain code, no model</text>
+  <text x="640" y="692" class="t" text-anchor="middle">Line numbers are looked up in the real file  ·  every citation must match code that was actually read  ·  gaps are flagged Unverified</text>
+  <path d="M640,707 V736" class="f" marker-end="url(#a)"/>
+
+  <!-- Answer -->
+  <rect x="400" y="740" width="480" height="54" rx="12" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="640" y="763" class="h" text-anchor="middle">Answer with clickable citations</text>
+  <text x="640" y="783" class="mono" text-anchor="middle">inventory/store.py:27-29</text>
+
+  <!-- What it runs on -->
+  <text x="40" y="836" class="n">All on your machine</text>
+  <g>
+    <rect x="40" y="848" width="330" height="42" rx="10" fill="#f3f4f6" stroke="#9ca3af"/>
+    <text x="205" y="866" class="n" text-anchor="middle">Ollama on 127.0.0.1</text><text x="205" y="882" class="s" text-anchor="middle">chat model, optional embedding model</text>
+    <rect x="386" y="848" width="270" height="42" rx="10" fill="#f3f4f6" stroke="#9ca3af"/>
+    <text x="521" y="866" class="n" text-anchor="middle">Your repository</text><text x="521" y="882" class="s" text-anchor="middle">read-only, never changed</text>
+    <rect x="672" y="848" width="270" height="42" rx="10" fill="#f3f4f6" stroke="#9ca3af"/>
+    <text x="807" y="866" class="n" text-anchor="middle">~/CodeHaven</text><text x="807" y="882" class="s" text-anchor="middle">saved answers, chats, search vectors</text>
+    <rect x="958" y="848" width="282" height="42" rx="10" fill="#f3f4f6" stroke="#9ca3af"/>
+    <text x="1099" y="866" class="n" text-anchor="middle">Docker sandbox</text><text x="1099" y="882" class="s" text-anchor="middle">tests only, networking off</text>
+  </g>
+</svg>

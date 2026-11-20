@@ -5,13 +5,18 @@ from pathspec import GitIgnoreSpec
 
 
 class IgnoreConfigurationError(ValueError):
-    pass
+    """An ignore file or --exclude pattern is unusable. Raised, never skipped, so a bad rule cannot silently expose files."""
 
 
 class Exclusions:
+    """Decides whether a path is ignored by .gitignore files, .agentignore files, or --exclude patterns."""
+
     def __init__(self, root, patterns=()):
+        """Validate the --exclude patterns and read the root rule files now, so a bad configuration fails at startup."""
         self.root = root
         self.patterns = tuple(patterns)
+        # cache: (directory, filename) -> compiled rules, or None for no file.
+        # decisions: (path parts, is a directory) -> whether that path is ignored.
         self.cache = {}
         self.decisions = {}
         for pattern in self.patterns:
@@ -25,12 +30,14 @@ class Exclusions:
 
     @staticmethod
     def compile(lines, source):
+        """Compile Git-style pattern lines; source only says where they came from if they are invalid."""
         try:
             return GitIgnoreSpec.from_lines(lines)
         except Exception as exc:
             raise IgnoreConfigurationError(f"Invalid exclusion rules in {source}: {exc}") from exc
 
     def spec(self, directory, filename):
+        """The compiled rules of one rule file in one directory, or None when there is none. Read once, then cached."""
         key = (directory, filename)
         if key not in self.cache:
             path = self.root / directory / filename
@@ -41,6 +48,7 @@ class Exclusions:
                     if path.exists() and not path.is_file():
                         raise IgnoreConfigurationError(f"Exclusion configuration must be a regular file: {path}")
                     with path.open('rb') as handle:
+                        # One byte past the 64 KB limit is enough to detect an oversized file.
                         data = handle.read(64_001)
                     if len(data) > 64_000:
                         raise IgnoreConfigurationError(f"Exclusion file exceeds 64 KB: {path}")
@@ -52,18 +60,22 @@ class Exclusions:
         return self.cache[key]
 
     def layer(self, relative, directory, filename):
+        """Whether one kind of rule file ignores the path, applying each ancestor directory's file from the root down."""
         ignored = False
         for depth in range(len(relative.parts)):
             ancestor = Path(*relative.parts[:depth])
             spec = self.spec(ancestor, filename)
             if spec is not None:
                 local = Path(*relative.parts[depth:]).as_posix() + ('/' if directory else '')
+                # True: a rule ignores the path. False: a ! rule re-includes it. None: this file has no matching rule.
+                # A deeper file's verdict replaces a shallower one, as in Git.
                 decision = spec.check_file(local).include
                 if decision is not None:
                     ignored = decision
         return ignored
 
     def ignored(self, relative, directory=False):
+        """Whether the path, or any directory above it, is excluded by any of the three rule sources."""
         # Evaluate parents too: a child cannot re-include an excluded directory.
         # Rule files are cached once read, so each prefix decision can be cached as well.
         parts = relative.parts
@@ -73,6 +85,7 @@ class Exclusions:
             decision = self.decisions.get(key)
             if decision is None:
                 prefix = Path(*parts[:depth])
+                # Each source can only add exclusions: a ! rule in .agentignore cannot re-include what .gitignore ignores.
                 decision = self.decisions[key] = bool(
                     self.layer(prefix, is_dir, '.gitignore')
                     or self.layer(prefix, is_dir, '.agentignore')

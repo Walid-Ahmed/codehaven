@@ -51,11 +51,13 @@ from .workspace import MAX_BYTES, MAX_FILES, Workspace
 
 PAGE = Path(__file__).with_name("gui.html")
 FILE_CONTEXT, FILE_LINES = 6, 400  # Lines shown around a citation, and the most one request returns.
+# Limits: folders listed by the folder browser, bytes in a JSON request, characters kept of an uploaded file's name.
 DIRECTORY_ENTRIES = 400
 REQUEST_BYTES = 64_000
 UPLOAD_NAME_CHARACTERS = 120
 CLONE_FOLDER = Path.home() / "CodeHaven" / "repos"
 CLONE_SECONDS, CLONE_BYTES = 180, 500_000_000  # A download is stopped after 3 minutes or 500 MB on disk.
+# The characters accepted in a GitHub owner name and repository name; anything else is refused before git runs.
 OWNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 REPOSITORY = re.compile(r"[A-Za-z0-9._-]{1,100}")
 SEMANTIC_WAIT = 15  # Seconds indexing waits for meaning search; the rest is prepared in the background.
@@ -71,6 +73,7 @@ class App:
 
     def __init__(self, model, *, max_steps=12, retrieval_budget=4000, excludes=(), allow_clone=False, clone_folder=None,
                  remember=False, memory_folder=None, embed_model=None, index_folder=None, chats_folder=None):
+        """Keep the settings. Nothing is indexed until open(), clone(), or open_file() is called."""
         self.chats_folder, self.chats, self.chat_id = chats_folder, None, new_id()
         self.embed_model, self.index_folder, self.semantic = embed_model, index_folder, None
         self.remember, self.memory_folder, self.memory = bool(remember), memory_folder, None
@@ -78,25 +81,30 @@ class App:
         self.excludes = tuple(excludes)
         self.allow_clone = bool(allow_clone)
         self.clone_folder = Path(clone_folder).expanduser() if clone_folder else CLONE_FOLDER
+        # One request at a time uses the model: busy is the flag, and the lock only guards reading and setting it.
         self.lock = threading.Lock()
         self.busy = False
         self.workspace = self.knowledge = self.session = None
         self.upload = self.upload_folder = None  # The uploaded file's name and its private temporary folder.
         self.picture = None  # When the upload was a picture: how reading it went, for the page to show.
         self.document = None  # When the upload was a notebook or a PDF: what was read from it.
+        # While an answer runs, the queue its log lines and streamed text are put on; see ask() and emit().
         self.sink = None
 
     def claim(self):
+        """Mark the app busy, or raise Busy if another request is still running. Always paired with release()."""
         with self.lock:
             if self.busy:
                 raise Busy("CodeHaven is still working on the previous request.")
             self.busy = True
 
     def release(self):
+        """Let the next request in."""
         with self.lock:
             self.busy = False
 
     def emit(self, event):
+        """Pass a log line or a piece of streamed text to the answer being sent, if one is running."""
         if self.sink is not None:
             self.sink.put(event)
 
@@ -109,10 +117,12 @@ class App:
             self.release()
 
     def index(self, path, excludes=()):
+        """Index the folder at path and return the page's summary. The caller already holds the busy claim."""
         root = Path(path).expanduser()
         if not root.is_absolute():
             raise ValueError("Use the full path of the repository folder, such as /Users/you/dev/project.")
         workspace = Workspace(root, excludes=self.excludes + tuple(excludes))
+        # A knowledge folder inside the repository holds the user's own reference notes; it is indexed when present.
         references = workspace.root / "knowledge"
         self.load(workspace, references if references.exists() else None)
         return self.summary()
@@ -164,6 +174,7 @@ class App:
             self.release()
 
     def open_picture(self, name, data):
+        """Read a picture of code into text with Tesseract, and open that text as the uploaded file."""
         self.claim()  # Before reading, so two pictures are never read at once.
         try:
             found = ocr.read_code(name, data)
@@ -185,6 +196,7 @@ class App:
             self.release()
 
     def open_copy(self, name, data):
+        """Write the uploaded bytes into a new private temporary folder and make that folder the workspace."""
         folder = Path(tempfile.mkdtemp(prefix="codehaven-upload-"))  # Readable by this user only.
         try:
             (folder / name).write_bytes(data)
@@ -198,6 +210,7 @@ class App:
             raise
 
     def load(self, workspace, references, *, upload=None, upload_folder=None, keep_chat=False):
+        """Replace what is open: build the search index, memory, and saved chats for workspace, and a new Session."""
         turns = self.session.turns if keep_chat and self.session is not None else []
         semantic = None
         if self.embed_model:
@@ -209,6 +222,7 @@ class App:
         if semantic is not None:
             semantic.wait(SEMANTIC_WAIT)
         self.semantic = semantic
+        # Only now, once the new index was built without an error, is the previous upload's temporary folder deleted.
         self.discard_upload()
         self.workspace, self.knowledge = workspace, knowledge
         self.upload, self.upload_folder = upload, upload_folder
@@ -231,9 +245,11 @@ class App:
             self.upload = self.upload_folder = self.picture = self.document = None
 
     def close(self):
+        """Clean up when the server stops: delete the uploaded file's temporary copy."""
         self.discard_upload()
 
     def model_name(self):
+        """The name of the chat model in use, or the default name when the model object does not give one."""
         return getattr(self.model, "model", MODEL)
 
     def models(self):
@@ -245,6 +261,7 @@ class App:
         return {"models": found, "current": self.model_name(), "default": MODEL}
 
     def use_model(self, name):
+        """Switch to another installed chat model and return the refreshed list for the picker."""
         if not hasattr(self.model, "use"):
             raise ValueError("This model cannot be changed.")
         self.claim()
@@ -255,6 +272,7 @@ class App:
             self.release()
 
     def summary(self):
+        """What the page needs to show the current state: model, settings, saved chats, and what is open."""
         meaning = None
         if self.semantic is not None:
             ready, total = self.semantic.coverage()
@@ -291,6 +309,7 @@ class App:
             self.release()
 
     def reset(self):
+        """Start a new chat: the session forgets earlier questions, and later ones are saved under a new id."""
         if self.session is not None:
             self.claim()
             try:
@@ -315,6 +334,7 @@ class App:
             self.release()
 
     def delete_chat(self, chat_id):
+        """Delete one saved chat and return the chats that remain."""
         if self.chats is None:
             raise ValueError("Saved chats are off, or no repository is open.")
         self.claim()
@@ -334,10 +354,12 @@ class App:
         if not isinstance(question, str) or not question.strip():
             raise ValueError("Type a question first.")
         self.claim()
+        # The answer runs on a worker thread; its events reach this request thread, which writes them out, through a queue.
         events = queue.Queue()
         self.sink = events
 
         def work():
+            """Answer the question, save the chat, and queue the final done or error event."""
             try:
                 code = session.ask(question.strip())
                 state = session.last_state
@@ -354,6 +376,7 @@ class App:
             except Exception as exc:  # Reported to the page; the server keeps running.
                 events.put({"type": "error", "message": str(exc) or type(exc).__name__})
             finally:
+                # Always sent, even after an error: None tells the loop below that the answer is over.
                 events.put(None)
 
         threading.Thread(target=work, daemon=True).start()
@@ -361,6 +384,7 @@ class App:
             while (event := events.get()) is not None:
                 yield event
         finally:
+            # Also reached when the page goes away and the generator is closed early, so the app never stays busy.
             self.sink = None
             self.release()
 
@@ -383,6 +407,7 @@ class App:
         return {"name": self.upload, "text": self.workspace.read(self.upload)}
 
     def opened(self):
+        """The open workspace, or ValueError when nothing is open yet."""
         if self.workspace is None:
             raise ValueError("Choose a repository or upload a file first.")
         return self.workspace
@@ -471,6 +496,7 @@ def origin_repository(folder):
 
 
 def folder_bytes(folder):
+    """Bytes on disk under folder, counting links as themselves; used to stop a download that grows too large."""
     total = 0
     for root, _dirs, names in os.walk(folder):
         for name in names:
@@ -494,15 +520,18 @@ def download(owner, name, ssh, target):
     partial = Path(tempfile.mkdtemp(prefix=f".{name}-", dir=target.parent))  # Hidden until the clone is complete.
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1"}
     env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")  # Never wait for a passphrase nobody can type.
+    # Only the https and ssh transports are allowed, and the clone can run no hooks, LFS filters, or template files.
     command = [git, "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "protocol.ssh.allow=always",
                "-c", f"core.hooksPath={os.devnull}", "-c", "core.symlinks=false", "-c", "filter.lfs.required=false",
                "-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=",
                "clone", "--depth", "1", "--single-branch", "--no-tags", "--template=", "--quiet", "--", url, str(partial)]
     try:
+        # git's messages go to a temporary file, not a pipe, because nothing reads them while the loop below polls.
         with tempfile.TemporaryFile() as errors:
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
                                        env=env)
             deadline, stopped = time.monotonic() + CLONE_SECONDS, None
+            # Polled rather than waited for, so that both the time limit and the size limit can stop the download.
             while process.poll() is None:
                 if time.monotonic() > deadline:
                     stopped = f"The download took longer than {CLONE_SECONDS // 60} minutes and was stopped."
@@ -517,6 +546,7 @@ def download(owner, name, ssh, target):
             message = errors.read().decode("utf-8", "replace")
         if process.returncode != 0:
             raise ValueError(clone_error(message, owner, name))
+        # The finished clone appears under its real name in one step; a failed one never does.
         partial.rename(target)
     except BaseException:
         shutil.rmtree(partial, ignore_errors=True)
@@ -524,6 +554,7 @@ def download(owner, name, ssh, target):
 
 
 def clone_error(message, owner, name):
+    """Turn git's error output into a plain-English message for the page."""
     lowered = message.lower()
     if "could not resolve host" in lowered or "could not resolve hostname" in lowered:
         return "GitHub could not be reached. Check the internet connection, or open a copy already on this computer."
@@ -560,20 +591,30 @@ def directories(path=""):
 
 
 def make_handler(app, token, port_holder):
+    """The request handler class for one app and token. port_holder is filled in once the server knows its port."""
     nonce_holder = {}
 
     class Handler(BaseHTTPRequestHandler):
+        """Serves the page and its JSON API. Every request must pass authorized() before anything else happens."""
+
         server_version = "CodeHaven"
         sys_version = ""
 
         def log_message(self, *_args):
+            """Log nothing."""
             pass  # Requests carry file paths and questions; keep them out of the terminal.
 
         def allowed_host(self):
+            """Whether the Host header names this server on this machine.
+
+            A website whose own name is made to resolve to 127.0.0.1 (DNS rebinding) still sends its own name here,
+            so it is refused even though the request reaches this server.
+            """
             port = port_holder["port"]
             return self.headers.get("Host", "") in (f"127.0.0.1:{port}", f"localhost:{port}")
 
         def send(self, status, body, content_type="application/json"):
+            """Send a complete response: bytes as they are (the page), anything else as JSON."""
             data = body if isinstance(body, bytes) else json.dumps(body).encode()
             self.send_response(status)
             self.send_header("Content-Type", content_type + "; charset=utf-8")
@@ -583,6 +624,7 @@ def make_handler(app, token, port_holder):
             self.wfile.write(data)
 
         def security_headers(self):
+            """Headers on every response: no caching, sniffing, or framing, and only the script with this page's nonce runs."""
             nonce = nonce_holder.get("nonce", "")
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -594,19 +636,24 @@ def make_handler(app, token, port_holder):
                              "connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
         def refuse(self, status, message):
+            """Send an error as JSON, which the page shows to the user."""
             self.send(status, {"error": message})
 
         def authorized(self, query):
+            """Check the Host header, then the secret token. Sends a 403 and returns False if either is wrong."""
             if not self.allowed_host():
                 self.refuse(403, "Unknown host.")
                 return False
+            # The page sends the token in a header; only the first page load carries it in the link's query string.
             sent = self.headers.get("X-CodeHaven-Token") or query.get("token", [""])[0]
+            # compare_digest takes the same time wherever the first difference is, so timing reveals nothing about the token.
             if not secrets.compare_digest(sent, token):
                 self.refuse(403, "Open the link CodeHaven printed in the terminal.")
                 return False
             return True
 
         def body(self):
+            """The request's JSON object. Bodies over REQUEST_BYTES are refused without being read."""
             length = int(self.headers.get("Content-Length") or 0)
             if not 0 <= length <= REQUEST_BYTES:  # A negative length would make the read wait for the connection to close.
                 self.close_connection = True  # The body is not read, so the connection cannot be reused.
@@ -617,12 +664,14 @@ def make_handler(app, token, port_holder):
             return data
 
         def do_GET(self):
+            """Serve the page itself and the routes that only read."""
             url = urlsplit(self.path)
             query = parse_qs(url.query)
             if not self.authorized(query):
                 return
             try:
                 if url.path == "/":
+                    # A new nonce for every page load: it goes into the page's script tag and into the policy header.
                     nonce_holder["nonce"] = secrets.token_urlsafe(16)
                     page = PAGE.read_text(encoding="utf-8").replace("__NONCE__", nonce_holder["nonce"])
                     self.send(200, page.encode(), "text/html")
@@ -645,6 +694,7 @@ def make_handler(app, token, port_holder):
                 self.refuse(400, str(exc))
 
         def upload(self):
+            """The raw bytes of an uploaded file. Bodies over the picture limit are refused without being read."""
             length = int(self.headers.get("Content-Length") or 0)
             if not 0 <= length <= ocr.IMAGE_BYTES:  # Text files have a smaller limit, checked once the bytes are seen.
                 self.close_connection = True  # The body is not read, so the connection cannot be reused.
@@ -653,8 +703,10 @@ def make_handler(app, token, port_holder):
             return self.rfile.read(length)
 
         def do_POST(self):
+            """Handle an upload, and the JSON routes that open something, change state, or start an answer."""
             url = urlsplit(self.path)
             query = parse_qs(url.query)
+            # The empty query means a POST must carry the token in its header; one in the address is not accepted.
             if not self.authorized({}):
                 return
             try:
@@ -719,7 +771,9 @@ def make_server(app, port=0):
     token = secrets.token_urlsafe(24)
     port_holder = {}
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app, token, port_holder))
+    # Request threads must not keep the program alive once the server is stopped.
     server.daemon_threads = True
+    # With port=0 the port is known only now; the handler reads it for its Host check.
     port_holder["port"] = server.server_address[1]
     return server, token, f"http://127.0.0.1:{port_holder['port']}/?token={token}"
 
@@ -749,6 +803,7 @@ def serve(model, *, port=0, open_browser=True, repository=None, max_steps=12, re
         webbrowser.open(url)
 
     def stop(_signum, _frame):
+        """Treat a kill signal like Ctrl+C, so the cleanup below still runs."""
         raise KeyboardInterrupt  # A plain kill also deletes the uploaded file's temporary copy.
     signal.signal(signal.SIGTERM, stop)
     try:

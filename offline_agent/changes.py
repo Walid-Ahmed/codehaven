@@ -14,6 +14,7 @@ import subprocess
 
 GIT_SECONDS = 20
 OUTPUT_BYTES = 400_000  # The most read from one git command.
+# Changed files listed, untracked files named, and characters of a commit message's body shown.
 LISTED_FILES, UNTRACKED_SHOWN, MESSAGE_CHARS = 30, 12, 400
 CONTEXT_LINES = 2  # Less than git's usual 3, so more of a small prompt goes to the changed lines themselves.
 
@@ -54,9 +55,13 @@ def git(root, *arguments):
     program = shutil.which("git")
     if program is None:
         raise NoChanges("Git is not installed on this computer, so CodeHaven cannot read commits or changes.")
+    # --no-optional-locks (and GIT_OPTIONAL_LOCKS=0 below): the index file is not refreshed, so .git is not written.
+    # core.fsmonitor and core.hooksPath: a setting of the repository must not make git start another program.
+    # core.quotePath=false keeps non-ASCII file names as they are. No pager, colours, or signature checks.
     command = [program, "-C", str(root), "--no-pager", "--no-optional-locks",
                "-c", "core.fsmonitor=false", "-c", f"core.hooksPath={os.devnull}", "-c", "core.quotePath=false",
                "-c", "log.showSignature=false", "-c", "color.ui=false", *arguments]
+    # Never stop to ask for a password, and treat path arguments as plain names, not patterns.
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_LITERAL_PATHSPECS": "1", "GIT_OPTIONAL_LOCKS": "0"}
     try:
         done = subprocess.run(command, capture_output=True, stdin=subprocess.DEVNULL, timeout=GIT_SECONDS, env=env)
@@ -68,6 +73,8 @@ def git(root, *arguments):
     return done.stdout[:OUTPUT_BYTES].decode("utf-8", "replace")
 
 
+# For every diff: no external diff tool or text converter (both would run a program), a rename shown as a
+# delete plus an add, paths relative to the workspace root, and no colour codes.
 DIFF = ("--no-ext-diff", "--no-textconv", "--no-renames", "--relative", "--no-color")
 
 
@@ -77,6 +84,7 @@ def parse_hunks(diff):
     for line in diff.splitlines():
         header = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
         if header:
+            # In "@@ -a,b +c,d @@", c is the hunk's first line after the change and d its line count, which is 1 when left out.
             start, count = int(header[1]), int(header[2]) if header[2] is not None else 1
             hunks.append([max(1, start), max(1, start + max(count, 1) - 1), []])
         elif hunks and line[:1] in ("+", "-", " "):
@@ -85,6 +93,7 @@ def parse_hunks(diff):
 
 
 def allowed(workspace, name):
+    """True when the workspace rules let this file be read: not hidden, excluded, or outside the root."""
     try:
         workspace.path(name)
         return True
@@ -123,9 +132,11 @@ def describe(workspace, request, limit, prefer=()):
             commit = ""
         if not commit:
             raise NoChanges(f"Git has no commit named {ref} in this repository.")
+        # The fields are separated by NUL bytes (%x00), which cannot occur inside them; the padding guards against a short reply.
         short, author, day, subject, body = (git(root, "log", "-1", "--no-show-signature", "--date=short",
                                                  "--format=%h%x00%an%x00%ad%x00%s%x00%b", commit).split("\0") + [""] * 5)[:5]
         parents = git(root, "log", "-1", "--no-show-signature", "--format=%P", commit).split()
+        # A first commit has no parent: it is compared with git's empty tree, so all its files show as added.
         base = parents[0] if parents else git(root, "hash-object", "-t", "tree", os.devnull).strip()
         span = (base, commit)
         label = f"commit {short} ({day}, by {author})" + (" (the last commit)" if commit == head else "")
@@ -143,10 +154,12 @@ def describe(workspace, request, limit, prefer=()):
         untracked = [name for name in git(root, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
                      if name and allowed(workspace, name)]
     status = {}
+    # With -z the output is letter, name, letter, name, ... separated by NUL bytes, which is safe for any file name.
     fields = git(root, "diff", *DIFF, "--name-status", "-z", *span).split("\0")
     for letter, name in zip(fields[::2], fields[1::2]):
         status[name] = {"A": "added", "D": "deleted", "M": "modified", "T": "type changed"}.get(letter[:1], "changed")
     counts = {}
+    # Each --numstat row is "added<TAB>removed<TAB>name"; a binary file has "-" for both counts.
     for row in git(root, "diff", *DIFF, "--numstat", "-z", *span).split("\0"):
         parts = row.split("\t", 2)
         if len(parts) == 3:
@@ -162,6 +175,7 @@ def describe(workspace, request, limit, prefer=()):
                         + (" Ask about the last commit to see what it changed." if kind != "commit" else ""))
     # Files the task names come first; then the smallest diffs, so as many files as possible are shown.
     def size(name):
+        """Lines added plus removed in one file; a binary file, counted as "-", is 0."""
         added, removed = counts.get(name, ("0", "0"))
         return (int(added) if added.isdigit() else 0) + (int(removed) if removed.isdigit() else 0)
     names.sort(key=lambda name: (name not in prefer, size(name), name))
@@ -193,6 +207,7 @@ def describe(workspace, request, limit, prefer=()):
             where = (f"\n{name} ({status[name]}), removed lines:" if status[name] == "deleted"
                      else f"\n{name} ({status[name]}), lines {start}-{end} after the change:")
             block = where + "\n" + "\n".join(body)
+            # Whole hunks only: stop at the first one that does not fit; the file is then named as not fully shown.
             if len((text + block).encode()) > limit:
                 break
             text += block

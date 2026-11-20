@@ -12,20 +12,25 @@ from pathlib import Path
 
 from .workspace import MAX_BYTES, MAX_FILES
 
+# Defaults: seconds one test run may take, and the most output bytes kept so the result fits in a prompt.
 TIMEOUT = 30
 OUTPUT_LIMIT = 16_000
+# Must already exist locally; the agent never pulls an image.
 DEFAULT_IMAGE = 'offline-agent-tests:0.7.0'
 
 
 def command(runner='unittest'):
+    """The fixed test command for a runner. The model chooses only the runner, never a command line."""
     if runner == 'unittest':
         return ['python', '-m', 'unittest', 'discover', '-s', 'tests', '-v']
+    # No cache directory (the project is mounted read-only), and addopts from the project's own config are cleared.
     if runner == 'pytest':
         return ['python', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', '-o', 'addopts=', 'tests']
     raise ValueError('Test runner must be unittest or pytest')
 
 
 def local_socket(configured=None):
+    """Find the local Docker Unix socket: the configured path, or the usual locations. A remote host is never used."""
     if os.name != 'posix':
         raise ValueError('Isolated tests require Docker Linux containers on macOS/Linux')
     candidates = [Path(configured).expanduser()] if configured else [
@@ -40,11 +45,16 @@ def local_socket(configured=None):
 
 
 def docker_environment():
+    """The few environment variables passed on to the docker command."""
     # Avoid remote contexts, proxy injection, TLS overrides, and client plugins/config.
     return {key: value for key, value in os.environ.items() if key in {'PATH', 'HOME', 'SYSTEMROOT'}}
 
 
 def inspect_image(base, image, env):
+    """Check that the image exists locally and is a Linux image without volumes; return its sha256 ID.
+
+    The container is then created from that ID, so the image that was checked is the image that runs.
+    """
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,255}', image):
         raise ValueError('Invalid local test image name')
     try:
@@ -60,6 +70,7 @@ def inspect_image(base, image, env):
         if not isinstance(metadata, dict) or not isinstance(metadata.get('Config'), dict):
             raise ValueError('Invalid Docker image inspection response')
         identity = metadata.get('Id', '')
+        # A declared VOLUME would give the container writable storage outside its read-only root.
         if metadata['Config'].get('Volumes') or metadata.get('Os') != 'linux':
             raise ValueError('Test image must be Linux and declare no VOLUME mounts')
         if not re.fullmatch(r'sha256:[a-f0-9]{64}', identity):
@@ -70,6 +81,7 @@ def inspect_image(base, image, env):
 
 
 def snapshot(workspace, destination, runner):
+    """Copy the workspace's permitted files into destination and return how many. The container sees only this copy."""
     tests = workspace.path('tests')
     if not tests.is_dir():
         raise ValueError('A permitted tests/ directory is required')
@@ -77,6 +89,7 @@ def snapshot(workspace, destination, runner):
     if len(names) >= MAX_FILES:
         raise ValueError('Snapshot file limit reached; narrow the workspace or add exclusions')
     def is_test(name):
+        """Whether the runner would collect this file: tests/test*.py for unittest, test_*.py or *_test.py for pytest."""
         file = Path(name)
         return (name.startswith('tests/') and file.suffix == '.py' and
                 (file.name.startswith('test') if runner == 'unittest' else
@@ -88,6 +101,8 @@ def snapshot(workspace, destination, runner):
     try:
         for name in names:
             workspace.path(name)  # Enforce the same ignore policy again before copying.
+            # Walk down from the root one component at a time with O_NOFOLLOW, so a symlink swapped in after
+            # the listing is refused rather than followed out of the workspace.
             parent = os.dup(with_fd)
             try:
                 parts = Path(name).parts
@@ -95,6 +110,7 @@ def snapshot(workspace, destination, runner):
                     child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
                     os.close(parent)
                     parent = child
+                # O_NONBLOCK stops a named pipe from hanging the open; fstat then rejects anything but a regular file.
                 file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
                 with os.fdopen(file_fd, 'rb') as handle:
                     info = os.fstat(handle.fileno())
@@ -110,6 +126,7 @@ def snapshot(workspace, destination, runner):
                 raise ValueError('Snapshot exceeds 16 MB; add exclusions or narrow the workspace')
             target = destination / name
             target.parent.mkdir(parents=True, exist_ok=True)
+            # The container runs as another user, so the copy must be world-readable. Only the executable bit is kept.
             for directory in target.parents:
                 if directory == destination.parent:
                     break
@@ -123,8 +140,19 @@ def snapshot(workspace, destination, runner):
 
 
 def container_command(base, image_id, name, source, runner):
+    """The docker create command for one locked-down test container."""
+    # Docker's --mount value is comma-separated, so a comma in the path could add mount options.
     if ',' in str(source):
         raise ValueError('Snapshot path cannot contain commas in Docker mount syntax')
+    # What the flags below do, in order:
+    #   --pull never, --network none: nothing is downloaded and the tests cannot reach any network.
+    #   --read-only, --cap-drop ALL, no-new-privileges, --user 65534 (nobody): no writes to the image, no privileges.
+    #   pids / memory / cpus / ulimits / shm-size: a runaway test cannot exhaust the machine.
+    #   --log-driver none: output goes only to the attached reader, never to Docker's logs on disk.
+    #   --tmpfs /tmp: the only writable place, small, in memory, and noexec.
+    #   --mount ... readonly: the snapshot, not the real project, and it cannot be changed.
+    #   the environment: no bytecode files, no pytest plugins or extra options, no package index for pip.
+    # The entrypoint is python, so the leading 'python' is dropped from the test command.
     return base + [
         'create', '--name', name, '--pull', 'never', '--network', 'none', '--no-healthcheck',
         '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
@@ -141,6 +169,11 @@ def container_command(base, image_id, name, source, runner):
 
 def run_tests(workspace, *, runner='unittest', image=DEFAULT_IMAGE, docker_socket=None,
               timeout=TIMEOUT, output_limit=OUTPUT_LIMIT):
+    """Run the workspace's tests in a throwaway Docker container and return a text report.
+
+    Fails closed: when Docker, the socket, or the image is unavailable it raises ValueError and nothing runs on the host.
+    """
+    # Called only to reject an unknown runner before anything is started.
     command(runner)
     if not 0 < timeout <= 120 or not 0 < output_limit <= OUTPUT_LIMIT:
         raise ValueError('Test timeout/output limit is out of range')
@@ -151,6 +184,7 @@ def run_tests(workspace, *, runner='unittest', image=DEFAULT_IMAGE, docker_socke
     env = docker_environment()
     with tempfile.TemporaryDirectory(prefix='offline-agent-tests-') as temporary:
         root = Path(temporary)
+        # An empty client config directory, so nothing in ~/.docker (contexts, credential helpers, plugins, proxies) is used.
         config = root / 'client'
         config.mkdir()
         (config / 'config.json').write_text('{"proxies": {}}')
@@ -179,6 +213,7 @@ def run_tests(workspace, *, runner='unittest', image=DEFAULT_IMAGE, docker_socke
                                        env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, start_new_session=True)
             def collect():
+                """Drain the container's output to the end, keeping only the first output_limit bytes."""
                 while True:
                     chunk = os.read(process.stdout.fileno(), 8192)
                     if not chunk:

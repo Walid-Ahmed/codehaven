@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from .exclusions import Exclusions, IgnoreConfigurationError
 
+# Directory names that are never listed or read: version control, environments, build output, and credential folders.
 EXCLUDED = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build",
             ".aws", ".ssh", ".codex", ".agents"}
 MAX_BYTES = 64_000  # The largest file read, listed, or indexed.
@@ -52,17 +53,21 @@ def symbol_lines(name, text, symbol):
 
 
 def python_symbol(tree, text, symbol):
+    """Line range of a named part of a parsed Python module, or None: see symbol_lines for what can be named."""
     if symbol.lower() == "imports":
         imports = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
         return (imports[0].lineno, imports[-1].end_lineno) if imports else None
     owner, _, member = symbol.rpartition(".")
     classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
+    # Class.method looks only inside that class; a bare name looks at module level, then inside every class.
     scopes = ([c.body for c in classes if c.name == owner] if owner else [tree.body] + [c.body for c in classes])
+    # A name starting with / is a route path, found as a quoted string in a decorator such as @app.get("/health").
     route = re.compile(rf"[\"']{re.escape(symbol)}[\"']") if symbol.startswith("/") else None
     for node in (node for body in scopes for node in body):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             decorators = [ast.get_source_segment(text, d) or "" for d in node.decorator_list]
             if node.name == member or (route and any(route.search(d) for d in decorators)):
+                # Start at the first decorator, so the range covers the whole definition.
                 return min([node.lineno] + [d.lineno for d in node.decorator_list]), node.end_lineno
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -84,6 +89,7 @@ def sections(text, limit, focus=(), overhead=0):
     chosen, used = set(), 0
 
     def take(indexes, budget):
+        """Choose lines in the given order until budget bytes are spent, skipping lines already chosen."""
         nonlocal used
         spent = 0
         for index in indexes:
@@ -96,13 +102,16 @@ def sections(text, limit, focus=(), overhead=0):
             used += cost[index]
 
     if focus:
+        # Three lines either side of each focus line, using at most 30% of the limit.
         window = [index for line in focus for index in range(max(0, line - 4), min(len(lines), line + 3))]
         take(window, limit * 3 // 10)
     remaining = limit - used
+    # Three quarters of what is left goes to the start of the file, and the rest to its end.
     take(range(len(lines)), remaining * 3 // 4)
     take(reversed(range(len(lines))), limit - used)
     if not chosen:
         chosen.add(0)  # A single line longer than the limit still gets shown; callers mark it incomplete.
+    # Merge neighbouring line indexes into 1-based inclusive ranges.
     ranges = []
     for index in sorted(chosen):
         if ranges and ranges[-1][1] == index:
@@ -112,6 +121,7 @@ def sections(text, limit, focus=(), overhead=0):
     return [tuple(pair) for pair in ranges]
 
 
+# A definition line in common languages: optional modifiers, a keyword, then the name (group 2).
 DEFINITION = re.compile(r"^(\s*)(?:[\w@.<>\[\],\s]*\s)?(?:function|class|def|func|fn|interface|struct|impl)\s+([\w$]+)")
 
 
@@ -125,6 +135,7 @@ def enclosing_parts(name, text):
             tree = None
         if tree is not None:
             def visit(node, prefix):
+                """Record the line span and dotted name of every function and class, however deeply nested."""
                 for child in ast.iter_child_nodes(node):
                     if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                         qualified = prefix + child.name
@@ -135,6 +146,7 @@ def enclosing_parts(name, text):
             visit(tree, "")
 
             def lookup(number):
+                """The innermost function or class that contains the line."""
                 inside = [span for span in spans if span[0] <= number <= span[1]]
                 if not inside:
                     return None, False
@@ -144,6 +156,7 @@ def enclosing_parts(name, text):
     lines = text.splitlines()
 
     def lookup(number):
+        """The nearest definition line at or above the line: a heuristic for other languages and unparsable Python."""
         for index in range(min(number, len(lines)) - 1, -1, -1):
             found = DEFINITION.match(lines[index])
             if found:
@@ -153,7 +166,10 @@ def enclosing_parts(name, text):
 
 
 class Workspace:
+    """Read-only view of one directory tree. Every name is checked by path() before it is listed, read, or searched."""
+
     def __init__(self, root, *, excludes=()):
+        """Resolve the root once, so later checks compare against the real directory, and load the ignore rules."""
         self.root = Path(root).resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Workspace must be a directory")
@@ -161,29 +177,42 @@ class Workspace:
         self.exclusions = Exclusions(self.root, self.excludes)
 
     def path(self, name):
+        """Return the real path for a workspace-relative name.
+
+        Raises ValueError when the name would leave the root, or is hidden, excluded, reached through a symlink,
+        or ignored by the ignore rules. This is the one gate every file access goes through.
+        """
         rel = Path(name)
+        # Path traversal: no absolute paths and no .. components.
         if not name or rel.is_absolute() or ".." in rel.parts:
             raise ValueError("Use a relative path inside the workspace")
         if any(p in EXCLUDED or p.startswith(".") for p in rel.parts):
             raise ValueError("Hidden and excluded paths are unavailable")
         target = self.root / rel
+        # A symlink at any level could point outside the workspace, so each component is checked, not only the last.
         current = self.root
         for part in rel.parts:
             current = current / part
             if current.is_symlink():
                 raise ValueError("Symlink paths are unavailable")
+        # Final guard: the fully resolved path must still be inside the root (relative_to raises ValueError if not).
         target.resolve().relative_to(self.root)
         if self.exclusions.ignored(rel, directory=target.is_dir()):
             raise ValueError(f"Path is excluded by ignore rules: {name}")
         return target
 
     def files(self, scope=""):
+        """Relative paths of the readable files under scope, in sorted walk order, at most MAX_FILES of them.
+
+        Hidden, excluded, ignored, symlinked, and oversized files are left out.
+        """
         start = self.path(scope) if scope else self.root
         if not start.is_dir():
             raise ValueError("File listing scope must be a directory")
         found = []
 
         def visible_directory(path):
+            """Whether a directory passes path(). A broken ignore file is an error to report, not a reason to hide it."""
             try:
                 self.path(path.relative_to(self.root).as_posix())
                 return True
@@ -193,6 +222,7 @@ class Workspace:
                 return False
 
         for base, dirs, files in os.walk(start, followlinks=False):
+            # Assigning in place prunes the walk, so an excluded directory is never entered.
             dirs[:] = sorted(d for d in dirs if visible_directory(Path(base) / d))
             for name in sorted(files):
                 if name.startswith("."):
@@ -211,10 +241,12 @@ class Workspace:
         return found
 
     def read(self, name):
+        """Return a file's text. Raises ValueError for anything but a UTF-8 text file of at most MAX_BYTES."""
         target = self.path(name)
         if not target.is_file():
             raise ValueError("Only regular files can be read")
         with target.open("rb") as handle:
+            # One byte past the limit is enough to know the file is too large, without reading all of it.
             raw = handle.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES or b"\0" in raw:
             raise ValueError(f"Only UTF-8 text files up to {MAX_BYTES // 1000} KB can be read")
@@ -234,6 +266,7 @@ class Workspace:
         shown, size = [], 0
         for line in lines[start - 1:min(end or total, total)]:
             size += len(line.encode())
+            # The first line is always shown, even when it alone is over the limit.
             if shown and size > limit:
                 break
             shown.append(line)
@@ -266,10 +299,12 @@ class Workspace:
                 index = line.find(query)
                 if index < 0:
                     continue
+                # Show up to 40 characters before the match, and 320 characters in all.
                 start = max(0, index - 40)
                 snippet = line[start:start + 320]
                 match = {"path": name, "line": number, "text": snippet,
                          "snippet_truncated": start > 0 or start + len(snippet) < len(line)}
+                # Built once per file, and only for a file that has a match.
                 lookup = lookup or enclosing_parts(name, text)
                 # Name the surrounding function, so "who calls X?" is answered by the result itself.
                 part, defines = lookup(number)

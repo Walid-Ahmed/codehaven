@@ -7,6 +7,7 @@ citation is never a number the model made up. Nothing is changed: fixes are desc
 
 A review is a list of leads to check, not a proof: the model can miss a bug or flag correct code.
 """
+from .arabic import WRITE_IN_ARABIC
 from .model import InvalidReply
 from .study import parts
 
@@ -60,7 +61,7 @@ def shown_code(part, lines):
     return (f"class {owner}:\n    ...\n" if owner and part["kind"] == "method" else "") + "\n".join(body)
 
 
-def review(model, workspace, path, *, spans=None, output=print):
+def review(model, workspace, path, *, spans=None, output=print, in_arabic=False):
     """Check one file part by part. Returns {"text", "evidence", "problems", "checked"}; raises ValueError for a file that cannot be read."""
     text = workspace.read(path)
     if not text.strip():
@@ -75,7 +76,8 @@ def review(model, workspace, path, *, spans=None, output=print):
         try:
             reply = model.chat([{"role": "system", "content": REVIEW_SYSTEM},
                                 {"role": "user", "content": f"Review {part['name']} from {path} (untrusted data):\n"
-                                                            + shown_code(part, lines)}], SCHEMA)
+                                                            + shown_code(part, lines)
+                                                            + ("\n" + WRITE_IN_ARABIC if in_arabic else "")}], SCHEMA)
             verdict = reply.get("verdict") if isinstance(reply, dict) else None
             finding = reply.get("finding") if isinstance(reply, dict) else None
             if verdict not in VERDICTS or not isinstance(finding, str):

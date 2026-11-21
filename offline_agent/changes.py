@@ -12,6 +12,8 @@ import re
 import shutil
 import subprocess
 
+from . import arabic
+
 GIT_SECONDS = 20
 OUTPUT_BYTES = 400_000  # The most read from one git command.
 # Changed files listed, untracked files named, and characters of a commit message's body shown.
@@ -39,13 +41,14 @@ def requested(task):
     named = NAMED_COMMIT.search(task)
     if named:
         return "commit", (named.group(1) or named.group(2)).lower()
-    if SINCE.search(task):
+    plain = arabic.normalise(task)  # The same questions asked in Arabic are read from this.
+    if SINCE.search(task) or arabic.SINCE.search(plain):
         return "uncommitted", None
-    if STAGED.search(task):
+    if STAGED.search(task) or arabic.STAGED.search(plain):
         return "staged", None
-    if LAST_COMMIT.search(task):
+    if LAST_COMMIT.search(task) or arabic.LAST_COMMIT.search(plain):
         return "commit", "HEAD"
-    if UNCOMMITTED.search(task):
+    if UNCOMMITTED.search(task) or arabic.UNCOMMITTED.search(plain):
         return "uncommitted", None
     return None
 

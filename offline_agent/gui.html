@@ -39,6 +39,9 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); tex
 input[type=text], textarea { width: 100%; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 8px 10px; }
 input[type=text]:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 code, pre { font-family: var(--mono); font-size: 13px; }
+/* Code and citations read left to right even inside an Arabic sentence, so store.py:12-20 is never reordered. */
+code, pre, a.cite { direction: ltr; unicode-bidi: isolate; }
+pre { text-align: left; }
 
 /* ---- Page layout and sidebar (a few chat and upload rules added later sit here too) ---- */
 .app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
@@ -113,7 +116,7 @@ body.dropping .main::after { content: "Drop a file to chat about it"; position: 
 @media (prefers-reduced-motion: reduce) { .dot { animation: none; } .sidebar, button, input, select, textarea { transition: none !important; } }
 .answer p { margin: 0 0 10px; }
 .answer p:last-child { margin-bottom: 0; }
-.answer ul, .answer ol { margin: 0 0 10px; padding-left: 22px; }
+.answer ul, .answer ol { margin: 0 0 10px; padding-inline-start: 22px; }
 .answer li { margin-bottom: 4px; }
 .answer h4 { margin: 12px 0 6px; font-size: 15px; }
 .answer code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
@@ -123,7 +126,7 @@ a.cite { color: var(--accent); font-family: var(--mono); font-size: 13px; text-d
 a.cite:hover { border-bottom-style: solid; }
 .checks { margin-top: 12px; background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 9px 12px; font-size: 13px; }
 .checks strong { display: block; margin-bottom: 4px; }
-.checks ul { margin: 0; padding-left: 18px; }
+.checks ul { margin: 0; padding-inline-start: 18px; }
 .error-box { margin-top: 10px; background: var(--error-soft); color: var(--error); border-radius: 8px; padding: 9px 12px; font-size: 13px; }
 details.steps { margin-top: 12px; font-size: 13px; color: var(--muted); }
 details.steps summary { cursor: pointer; }
@@ -323,7 +326,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
     <div class="composer">
       <div class="composer-inner">
         <button id="attach" title="Attach a file, notebook, PDF, or picture of code" aria-label="Attach a file, notebook, PDF, or picture of code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2"/></svg></button>
-        <textarea id="question" rows="1" placeholder="Open a project or upload a file first" disabled aria-label="Question"></textarea>
+        <textarea id="question" rows="1" dir="auto" placeholder="Open a project or upload a file first" disabled aria-label="Question"></textarea>
         <button id="send" class="primary" disabled>Ask</button>
       </div>
       <div class="hint">Enter to send · Shift+Enter for a new line · Name files and functions exactly for the best answers</div>
@@ -478,7 +481,15 @@ function esc(text) {
   return text.replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 }
 // A citation such as src/app.py:12 or src/app.py:12-20, with or without repo/ in front.
-const CITE = /(^|[\s(\[>,;:])((?:repo\/)?[\w./-]+\.[A-Za-z]\w*):(\d+)(?:-(\d+))?(?![\w/])/g;
+const CITE = /(^|[\s(\[>,;:،؛])((?:repo\/)?[\wء-ي./-]+\.[A-Za-z]\w*):(\d+)(?:-(\d+))?(?![\w/])/g;
+// Arabic and Hebrew read right to left. Code and file names are left out when deciding, so an Arabic sentence
+// that starts with store.py:12 or `add` is still laid out right to left.
+const LETTER = /[A-Za-z֐-ࣿיִ-﷿ﹰ-ﻼ]/;
+function direction(text) {
+  const first = text.replace(/`[^`]*`/g, " ").replace(/\S*[\w)]\.\w+(?::\d+(?:-\d+)?)?/g, " ").match(LETTER);
+  return first && !/[A-Za-z]/.test(first[0]) ? "rtl" : "ltr";
+}
+const dirAttr = (text) => direction(text) === "rtl" ? ' dir="rtl"' : "";
 // One line of text as safe HTML: code spans, bold, and clickable citations.
 function inline(text) {
   let html = esc(text);
@@ -491,8 +502,8 @@ function inline(text) {
 function render(text) {
   const out = [];
   let list = null, para = [];
-  const flushPara = () => { if (para.length) { out.push(`<p>${para.map(inline).join("<br>")}</p>`); para = []; } };
-  const flushList = () => { if (list) { out.push(`<${list.tag}>${list.items.join("")}</${list.tag}>`); list = null; } };
+  const flushPara = () => { if (para.length) { out.push(`<p${dirAttr(para.join(" "))}>${para.map(inline).join("<br>")}</p>`); para = []; } };
+  const flushList = () => { if (list) { out.push(`<${list.tag}${dirAttr(list.first)}>${list.items.join("")}</${list.tag}>`); list = null; } };
   const lines = text.replace(/\r/g, "").split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -507,12 +518,12 @@ function render(text) {
     if (bullet) {
       flushPara();
       const tag = bullet[1] ? "ol" : "ul";
-      if (!list || list.tag !== tag) { flushList(); list = {tag, items: []}; }
+      if (!list || list.tag !== tag) { flushList(); list = {tag, items: [], first: bullet[2]}; }
       list.items.push(`<li>${inline(bullet[2])}</li>`);
       continue;
     }
     const heading = line.match(/^\s*#{1,6}\s+(.*)$/);
-    if (heading) { flushPara(); flushList(); out.push(`<h4>${inline(heading[1])}</h4>`); continue; }
+    if (heading) { flushPara(); flushList(); out.push(`<h4${dirAttr(heading[1])}>${inline(heading[1])}</h4>`); continue; }
     if (!line.trim()) { flushPara(); flushList(); continue; }
     if (list && /^\s{2,}\S/.test(line)) { list.items[list.items.length - 1] = list.items[list.items.length - 1].replace(/<\/li>$/, `<br>${inline(line.trim())}</li>`); continue; }
     flushList();
@@ -638,7 +649,7 @@ function setChats(chats) {
   $("chats").replaceChildren(...chats.map((chat) => {
     const row = document.createElement("div"); row.className = "chat-row";
     const open = document.createElement("button");
-    open.textContent = chat.title;
+    open.textContent = chat.title; open.dir = "auto";
     open.title = `${chat.questions} question${chat.questions === 1 ? "" : "s"} · last used ${chat.updated.replace("T", " ")}`;
     open.addEventListener("click", () => openChat(chat.id));
     const remove = document.createElement("button"); remove.className = "chat-delete"; remove.textContent = "×";
@@ -938,6 +949,7 @@ function addMessage(kind) {
   $("empty").hidden = true;
   const element = document.createElement("div");
   element.className = "msg " + kind;
+  if (kind === "user") element.dir = "auto";  // An Arabic question is shown right to left.
   $("messages-inner").append(element);
   return element;
 }
@@ -1289,6 +1301,7 @@ function showCard() {
   $("flashcard").classList.toggle("answer", cardAnswer);
   $("card-side").textContent = cardAnswer ? "Answer" : "Question";
   $("card-text").innerHTML = inline(cardAnswer ? card.answer : card.question);
+  $("card-text").dir = direction(cardAnswer ? card.answer : card.question);
   const where = card.start ? `${card.path}:${card.start}${card.end !== card.start ? "-" + card.end : ""}` : "";
   $("card-source").innerHTML = !cardAnswer ? esc(card.path) : where ? inline(`See ${where}`) + (card.symbol ? ` (<code>${esc(card.symbol)}</code>)` : "")
     : esc(`${card.path}: the part this answer names was not found, so check it against the file.`);

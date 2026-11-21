@@ -8,7 +8,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from . import changes, insights
+from . import arabic, changes, insights
 from .review import review
 from .test_runner import DEFAULT_IMAGE, command, run_tests
 from .evidence import NEGATED_EDIT, retain, discovery_task, check_answer, inventory
@@ -131,11 +131,15 @@ def entry_point_task(task):
 
 def task_kind(task):
     """question (answers cite code), change (asks for a change, which is explained, never made), or other (no assumptions)."""
-    # Drop a polite opener, paths, and negated verbs ("do not change ...") before looking for question or edit words.
-    polite = POLITE.match(task)
+    # Fold Arabic spelling first, then drop a polite opener, paths, and negated verbs ("do not change ...")
+    # before looking for question or edit words, in English or Arabic.
+    task = arabic.normalise(task)
+    polite = POLITE.match(task) or arabic.POLITE.match(task)
     text = NEGATED_EDIT.sub(" ", without_paths(task[polite.end():] if polite else task).lower()).strip()
-    edit = EDIT_REQUEST.search(text) is not None
-    asked = QUESTION.match(text) is not None or (text.endswith("?") and not polite)
+    text = arabic.NEGATED_EDIT.sub(" ", text).strip()
+    edit = (EDIT_REQUEST.search(text) or arabic.EDIT.search(text)) is not None
+    asked = ((QUESTION.match(text) or arabic.QUESTION.match(text)) is not None
+             or (text.endswith(("?", "؟")) and not polite))
     # A question that also has an edit verb ("how do I add ...?") could be either, so nothing is assumed about it.
     if asked:
         return "other" if edit else "question"
@@ -245,7 +249,7 @@ def trim_at_limit(text, limit):
     if not isinstance(limit, int) or len(text) < limit:
         return text, False
     # Cut after the last sentence end; with none, fall back to the last whole word and mark the cut with an ellipsis.
-    end = max(text.rfind(mark) for mark in (". ", ".\n", "? ", "?\n", "! ", "!\n", ".)", ".`"))
+    end = max(text.rfind(mark) for mark in (". ", ".\n", "? ", "?\n", "! ", "!\n", ".)", ".`", "؟ ", "؟\n"))
     if end > 0:
         return text[:end + 1].rstrip(), True
     return text[:text.rstrip().rfind(" ")].rstrip() + " …" if " " in text.strip() else text, True
@@ -889,16 +893,17 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     found = None
     reviewed = named_files(task, files)[:1] or ([focus_file] if focus_file in files else [])
     wanted = insights.requested(task) if report is None and not asked_changes else None
-    if report is None and REVIEW.search(task) and reviewed:
+    in_arabic = arabic.written_in(task)
+    if report is None and (REVIEW.search(task) or arabic.REVIEW.search(arabic.normalise(task))) and reviewed:
         spans = knowledge.dependencies.spans.get(reviewed[0]) if knowledge is not None else None
         try:
-            found = review(model, workspace, reviewed[0], spans=spans, output=output)
+            found = review(model, workspace, reviewed[0], spans=spans, output=output, in_arabic=in_arabic)
         except (ValueError, OSError, UnicodeError) as exc:
             found = {"text": f"{reviewed[0]} could not be reviewed: {exc}", "evidence": []}
     elif wanted == "gaps" and not named_files(task, files):
         found = insights.test_gaps(workspace, knowledge)
     elif wanted == "tour":
-        found = insights.tour(model, workspace, knowledge, output)
+        found = insights.tour(model, workspace, knowledge, output, in_arabic=in_arabic)
     if found is not None:
         output(found["text"])
         evidence, _ = retain(evidence, found["evidence"])
@@ -973,6 +978,9 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
             messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + guide + advice}
         elif numbered:
             messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + ANSWER_WITH_POINTS + advice}
+    # Joined to the last message for the same reason. English tasks get nothing added, so their prompts are unchanged.
+    if in_arabic:
+        messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + arabic.ANSWER_IN_ARABIC}
     # Phase 6: run the graph. A step is at most two graph hops (the model, then a tool), plus discover and limit,
     # which gives the recursion limit below.
     # Always offline: LangChain would otherwise start remote tracing from LANGSMITH_TRACING and similar env vars.
@@ -1019,7 +1027,7 @@ class Session:
     def first_sentence(answer):
         """The opening of an answer, without the cited points listed after it."""
         line = next((line.strip() for line in answer.splitlines() if line.strip()), "")
-        match = re.match(r"(.+?[.!?])(?:\s|$)", line)
+        match = re.match(r"(.+?[.!?؟])(?:\s|$)", line)
         return match[1] if match else line
 
     def history(self):

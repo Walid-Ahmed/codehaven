@@ -17,6 +17,7 @@ import tempfile
 from datetime import date
 from pathlib import Path
 
+from . import arabic
 from .evidence import CITATION
 from .knowledge import tokens
 
@@ -38,7 +39,7 @@ def clip(text, limit):
 
 def terms(text):
     """The meaningful stemmed words of a text, used to match a new question against saved notes."""
-    return {word for word in tokens(text) if word not in COMMON and len(word) > 1}
+    return {word for word in tokens(text) if word not in COMMON and word not in arabic.COMMON and len(word) > 1}
 
 
 def citations(answer):

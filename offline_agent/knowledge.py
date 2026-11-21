@@ -5,6 +5,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from . import arabic
 from .workspace import MAX_FILES, Workspace
 from .dependencies import PythonDependencies
 from .javascript import JS_EXTENSIONS, JavaScriptDependencies
@@ -30,11 +31,14 @@ def stem(word):
     if len(word) > 4 and word.isascii():
         word = re.sub(r"(?:ing|ed|es|(?<!s)s)$", "", word)
         word = word[:-1] if len(word) > 3 and word.endswith("e") else word
+    elif arabic.WORD.fullmatch(word):
+        word = arabic.stem(word)
     return word
 
 
 def tokens(text):
     """Lowercase word stems, split at underscores and camelCase, so applyDiscount and apply_discount match "apply discount"."""
+    text = arabic.normalise(text)  # Arabic short vowels are not word characters, so they would split a word in two.
     return [stem(word) for word in re.findall(r"[^\W_]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text).lower(), flags=re.UNICODE)]
 
 

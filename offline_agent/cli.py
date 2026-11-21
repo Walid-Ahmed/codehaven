@@ -84,7 +84,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=f"CodeHaven — Your code. Your machine. No API fees. A read-only assistant for "
                                                  f"understanding code with a local model ({MODEL} by default). "
                                                  "It never changes your files.")
-    parser.add_argument("task", nargs="?", help="Coding task in plain English")
+    parser.add_argument("task", nargs="?", help="Question about the code, in plain English or Arabic")
     parser.add_argument("--workspace", help="Project folder; defaults to the current folder (with --gui, none)")
     parser.add_argument("--exclude", action="append", default=[], metavar="PATTERN",
                         help="Additional Git-style exclusion; repeat for multiple patterns")

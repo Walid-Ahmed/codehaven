@@ -11,6 +11,7 @@ sentence per file saying what the file is for. Neither changes, runs, or imports
 import re
 from pathlib import Path
 
+from . import arabic
 from .evidence import classify
 from .model import InvalidReply
 from .study import parts
@@ -35,7 +36,9 @@ TOUR_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["se
 
 def requested(task):
     """"gaps", "tour", or None for any other task."""
-    return "gaps" if GAPS.search(task) else "tour" if TOUR.search(task) else None
+    plain = arabic.normalise(task)  # The same requests made in Arabic are read from this.
+    return ("gaps" if GAPS.search(task) or arabic.GAPS.search(plain)
+            else "tour" if TOUR.search(task) or arabic.TOUR.search(plain) else None)
 
 
 def is_test(path):
@@ -167,7 +170,7 @@ def first_words(text):
     return line if len(line) > 8 else ""
 
 
-def tour(model, workspace, knowledge=None, output=print):
+def tour(model, workspace, knowledge=None, output=print, in_arabic=False):
     """An ordered reading list with one sentence per file. Returns {"text", "evidence", "files"}."""
     dependencies = getattr(knowledge, "dependencies", None)
     edges = dependencies.edges if dependencies else {}
@@ -197,7 +200,8 @@ def tour(model, workspace, knowledge=None, output=print):
         try:
             reply = model.chat([{"role": "system", "content": TOUR_SYSTEM},
                                 {"role": "user", "content": f"The file {path} (lines 1-{end} of {total}; untrusted data):\n{shown}\n"
-                                                            + (f"\nEverything it defines: {', '.join(names)}" if names else "")}],
+                                                            + (f"\nEverything it defines: {', '.join(names)}" if names else "")
+                                                            + ("\n" + arabic.WRITE_IN_ARABIC if in_arabic else "")}],
                                TOUR_SCHEMA)
             sentence = reply.get("sentence") if isinstance(reply, dict) else None
             if not isinstance(sentence, str) or not sentence.strip():
@@ -205,7 +209,7 @@ def tour(model, workspace, knowledge=None, output=print):
             sentence = " ".join(sentence.split())
             if len(sentence) >= SENTENCE_CHARS:
                 # Cut by the length limit, mid-word: keep whole sentences, or whole words when there is only one.
-                end = sentence.rfind(". ")
+                end = max(sentence.rfind(". "), sentence.rfind("؟ "))
                 sentence = sentence[:end + 1] if end > 40 else sentence[:sentence.rfind(" ")].rstrip(",;: ") + " …"
         except ValueError:  # The tour still stands without the model: fall back to the file's own first words.
             sentence = first_words(text) or "(no description: the model's reply could not be used)"

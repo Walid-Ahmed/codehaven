@@ -441,11 +441,11 @@ class App:
 def upload_name(name):
     """A safe file name for an uploaded copy, keeping the original name where it can.
 
-    Only the last part of the name is kept, and characters other than letters, digits, dot, dash, and
-    underscore become underscores, so citations such as notes_v2.py:12 stay clickable.
+    Only the last part of the name is kept, and characters other than English and Arabic letters, digits, dot,
+    dash, and underscore become underscores, so citations such as notes_v2.py:12 stay clickable.
     """
     name = re.split(r"[\\/]", str(name or ""))[-1].strip()
-    name = re.sub(r"[^\w.-]", "_", name, flags=re.ASCII)[-UPLOAD_NAME_CHARACTERS:]
+    name = re.sub(r"[^A-Za-z0-9_.\-\u0621-\u064A]", "_", name)[-UPLOAD_NAME_CHARACTERS:]
     if not name.strip("._"):
         raise ValueError("The uploaded file needs a name.")
     if name.startswith("."):

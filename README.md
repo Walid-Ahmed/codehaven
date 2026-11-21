@@ -30,6 +30,7 @@ Watch the [narrated demo video on YouTube](https://youtu.be/d18wHCz8LFs) (or the
 | "Review `inventory/store.py`" | [Likely bugs](#review-a-file), one function at a time, most serious first |
 | "Which functions have no tests?" | [A list of test gaps](#test-gaps-and-a-project-tour), instantly, with no model |
 | "Give me a project tour" | An ordered reading list of up to 8 files |
+| "اشرح الدالة `checkout_total`" | [The answer in Arabic](#ask-in-arabic), with the same checked citations |
 
 In the browser page you can also draw a **structure map** of your files, make **flashcards** to study them, chat about a [notebook or PDF](#notebooks-and-pdfs), and turn a [screenshot of code](#read-code-from-a-picture) into a file. CodeHaven [remembers checked answers](#long-term-memory) and [your chats](#saved-chats) between sessions, on your computer only.
 
@@ -39,7 +40,7 @@ In the browser page you can also draw a **structure map** of your files, make **
 - [How it is built](#how-it-is-built)
 - [Chat in your browser](#chat-in-your-browser)
 - [Use it from the terminal](#use-it-from-the-terminal)
-- Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning)
+- Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning) · [Arabic](#ask-in-arabic)
 - Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.10 does](#what-v010-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
 - [Development](#development)
 - [Technical report](docs/TECHNICAL_REPORT.md)
@@ -298,6 +299,23 @@ codehaven --doctor               # prints "Meaning search: nomic-embed-text:late
 - **Memory.** A small embedding model (about 300 MB) normally fits beside the chat model. On a machine short of memory Ollama may swap the two, which slows every step; use `--no-semantic` there. See [Local inference speed](#local-inference-speed).
 
 The evaluation harness keeps using key-word search alone, so its results stay comparable from run to run.
+
+## Ask in Arabic
+
+Ask in Arabic and CodeHaven answers in Arabic, in the browser page and in the terminal:
+
+```sh
+codehaven --workspace ~/dev/project 'اشرح الدالة `checkout_total`'
+codehaven --workspace ~/dev/project 'ما الذي تغير في آخر commit؟'
+```
+
+- **Nothing to switch on.** A question written mostly in Arabic is answered in Arabic. Quoted text, file paths, and code names do not count when the language is decided, so an English question that names an Arabic file stays English.
+- **Citations stay as they are.** File paths, names from the code, and `path:line` citations are kept in Latin letters and Western digits, and are checked the same way as for English.
+- **The same requests work.** Asking in Arabic for your Git changes, a file review, test gaps, or a project tour reaches the same helper as in English.
+- **Spelling variants match.** Short vowels, the forms of alef, a final ى or ة, and Arabic-Indic digits are folded to one spelling, and "ال" and common endings are dropped, so الدوال finds دوال.
+- **Right to left.** The page lays out Arabic questions and answers right to left, while code and citations stay left to right.
+- **Finding code.** Code is written in Latin letters, so an Arabic question finds it through the names it mentions, through Arabic comments and documentation in the project, and through [search by meaning](#search-by-meaning) when the embedding model handles Arabic (`bge-m3` does).
+- **Expect less polish.** The default 7B model writes weaker Arabic than English, and the evals measure English questions only. English questions get exactly the same prompts as before.
 
 ## Use it from the terminal
 

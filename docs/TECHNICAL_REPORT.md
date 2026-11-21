@@ -15,12 +15,13 @@ This report describes how it is built: the parts and how a question moves throug
 7. [Answer checks](#answer-checks)
 8. [Keeping prompts small](#keeping-prompts-small)
 9. [What is stored](#what-is-stored)
-10. [Offline and read-only guarantees](#offline-and-read-only-guarantees)
-11. [The browser page](#the-browser-page)
-12. [Code map](#code-map)
-13. [Testing and evaluation](#testing-and-evaluation)
-14. [Retrieval measurements](#retrieval-measurements)
-15. [Known limitations and next steps](#known-limitations-and-next-steps)
+10. [Questions in Arabic](#questions-in-arabic)
+11. [Offline and read-only guarantees](#offline-and-read-only-guarantees)
+12. [The browser page](#the-browser-page)
+13. [Code map](#code-map)
+14. [Testing and evaluation](#testing-and-evaluation)
+15. [Retrieval measurements](#retrieval-measurements)
+16. [Known limitations and next steps](#known-limitations-and-next-steps)
 
 ## The design in one page
 
@@ -186,6 +187,19 @@ Nothing is ever written inside your repository. What CodeHaven keeps is under `~
 | `index/` | Embedding vectors and hashes for meaning search. Never code text. | [semantic.py](../offline_agent/semantic.py) |
 | `repos/` | Repositories downloaded with `--allow-clone`. | [gui.py](../offline_agent/gui.py) |
 
+## Questions in Arabic
+
+A question asked in Arabic is answered in Arabic. The support is in [arabic.py](../offline_agent/arabic.py) and adds no model and no dependency.
+
+- **Detecting the language.** Quoted text, paths, and code names are set aside, then Arabic and Latin words are counted. A task is Arabic when it has at least two Arabic words and they are at least half as many as the Latin ones, or when its one Arabic word is not outnumbered by Latin words.
+- **One spelling.** `normalise` removes short vowels and stretching, folds the forms of alef into one, writes ى as ي and ة as ه, and turns Arabic-Indic digits into Western ones. Every pattern is written in that spelling.
+- **Routing.** Arabic patterns sit beside the English ones for the question type (question, change request, other) and for Git changes, file review, test gaps, and the project tour, so an Arabic request reaches the same helper.
+- **Search.** The index tokenizer normalises Arabic words and drops "ال" and common endings, so keyword search matches Arabic comments, strings, and documentation. Code names stay in Latin letters, so an Arabic question finds code through the names it mentions, or through meaning search with a multilingual embedding model.
+- **The prompt.** One instruction is added to the last message: answer in Arabic, and keep paths, code names, and citations exactly as written. English tasks get nothing added, so their prompts, and the eval results, are unchanged.
+- **The page.** Arabic text is laid out right to left; code and citations are isolated left to right, so `store.py:12-20` is never reordered.
+
+The answer checks are the same for both languages. Answer quality in Arabic has not been measured: the evals contain English questions only.
+
 ## Offline and read-only guarantees
 
 - **Loopback only.** The Ollama endpoint must be a numeric loopback address. Proxies and redirects are disabled.
@@ -222,6 +236,7 @@ All code is in [offline_agent/](../offline_agent).
 | [changes.py](../offline_agent/changes.py), [review.py](../offline_agent/review.py), [insights.py](../offline_agent/insights.py), [study.py](../offline_agent/study.py) | Purpose-built helpers |
 | [documents.py](../offline_agent/documents.py), [ocr.py](../offline_agent/ocr.py) | Notebooks, PDFs, and pictures of code |
 | [memory.py](../offline_agent/memory.py), [chats.py](../offline_agent/chats.py) | Long-term memory and saved chats |
+| [arabic.py](../offline_agent/arabic.py) | Questions asked in Arabic: language detection, spelling, and request patterns |
 | [test_runner.py](../offline_agent/test_runner.py) | Isolated test runs in Docker |
 | [evaluation.py](../offline_agent/evaluation.py) | The eval harness |
 
@@ -258,5 +273,6 @@ What they show:
 - **"Who calls X?"** Retrieval favours a function's definition over its callers. The search that runs before the model's first step already finds callers for named functions; retrieval could add the passages that call a named function.
 - **Reviews see one function at a time.** A review cannot judge how functions work together, and it can miss a bug or flag correct code.
 - **Line-pattern parsing.** Go, Java, and Rust imports are read with line patterns, so unusual layouts and macros can be missed.
+- **Arabic is unmeasured.** Add Arabic questions to the evals to learn how well the 7B model answers them.
 - **Small models.** Results shift when prompts change, and other models may answer differently from `qwen2.5-coder:7b`.
 - **Not an OS sandbox.** File access relies on path checks, which are not hardened against files being moved while CodeHaven runs.

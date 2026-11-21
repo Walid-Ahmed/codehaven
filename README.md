@@ -314,6 +314,8 @@ codehaven --workspace ~/dev/project 'ما الذي تغير في آخر commit؟
 - **The same requests work.** Asking in Arabic for your Git changes, a file review, test gaps, or a project tour reaches the same helper as in English.
 - **Spelling variants match.** Short vowels, the forms of alef, a final ى or ة, and Arabic-Indic digits are folded to one spelling, and "ال" and common endings are dropped, so الدوال finds دوال.
 - **Right to left.** The page lays out Arabic questions and answers right to left, while code and citations stay left to right.
+- **The page in Arabic.** The **العربية** button in the top bar shows the whole page in Arabic, laid out right to left, with Arabic suggested questions; **English** switches back. English stays the default, and the choice is remembered in your browser only. In the Arabic page, flashcards are written in Arabic too.
+- **Reports in Arabic.** A file review, the test-gap list, and the project tour asked for in Arabic come back in Arabic, including the sentences CodeHaven writes itself. Error messages from the server and the step log under an answer stay in English.
 - **Finding code.** Code is written in Latin letters, so an Arabic question finds it through the names it mentions, through Arabic comments and documentation in the project, and through [search by meaning](#search-by-meaning) when the embedding model handles Arabic (`bge-m3` does).
 - **Expect less polish.** The default 7B model writes weaker Arabic than English, and the evals measure English questions only. English questions get exactly the same prompts as before.
 

@@ -428,12 +428,14 @@ class App:
         workspace, knowledge = self.opened(), self.knowledge
         return study.structure(workspace, knowledge, self.selection(paths))
 
-    def flashcards(self, paths, count=study.DEFAULT_CARDS):
-        """Yield the events of making flashcards for the chosen files; the model is busy until they end."""
+    def flashcards(self, paths, count=study.DEFAULT_CARDS, in_arabic=False):
+        """Yield the events of making flashcards for the chosen files; the model is busy until they end.
+
+        in_arabic is set by the Arabic page, so its cards are written in Arabic."""
         workspace = self.opened()
         self.claim()
         try:
-            yield from study.flashcards(self.model, workspace, self.selection(paths), count)
+            yield from study.flashcards(self.model, workspace, self.selection(paths), count, in_arabic=in_arabic)
         finally:
             self.release()
 
@@ -734,7 +736,8 @@ def make_handler(app, token, port_holder):
                 elif url.path == "/api/map":
                     self.send(200, app.structure(data.get("paths") or []))
                 elif url.path == "/api/flashcards":
-                    self.stream(app.flashcards(data.get("paths") or [], data.get("count", study.DEFAULT_CARDS)), drain=False)
+                    self.stream(app.flashcards(data.get("paths") or [], data.get("count", study.DEFAULT_CARDS),
+                                               in_arabic=data.get("language") == "ar"), drain=False)
                 else:
                     self.refuse(404, "Not found.")
             except Busy as exc:

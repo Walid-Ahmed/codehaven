@@ -17,7 +17,7 @@ CodeHaven is a read-only assistant for understanding code. Point it at a project
 
 ![The CodeHaven page: a repository and model chosen in the sidebar, and an answer that explains how to fix Store.low_stock, citing inventory/store.py:27-29.](docs/assets/codehaven-gui.png)
 
-Watch the [narrated demo video](docs/assets/codehaven-demo.mp4), or read on.
+Watch the [narrated demo video on YouTube](https://youtu.be/d18wHCz8LFs) (or the [video file](docs/assets/codehaven-demo.mp4) in this repository), or read on.
 
 ## What you can ask
 

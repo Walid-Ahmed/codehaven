@@ -901,7 +901,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
         except (ValueError, OSError, UnicodeError) as exc:
             found = {"text": f"{reviewed[0]} could not be reviewed: {exc}", "evidence": []}
     elif wanted == "gaps" and not named_files(task, files):
-        found = insights.test_gaps(workspace, knowledge)
+        found = insights.test_gaps(workspace, knowledge, in_arabic=in_arabic)
     elif wanted == "tour":
         found = insights.tour(model, workspace, knowledge, output, in_arabic=in_arabic)
     if found is not None:

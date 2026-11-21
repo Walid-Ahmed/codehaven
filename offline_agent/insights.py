@@ -64,7 +64,7 @@ def code_files(workspace):
     return texts
 
 
-def test_gaps(workspace, knowledge=None):
+def test_gaps(workspace, knowledge=None, in_arabic=False):
     """Functions and methods no test file mentions by name. Returns {"text", "evidence", "untested", "functions"}."""
     texts, spans = code_files(workspace), spans_of(knowledge)
     tests = {name: text for name, text in texts.items() if is_test(name)}
@@ -86,13 +86,19 @@ def test_gaps(workspace, knowledge=None):
             if short not in mentioned:
                 untested.append((path, part))
     if not total:
-        text = "No functions were found in this project's code files, so there is nothing to check tests against."
+        text = ("لم يُعثر على دوال في ملفات الكود لهذا المشروع، لذلك لا يوجد ما تُقارن به الاختبارات." if in_arabic else
+                "No functions were found in this project's code files, so there is nothing to check tests against.")
         return {"text": text, "evidence": [], "untested": 0, "functions": 0}
     lines = [(f"{len(untested)} of {total} functions and methods are not mentioned by name in any of the {len(tests)} test "
               f"file{'s' if len(tests) != 1 else ''}." if tests else
               f"No test files were found, so none of the {total} functions and methods has a test.")
              + " This is a name check made by parsing the code, without the model: a function a test reaches only through "
                "another function is still listed. Private names (starting with _) are left out."]
+    if in_arabic:
+        lines = [(f"{len(untested)} من {total} من الدوال لم يُذكر اسمها في أي من ملفات الاختبار ({arabic.counted(len(tests), *arabic.FILES)})."
+                  if tests else f"لم يُعثر على ملفات اختبار، لذلك لا يوجد اختبار لأي من الدوال وعددها {total}.")
+                 + " هذا فحص للأسماء يتم بتحليل الكود بدون النموذج: الدالة التي يصل إليها اختبار عبر دالة أخرى تظل مذكورة هنا. "
+                   "الأسماء الخاصة (التي تبدأ بـ _) مستبعدة."]
     evidence, by_file = [], {}
     for path, part in untested:
         by_file.setdefault(path, []).append(part)
@@ -107,13 +113,15 @@ def test_gaps(workspace, knowledge=None):
             evidence.append({"path": path, "line": part["start"], "end_line": part["end"], "text": part["name"]})
             shown += 1
     if len(untested) > shown:
-        lines.append(f"... and {len(untested) - shown} more. Ask about one folder or file to narrow the list.")
+        lines.append(f"... و{len(untested) - shown} أخرى. اسأل عن مجلد أو ملف واحد لتضييق القائمة." if in_arabic else
+                     f"... and {len(untested) - shown} more. Ask about one folder or file to narrow the list.")
     if tests and not untested:
-        lines.append("Every public function is mentioned in at least one test file.")
+        lines.append("كل دالة عامة مذكورة في ملف اختبار واحد على الأقل." if in_arabic else
+                     "Every public function is mentioned in at least one test file.")
     return {"text": "\n".join(lines), "evidence": evidence, "untested": len(untested), "functions": total}
 
 
-def reading_order(files, edges):
+def reading_order(files, edges, in_arabic=False):
     """[(path, reason)] to read, in order: the entry point, then what it imports, level by level.
 
     The entry point is the file that reaches the most other files through imports, preferring conventional
@@ -148,8 +156,10 @@ def reading_order(files, edges):
         stem = Path(name).stem.lower()
         return (-reach(name), ENTRY_NAMES.index(stem) if stem in ENTRY_NAMES else len(ENTRY_NAMES), name.count("/"), name)
     entry = min(candidates, key=rank)
-    order = [(entry, "the entry point: it reaches the most of the project through its imports"
-                     + ("" if importers.get(entry) else ", and nothing imports it"))]
+    order = [(entry, ("نقطة الدخول: يصل إلى أكبر جزء من المشروع عبر ما يستورده" + ("" if importers.get(entry) else "، ولا يستورده أي ملف"))
+              if in_arabic else
+              "the entry point: it reaches the most of the project through its imports"
+              + ("" if importers.get(entry) else ", and nothing imports it"))]
     # Breadth-first from the entry point, so files are read level by level, up to TOUR_FILES.
     seen, queue = {entry}, [entry]
     for name in queue:
@@ -159,7 +169,9 @@ def reading_order(files, edges):
                 seen.add(target)
                 queue.append(target)
                 used = len(importers.get(target, []))
-                order.append((target, f"imported by {name}" + (f" and {used - 1} other file{'s' if used != 2 else ''}" if used > 1 else "")))
+                order.append((target, (f"يستورده {name}" + (f" و{arabic.counted(used - 1, 'ملف آخر', 'ملفان آخران', 'ملفات أخرى', 'ملفًا آخر')}" if used > 1 else ""))
+                              if in_arabic else
+                              f"imported by {name}" + (f" and {used - 1} other file{'s' if used != 2 else ''}" if used > 1 else "")))
     return order
 
 
@@ -175,21 +187,29 @@ def tour(model, workspace, knowledge=None, output=print, in_arabic=False):
     dependencies = getattr(knowledge, "dependencies", None)
     edges = dependencies.edges if dependencies else {}
     texts = code_files(workspace)
-    order = reading_order(list(texts), edges)
+    order = reading_order(list(texts), edges, in_arabic)
     listed = workspace.files()
     readme = next((name for name in listed if name.lower() in ("readme.md", "readme.rst", "readme.txt", "readme")), None)
     if not order:
         text = ("CodeHaven could not find imports between this project's files, so it cannot work out a reading order. "
                 "Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust."
                 + (f" Start with {readme}." if readme else ""))
+        if in_arabic:
+            text = ("لم يجد CodeHaven استيرادات بين ملفات هذا المشروع، لذلك لا يستطيع تحديد ترتيب للقراءة. "
+                    "تُتبع الاستيرادات في Python و JavaScript و TypeScript و Go و Java و Rust."
+                    + (f" ابدأ بـ {readme}." if readme else ""))
         return {"text": text, "evidence": [], "files": 0}
     lines = [f"A reading order for this project: {len(order)} of {len(texts)} code files, following the imports down from the "
              "entry point. The order comes from parsing the code; the one-line descriptions are written by the local model."]
+    if in_arabic:
+        lines = [f"ترتيب لقراءة هذا المشروع: {len(order)} من {len(texts)} من ملفات الكود، بتتبع الاستيرادات نزولًا من نقطة الدخول. "
+                 "الترتيب مأخوذ من تحليل الكود؛ أما الوصف المختصر لكل ملف فيكتبه النموذج المحلي."]
     evidence, step = [], 0
     if readme:
         total = max(1, len(workspace.read(readme).splitlines()))
         step += 1
-        lines.append(f"{step}. {readme}:1-{total} Start here: the project's own introduction.")
+        lines.append(f"{step}. {readme}:1-{total} " + ("ابدأ من هنا: مقدمة المشروع نفسه." if in_arabic else
+                                                      "Start here: the project's own introduction."))
         evidence.append({"path": readme, "line": 1, "end_line": total, "text": readme})
     for index, (path, reason) in enumerate(order, 1):
         output(f"Describing {path} ({index} of {len(order)})...")
@@ -212,8 +232,9 @@ def tour(model, workspace, knowledge=None, output=print, in_arabic=False):
                 end = max(sentence.rfind(". "), sentence.rfind("؟ "))
                 sentence = sentence[:end + 1] if end > 40 else sentence[:sentence.rfind(" ")].rstrip(",;: ") + " …"
         except ValueError:  # The tour still stands without the model: fall back to the file's own first words.
-            sentence = first_words(text) or "(no description: the model's reply could not be used)"
+            sentence = first_words(text) or ("(لا يوجد وصف: تعذر استخدام رد النموذج)" if in_arabic else
+                                             "(no description: the model's reply could not be used)")
         step += 1
-        lines.append(f"{step}. {path}:1-{total} {sentence} Why now: {reason}.")
+        lines.append(f"{step}. {path}:1-{total} {sentence} " + (f"لماذا الآن: {reason}." if in_arabic else f"Why now: {reason}."))
         evidence.append({"path": path, "line": 1, "end_line": total, "text": path})
     return {"text": "\n".join(lines), "evidence": evidence, "files": len(order)}

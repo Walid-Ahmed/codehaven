@@ -42,10 +42,15 @@ code, pre { font-family: var(--mono); font-size: 13px; }
 /* Code and citations read left to right even inside an Arabic sentence, so store.py:12-20 is never reordered. */
 code, pre, a.cite { direction: ltr; unicode-bidi: isolate; }
 pre { text-align: left; }
+/* Letter spacing pulls joined Arabic letters apart, so the Arabic page has none. */
+[lang=ar] body, [lang=ar] body * { letter-spacing: 0 !important; }
+/* File paths, addresses, and the map are left to right in the Arabic page as well. */
+#path, #github, .modal .list label, .modal header .where, .drawer header .where, .drawer .code, .study-bar .chosen:not(.none), .map-scroll { direction: ltr; }
+.lang { font-size: 13px; padding: 4px 10px; white-space: nowrap; }
 
 /* ---- Page layout and sidebar (a few chat and upload rules added later sit here too) ---- */
 .app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
-.sidebar { border-right: 1px solid var(--line); background: var(--panel); padding: 18px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
+.sidebar { border-inline-end: 1px solid var(--line); background: var(--panel); padding: 18px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .logo { width: 46px; height: 46px; flex: none; }
 .brand h1 { font-size: 21px; margin: 0; letter-spacing: -.02em; line-height: 1.1; }
@@ -76,9 +81,9 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .index-status.error { color: var(--error); }
 .upload-row { display: flex; gap: 8px; margin-top: 8px; }
 .upload-row button { flex: 1; }
-body.dropping .main::after { content: "Drop a file to chat about it"; position: fixed; inset: 12px 12px 12px 312px; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: 12px; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 18px; z-index: 5; pointer-events: none; }
-@media (max-width: 760px) { body.dropping .main::after { inset: 12px; } }
-.recent button { display: block; width: 100%; text-align: left; margin-bottom: 6px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.dropping .main::after { content: attr(data-drop); position: fixed; inset-block: 12px; inset-inline: 312px 12px; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: 12px; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 18px; z-index: 5; pointer-events: none; }
+@media (max-width: 760px) { body.dropping .main::after { inset-inline: 12px; } }
+.recent button { display: block; width: 100%; text-align: start; margin-bottom: 6px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .privacy { margin-top: auto; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
 
 /* ---- Main column and top bar ---- */
@@ -107,7 +112,7 @@ body.dropping .main::after { content: "Drop a file to chat about it"; position: 
 .msg.note { align-self: center; max-width: 90%; font-size: 13px; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 8px 14px; overflow-wrap: anywhere; }
 .msg.note strong { color: var(--text); }
 .msg.note.error { color: var(--error); border-color: var(--error); }
-.msg.note button { font-size: 12px; padding: 3px 10px; margin-left: 6px; }
+.msg.note button { font-size: 12px; padding: 3px 10px; margin-inline-start: 6px; }
 .composer #attach { flex: none; width: 44px; height: 44px; padding: 0; display: flex; align-items: center; justify-content: center; }
 .composer #attach svg { width: 20px; height: 20px; }
 .msg.assistant .status { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 8px; }
@@ -194,13 +199,13 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
 .modal header { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
 .modal header .where { flex: 1; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
 .modal .list { overflow-y: auto; padding: 6px 8px; flex: 1; }
-.modal .list button { display: flex; width: 100%; justify-content: space-between; border: 0; background: none; text-align: left; padding: 7px 10px; border-radius: 6px; }
+.modal .list button { display: flex; width: 100%; justify-content: space-between; border: 0; background: none; text-align: start; padding: 7px 10px; border-radius: 6px; }
 .modal .list button:hover { background: var(--panel-2); }
 .modal footer { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
 .tag { font-size: 11px; color: var(--accent); }
 
 /* ---- Drawer that shows cited code ---- */
-.drawer { position: fixed; z-index: 11; top: 0; right: 0; bottom: 0; width: min(720px, 100vw); background: var(--panel); border-left: 1px solid var(--line); display: none; flex-direction: column; }
+.drawer { position: fixed; z-index: 11; top: 0; inset-inline-end: 0; bottom: 0; width: min(720px, 100vw); background: var(--panel); border-inline-start: 1px solid var(--line); display: none; flex-direction: column; }
 .drawer.open { display: flex; }
 .drawer header { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: center; }
 .drawer header .where { flex: 1; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
@@ -213,7 +218,8 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
 @media (max-width: 760px) {
   /* The sidebar slides in over the chat, so the chat is the first thing on a small screen. */
   .app { grid-template-columns: 1fr; }
-  .sidebar { position: fixed; z-index: 12; top: 0; bottom: 0; left: 0; width: min(320px, 88vw); transform: translateX(-102%); transition: transform .18s ease; }
+  .sidebar { position: fixed; z-index: 12; top: 0; bottom: 0; inset-inline-start: 0; width: min(320px, 88vw); transform: translateX(-102%); transition: transform .18s ease; }
+  [dir=rtl] .sidebar { transform: translateX(102%); }
   body.menu-open .sidebar { transform: none; box-shadow: 0 0 40px rgba(0,0,0,.25); }
   .menu { display: block; }
   .topbar .repo { flex: 1; min-width: 0; }
@@ -295,7 +301,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
     <div class="privacy">Runs on this computer with <span id="model-name">a local model</span>. <span id="privacy-network">Nothing is sent to the internet.</span><span id="privacy-saved"></span></div>
   </aside>
 
-  <main class="main">
+  <main class="main" data-drop="Drop a file to chat about it">
     <div class="topbar">
       <button id="menu" class="menu" aria-label="Open the sidebar" title="Projects, chats, and settings">☰</button>
       <div class="repo empty" id="repo-label">No project open</div>
@@ -305,6 +311,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
         <button id="tab-cards" aria-pressed="false" disabled>Flashcards</button>
       </div>
       <div class="spacer"></div>
+      <button id="language" class="lang" lang="ar" title="اعرض هذه الصفحة بالعربية">العربية</button>
       <span class="pill" id="index-pill" hidden></span>
       <span class="pill offline" id="offline-pill" title="CodeHaven runs only on this computer and never connects to the internet">Offline</span>
     </div>
@@ -401,7 +408,258 @@ const UPLOAD_BYTES = 64000;  // The same limit as every file CodeHaven reads.
 const PICTURE_BYTES = 8000000;  // A picture of code is read into text by Tesseract on this computer.
 const isDocument = (file) => /\.(ipynb|pdf)$/i.test(file.name) || file.type === "application/pdf";
 const isPicture = (file) => /^image\/(png|jpeg)$/.test(file.type) || /\.(png|jpe?g)$/i.test(file.name);
-const REPOSITORY_SUGGESTIONS = [
+// ---- Language: English, or Arabic chosen with the button in the top bar and remembered in this browser only.
+// The Arabic page is the same page: its English text is the key each Arabic sentence is looked up by.
+let LANG = "en";
+try { if (localStorage.getItem("codehaven.language") === "ar") LANG = "ar"; } catch {}
+const ARABIC = {
+  "CodeHaven logo": "شعار CodeHaven",
+  "Understands your code. Works offline.": "يفهم الكود الخاص بك. يعمل بدون إنترنت.",
+  "Offline and read-only": "بدون إنترنت وللقراءة فقط",
+  "Your code stays on this computer, and CodeHaven never changes your files.": "يبقى الكود على هذا الحاسوب، ولا يغيّر CodeHaven ملفاتك أبدًا.",
+  "Open a project": "افتح مشروعًا",
+  "Repository folder": "مجلد المشروع",
+  "Browse…": "تصفح…",
+  "Index": "فهرسة",
+  "Choose your project folder, then click Index.": "اختر مجلد مشروعك ثم اضغط «فهرسة».",
+  "Or from GitHub": "أو من GitHub",
+  "GitHub repository address": "عنوان مستودع GitHub",
+  "Download and index": "تنزيل وفهرسة",
+  "Private repositories work only if git on this computer is already signed in to GitHub.": "المستودعات الخاصة تعمل فقط إذا كان git على هذا الحاسوب مسجّل الدخول إلى GitHub.",
+  "Downloads once, then opens offline. Nothing is uploaded, and CodeHaven never asks for your password.": "يُنزَّل مرة واحدة ثم يُفتح بدون إنترنت. لا يُرفع أي شيء، ولا يطلب CodeHaven كلمة مرورك أبدًا.",
+  "Or one file": "أو ملف واحد",
+  "Upload a file…": "ارفع ملفًا…",
+  "Text files up to 64 KB. Notebooks (.ipynb), PDFs, and PNG or JPEG pictures of code up to 8 MB are read into a text file you can save. The copy CodeHaven reads is deleted when you open something else.": "ملفات نصية حتى 64 كيلوبايت. دفاتر Jupyter (.ipynb) وملفات PDF وصور الكود بصيغة PNG أو JPEG حتى 8 ميغابايت تُقرأ إلى ملف نصي يمكنك حفظه. النسخة التي يقرؤها CodeHaven تُحذف عند فتح شيء آخر.",
+  "A text file, notebook, PDF, or picture of code. You can also drop or paste it anywhere on the page.": "ملف نصي أو دفتر أو PDF أو صورة لكود. يمكنك أيضًا إفلاته أو لصقه في أي مكان في الصفحة.",
+  "Save the file…": "احفظ الملف…",
+  "Recent projects": "المشاريع الأخيرة",
+  "Chats": "المحادثات",
+  "+ New chat": "+ محادثة جديدة",
+  "Saved on this computer only. Click a chat to reopen it.": "محفوظة على هذا الحاسوب فقط. اضغط على محادثة لإعادة فتحها.",
+  "Follow-up questions remember the last 8 questions.": "أسئلة المتابعة تتذكر آخر 8 أسئلة.",
+  "Settings": "الإعدادات",
+  "Model": "النموذج",
+  "Local model": "النموذج المحلي",
+  "Loading…": "جارٍ التحميل…",
+  "Models installed in Ollama on this computer.": "النماذج المثبتة في Ollama على هذا الحاسوب.",
+  "Memory": "الذاكرة",
+  "Forget this project": "انسَ هذا المشروع",
+  "Runs on this computer with": "يعمل على هذا الحاسوب باستخدام",
+  "a local model": "نموذج محلي",
+  "Nothing is sent to the internet.": "لا يُرسل أي شيء إلى الإنترنت.",
+  "Open the sidebar": "افتح الشريط الجانبي",
+  "Projects, chats, and settings": "المشاريع والمحادثات والإعدادات",
+  "No project open": "لا يوجد مشروع مفتوح",
+  "View": "العرض",
+  "Chat": "محادثة",
+  "Map": "خريطة",
+  "Flashcards": "بطاقات",
+  "CodeHaven runs only on this computer and never connects to the internet": "يعمل CodeHaven على هذا الحاسوب فقط ولا يتصل بالإنترنت أبدًا",
+  "Offline": "بدون إنترنت",
+  "Understand any codebase, offline": "افهم أي كود، بدون إنترنت",
+  "Open a project folder or a single file, then ask how something works.": "افتح مجلد مشروع أو ملفًا واحدًا، ثم اسأل كيف يعمل أي شيء.",
+  "Answers cite the exact lines they rely on.": "الإجابات تذكر الأسطر التي تعتمد عليها بالضبط.",
+  "Choose a folder…": "اختر مجلدًا…",
+  "Try asking": "جرّب أن تسأل",
+  "Attach a file, notebook, PDF, or picture of code": "أرفق ملفًا أو دفترًا أو PDF أو صورة لكود",
+  "Open a project or upload a file first": "افتح مشروعًا أو ارفع ملفًا أولًا",
+  "Question": "السؤال",
+  "Ask": "اسأل",
+  "Enter to send · Shift+Enter for a new line · Name files and functions exactly for the best answers": "Enter للإرسال · Shift+Enter لسطر جديد · اكتب أسماء الملفات والدوال كما هي للحصول على أفضل الإجابات",
+  "Choose files…": "اختر ملفات…",
+  "← All files": "→ كل الملفات",
+  "Draw map": "ارسم الخريطة",
+  "Choose one file to see its functions and classes and which call which, or several files to see how they import each other. The map is drawn from the code itself, without the model, so it is instant.": "اختر ملفًا واحدًا لترى دواله وأصنافه وأيها يستدعي الآخر، أو عدة ملفات لترى كيف يستورد بعضها بعضًا. تُرسم الخريطة من الكود نفسه بدون النموذج، لذلك تظهر فورًا.",
+  "Structure map": "خريطة البنية",
+  "Cards per file": "بطاقات لكل ملف",
+  "Make flashcards": "أنشئ البطاقات",
+  "Choose one or more files and the local model writes question-and-answer cards about them. Each answer links to the lines it is about. One file takes about as long as one chat answer.": "اختر ملفًا أو أكثر وسيكتب النموذج المحلي بطاقات سؤال وجواب عنها. كل إجابة ترتبط بالأسطر التي تتحدث عنها. الملف الواحد يستغرق وقت إجابة واحدة في المحادثة تقريبًا.",
+  "← Previous": "السابقة →",
+  "Show answer": "أظهر الإجابة",
+  "Next →": "← التالية",
+  "Shuffle": "اخلط",
+  "Copy all as text": "انسخ الكل كنص",
+  "Choose a folder": "اختر مجلدًا",
+  "Parent folder": "المجلد الأعلى",
+  "Cancel": "إلغاء",
+  "Use this folder": "استخدم هذا المجلد",
+  "Choose files": "اختر ملفات",
+  "Filter files, such as pricing or tests/": "صفِّ الملفات، مثل pricing أو tests/",
+  "Filter files": "تصفية الملفات",
+  "Clear": "امسح",
+  "Done": "تم",
+  "Cited code": "الكود المذكور",
+  "Close": "إغلاق",
+  "Drop a file to chat about it": "أفلت ملفًا للتحدث عنه",
+  "Search by meaning stopped, so answers use key words.": "توقف البحث بالمعنى، لذلك تعتمد الإجابات على الكلمات المفتاحية.",
+  "Search by meaning is on.": "البحث بالمعنى يعمل.",
+  "Search by meaning: {ready} of {total} passages ready, the rest are being prepared.": "البحث بالمعنى: {ready} من {total} مقطعًا جاهزة، والباقي قيد التحضير.",
+  "Ask about your code": "اسأل عن الكود الخاص بك",
+  "{name} · uploaded file": "{name} · ملف مرفوع",
+  "Choose a folder, then index it to chat about a whole repository.": "اختر مجلدًا ثم فهرسه للتحدث عن مستودع كامل.",
+  "Chatting about ": "المحادثة الآن عن ",
+  ". The copy CodeHaven reads is deleted when you open something else; your original is never touched.": ". النسخة التي يقرؤها CodeHaven تُحذف عند فتح شيء آخر، وملفك الأصلي لا يُمس أبدًا.",
+  "Ask how something in {name} works. Answers cite the exact lines they rely on; click a citation to see the code.": "اسأل كيف يعمل أي شيء في {name}. الإجابات تذكر الأسطر التي تعتمد عليها بالضبط؛ اضغط على أي إشارة لترى الكود.",
+  "{files} indexed": "تمت فهرسة {files}",
+  "<strong>{n}</strong> files indexed.": "عدد الملفات المفهرسة: <strong>{n}</strong>.",
+  "Index limits were reached, so some files are left out; answers can still search and read them.": "تم بلوغ حدود الفهرسة، لذلك استُبعدت بعض الملفات؛ ما زالت الإجابات قادرة على البحث فيها وقراءتها.",
+  "Ask how something in this repository works. Answers cite the exact lines they rely on; click a citation to see the code.": "اسأل كيف يعمل أي شيء في هذا المستودع. الإجابات تذكر الأسطر التي تعتمد عليها بالضبط؛ اضغط على أي إشارة لترى الكود.",
+  "Indexing… this usually takes a few seconds.": "جارٍ الفهرسة… يستغرق هذا عادةً بضع ثوانٍ.",
+  "Indexing…": "جارٍ الفهرسة…",
+  " Checked answers and your chats are saved on this computer only.": " الإجابات المتحقق منها ومحادثاتك تُحفظ على هذا الحاسوب فقط.",
+  "Uploaded files are never remembered.": "الملفات المرفوعة لا تُحفظ في الذاكرة أبدًا.",
+  "Checked answers and chats are kept on this computer.": "الإجابات المتحقق منها والمحادثات تُحفظ على هذا الحاسوب.",
+  "{answers} for this project{added}. An answer is used again only while the files it cites are unchanged.": "{answers} لهذا المشروع{added}. تُستخدم الإجابة مرة أخرى فقط ما دامت الملفات التي تذكرها لم تتغير.",
+  " (one just added)": " (أُضيفت واحدة للتو)",
+  "Delete the {answers} and {chats} for this project? This cannot be undone.": "هل تريد حذف ما حُفظ لهذا المشروع ({answers}، {chats})؟ لا يمكن التراجع عن ذلك.",
+  "{questions} · last used {when}": "{questions} · آخر استخدام {when}",
+  "Delete this saved chat": "احذف هذه المحادثة المحفوظة",
+  "Delete the saved chat {title}": "احذف المحادثة المحفوظة {title}",
+  "Delete the saved chat \"{title}\"? This cannot be undone.": "هل تريد حذف المحادثة المحفوظة «{title}»؟ لا يمكن التراجع عن ذلك.",
+  "Saved chat, last used {when}. The code may have changed since: cited lines open the files as they are now.": "محادثة محفوظة، آخر استخدام {when}. ربما تغيّر الكود منذ ذلك الحين: الأسطر المذكورة تفتح الملفات كما هي الآن.",
+  "Unverified: check the cited lines before relying on this answer.": "غير مؤكدة: راجع الأسطر المذكورة قبل الاعتماد على هذه الإجابة.",
+  "Reopened a saved chat. Follow-ups remember {remembered} of its questions.": "أُعيد فتح محادثة محفوظة. أسئلة المتابعة تتذكر {remembered} من أسئلتها.",
+  "Offline · GitHub download on": "بدون إنترنت · تنزيل GitHub مفعّل",
+  "CodeHaven connects to the internet only to download a GitHub repository you ask for. Nothing is uploaded.": "يتصل CodeHaven بالإنترنت فقط لتنزيل مستودع GitHub الذي تطلبه. لا يُرفع أي شيء.",
+  "Your code never leaves this computer. GitHub downloads are on: they run only when you click Download, and upload nothing.": "الكود لا يغادر هذا الحاسوب أبدًا. تنزيلات GitHub مفعّلة: تعمل فقط عندما تضغط «تنزيل»، ولا ترفع شيئًا.",
+  "Only GitHub downloads you ask for use the internet; nothing is sent.": "تنزيلات GitHub التي تطلبها هي فقط ما يستخدم الإنترنت؛ لا يُرسل أي شيء.",
+  "Downloading from GitHub… this can take a minute for large repositories.": "جارٍ التنزيل من GitHub… قد يستغرق ذلك دقيقة للمستودعات الكبيرة.",
+  "Downloaded ": "تم تنزيل ",
+  "Opened the copy already on this computer of ": "فُتحت النسخة الموجودة على هذا الحاسوب من ",
+  ". It is kept on this computer and opens offline from Recent.": ". يبقى على هذا الحاسوب ويُفتح بدون إنترنت من «المشاريع الأخيرة».",
+  ", without using the internet.": "، بدون استخدام الإنترنت.",
+  "Read {lines} from the picture {image} into ": "قُرئ من الصورة {image} ({lines}) إلى ",
+  ". Reading a picture can get characters wrong, so check the text before you run it.": ". قراءة الصور قد تخطئ في بعض الحروف، لذلك راجع النص قبل تشغيله.",
+  " Compare with the picture: line ": " قارن مع الصورة: السطر ",
+  " Not valid Python yet ({problem}).": " ليس كود Python صالحًا بعد ({problem}).",
+  " It is valid Python.": " هو كود Python صالح.",
+  "Save {name}…": "احفظ {name}…",
+  "{name} is no longer open, so it cannot be saved. Attach the picture again.": "{name} لم يعد مفتوحًا، لذلك لا يمكن حفظه. أرفق الصورة مرة أخرى.",
+  "Now chatting about ": "المحادثة الآن عن ",
+  " The chat above is kept and follow-up questions still remember it, but its citations point to what was open before, so they no longer open.": " المحادثة أعلاه باقية وأسئلة المتابعة ما زالت تتذكرها، لكن إشاراتها تخص ما كان مفتوحًا من قبل، لذلك لم تعد تُفتح.",
+  "View {name}": "اعرض {name}",
+  "{name} is {size} MB; CodeHaven reads notebooks and PDFs up to 8 MB.": "حجم {name} هو {size} ميغابايت؛ يقرأ CodeHaven الدفاتر وملفات PDF حتى 8 ميغابايت.",
+  "{name} is {size} MB; CodeHaven reads pictures up to 8 MB. Crop it to the code.": "حجم {name} هو {size} ميغابايت؛ يقرأ CodeHaven الصور حتى 8 ميغابايت. قص الصورة على الكود فقط.",
+  "{name} is {size} KB; CodeHaven reads text files up to 64 KB. Index its folder instead to ask about part of it.": "حجم {name} هو {size} كيلوبايت؛ يقرأ CodeHaven الملفات النصية حتى 64 كيلوبايت. فهرس مجلده بدلًا من ذلك لتسأل عن جزء منه.",
+  "Reading {name} into text…": "جارٍ قراءة {name} إلى نص…",
+  "Reading the code in {name}… this takes a few seconds.": "جارٍ قراءة الكود في {name}… يستغرق هذا بضع ثوانٍ.",
+  "Reading {name}…": "جارٍ قراءة {name}…",
+  "Drop one file at a time, or index the folder that holds them.": "أفلت ملفًا واحدًا في كل مرة، أو فهرس المجلد الذي يحتويها.",
+  "  (Git repository)": "  (مستودع Git)",
+  "Git repository": "مستودع Git",
+  "No folders here.": "لا توجد مجلدات هنا.",
+  "{lines} in the file": "عدد أسطر الملف: {lines}",
+  " · default": " · الافتراضي",
+  "The default, and the model CodeHaven is tested with.": "النموذج الافتراضي، وهو الذي اختُبر CodeHaven به.",
+  "Not the tested default ({name}), so answers may differ. The first answer is slower while it loads.": "ليس النموذج الافتراضي المختبَر ({name})، لذلك قد تختلف الإجابات. الإجابة الأولى أبطأ ريثما يُحمَّل.",
+  "Checking {name}…": "جارٍ التحقق من {name}…",
+  "CodeHaven is working…": "CodeHaven يعمل…",
+  "Ask about this file": "اسأل عن هذا الملف",
+  "Ask about this repository": "اسأل عن هذا المستودع",
+  "Step {step} of at most {most}…": "الخطوة {step} من {most} كحد أقصى…",
+  "Starting…": "جارٍ البدء…",
+  "{seconds}s": "{seconds} ث",
+  "Writing the answer…": "جارٍ كتابة الإجابة…",
+  "The connection closed before the answer finished.": "انقطع الاتصال قبل اكتمال الإجابة.",
+  "No final answer: the step limit was reached before CodeHaven finished.": "لا توجد إجابة نهائية: بلغ CodeHaven حد الخطوات قبل أن ينتهي.",
+  "Follow-ups remember {remembered} of the last {memory} questions. Start a new chat when you change topic.": "أسئلة المتابعة تتذكر {remembered} من آخر {memory} أسئلة. ابدأ محادثة جديدة عند تغيير الموضوع.",
+  "{steps} · {seconds}s · show what CodeHaven did": "{steps} · {seconds} ث · اعرض ما فعله CodeHaven",
+  "Copy": "نسخ",
+  "Copied": "تم النسخ",
+  "Copy this answer as text": "انسخ هذه الإجابة كنص",
+  "This browser did not allow copying. Select the text and copy it instead.": "لم يسمح المتصفح بالنسخ. حدد النص وانسخه بنفسك.",
+  "New chat started. Follow-up questions remember the last 8 questions.": "بدأت محادثة جديدة. أسئلة المتابعة تتذكر آخر 8 أسئلة.",
+  "No files chosen": "لم تُختر ملفات",
+  "{count} more files: type in the filter to narrow the list.": "{count} ملفات أخرى: اكتب في خانة التصفية لتضييق القائمة.",
+  "No files match.": "لا توجد ملفات مطابقة.",
+  "{count} chosen. A map takes up to {map} files, flashcards up to {flashcards}.": "المختار: {count}. الخريطة تأخذ حتى {map} ملفات، والبطاقات حتى {flashcards}.",
+  "{name} · click to see the code": "{name} · اضغط لترى الكود",
+  "lines {start}-{end}": "الأسطر {start}-{end}",
+  "calls": "يستدعي",
+  "{path} has {lines} but no functions or classes CodeHaven can name, so there is nothing to draw.": "{path} فيه {lines} لكن لا توجد دوال أو أصناف يستطيع CodeHaven تسميتها، لذلك لا يوجد ما يُرسم.",
+  "{path}: {parts}, {calls} between them{limited}. An arrow points from the caller to what it calls. Click a box to see its code.": "{path}: {parts}، وبينها {calls}{limited}. السهم يتجه من المستدعي إلى ما يستدعيه. اضغط على أي مربع لترى الكود.",
+  " (only the first parts are shown)": " (تظهر الأجزاء الأولى فقط)",
+  "{path} · click to see inside": "{path} · اضغط لترى ما بداخله",
+  "not chosen": "غير مختار",
+  "{path} · linked to a chosen file, but not chosen": "{path} · مرتبط بملف مختار، لكنه غير مختار",
+  "imports {names}": "يستورد {names}",
+  "imports it": "يستورده",
+  "{files}, {imports}{limited}. An arrow points from a file to the file it imports; dashed boxes are files you did not choose. Click a file to see inside it.": "{files}، {imports}{limited}. السهم يتجه من الملف إلى الملف الذي يستورده؛ المربعات المتقطعة ملفات لم تخترها. اضغط على أي ملف لترى ما بداخله.",
+  " (limits reached, so some are left out)": " (تم بلوغ الحدود، لذلك استُبعد بعضها)",
+  "Reading the code…": "جارٍ قراءة الكود…",
+  "Answer": "الإجابة",
+  "See {where}": "انظر {where}",
+  "{path}: the part this answer names was not found, so check it against the file.": "{path}: الجزء الذي تذكره هذه الإجابة لم يُعثر عليه، لذلك راجعها مع الملف.",
+  "Card {at} of {total}": "البطاقة {at} من {total}",
+  "Show question": "أظهر السؤال",
+  "Writing cards for {path} (file {index} of {of})…": "جارٍ كتابة بطاقات {path} (الملف {index} من {of})…",
+  "The connection closed before the cards were finished.": "انقطع الاتصال قبل اكتمال البطاقات.",
+  "{cards} in {seconds}s. Click the card, or press Space, to turn it over; the arrow keys move between cards. ": "{cards} في {seconds} ث. اضغط على البطاقة أو مفتاح المسافة لقلبها؛ مفاتيح الأسهم تنقلك بين البطاقات. ",
+  "No cards were made. ": "لم تُنشأ أي بطاقات. ",
+  "Skipped {files}": "تم تخطي {files}",
+  "Copying is blocked by the browser": "المتصفح يمنع النسخ",
+  "Switching the language reloads the page, which starts a new chat. Continue?": "تغيير اللغة يعيد تحميل الصفحة، وهذا يبدأ محادثة جديدة. هل تريد المتابعة؟",
+  "This browser did not allow saving the language.": "لم يسمح المتصفح بحفظ اللغة.",
+};
+const ARABIC_NOUNS = {
+  "file": ["ملف واحد", "ملفان", "ملفات", "ملفًا"],
+  "line": ["سطر واحد", "سطران", "أسطر", "سطرًا"],
+  "part": ["جزء واحد", "جزءان", "أجزاء", "جزءًا"],
+  "call": ["استدعاء واحد", "استدعاءان", "استدعاءات", "استدعاءً"],
+  "import": ["استيراد واحد", "استيرادان", "استيرادات", "استيرادًا"],
+  "card": ["بطاقة واحدة", "بطاقتان", "بطاقات", "بطاقة"],
+  "question": ["سؤال واحد", "سؤالان", "أسئلة", "سؤالًا"],
+  "step": ["خطوة واحدة", "خطوتان", "خطوات", "خطوة"],
+  "saved answer": ["إجابة محفوظة واحدة", "إجابتان محفوظتان", "إجابات محفوظة", "إجابة محفوظة"],
+  "saved chat": ["محادثة محفوظة واحدة", "محادثتان محفوظتان", "محادثات محفوظة", "محادثة محفوظة"],
+};
+// A sentence in the page's language, with {name} places filled from values.
+function t(text, values) {
+  const found = LANG === "ar" && ARABIC[text] || text;
+  return values ? found.replace(/\{(\w+)\}/g, (place, name) => values[name] ?? place) : found;
+}
+// A count with its noun: "3 files". Arabic has its own form for one, for two, for 3 to 10, and for 11 or more.
+function count(number, word) {
+  if (LANG !== "ar") return plural(number, word);
+  const forms = ARABIC_NOUNS[word];
+  if (number === 1 || number === 2) return forms[number - 1];
+  return `${number} ${number % 100 >= 3 && number % 100 <= 10 ? forms[2] : forms[3]}`;
+}
+// Put the page that was written in English into Arabic, and lay it out right to left. Runs once, before anything
+// else reads text from the page.
+function translatePage() {
+  document.documentElement.lang = "ar"; document.documentElement.dir = "rtl";
+  const texts = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node; (node = texts.nextNode());) {
+    const text = node.nodeValue.trim();
+    if (text && ARABIC[text] && !node.parentElement.closest("script, style")) node.nodeValue = node.nodeValue.replace(text, ARABIC[text]);
+  }
+  for (const element of document.querySelectorAll("[title], [placeholder], [aria-label], [data-drop]")) {
+    for (const name of ["title", "placeholder", "aria-label", "data-drop"]) {
+      const value = element.getAttribute(name);
+      if (value && ARABIC[value]) element.setAttribute(name, ARABIC[value]);
+    }
+  }
+  // The button offers the other language, written in that language.
+  Object.assign($("language"), {textContent: "English", title: "Show this page in English", lang: "en"});
+}
+if (LANG === "ar") translatePage();
+$("language").addEventListener("click", () => {
+  if (busy) return;
+  // The empty state is hidden once a chat has messages; only then is there something to lose.
+  if ($("empty").hidden && !confirm(t("Switching the language reloads the page, which starts a new chat. Continue?"))) return;
+  try { localStorage.setItem("codehaven.language", LANG === "ar" ? "en" : "ar"); } catch { toast(t("This browser did not allow saving the language.")); return; }
+  location.reload();
+});
+// Suggested questions, as [button label, question] pairs. The Arabic ones are asked, and so answered, in Arabic.
+const REPOSITORY_SUGGESTIONS = LANG === "ar" ? [
+  ["اشرح المشروع", "اشرح هذا المشروع"],
+  ["اشرح README.md", "اشرح README.md"],
+  ["الوحدات الرئيسية", "ما هي الوحدات الرئيسية وما وظيفة كل منها؟"],
+  ["الاختبارات", "ما هي الاختبارات الموجودة وماذا تفحص؟"],
+  ["جولة في المشروع", "أعطني جولة في المشروع: أي الملفات يجب أن أقرأ أولا؟"],
+  ["فجوات الاختبارات", "أي الدوال بدون اختبارات؟"],
+] : [
   ["Explain this project", "Explain this project"],
   ["Explain README.md", "Explain README.md"],
   ["Main modules", "What are the main modules and what does each do?"],
@@ -409,7 +667,10 @@ const REPOSITORY_SUGGESTIONS = [
   ["Project tour", "Give me a project tour: which files should I read first?"],
   ["Test gaps", "Which functions have no tests?"],
 ];
-const GIT_SUGGESTIONS = [
+const GIT_SUGGESTIONS = LANG === "ar" ? [
+  ["تغييراتي", "اشرح تغييراتي"],
+  ["آخر commit", "ماذا تغير في آخر commit؟"],
+] : [
   ["My changes", "Explain my uncommitted changes"],
   ["Last commit", "What changed in my last commit?"],
 ];
@@ -424,13 +685,17 @@ function toast(message) {
 // Search by meaning uses a second local model; say whether it is on, and how far along it is.
 function meaningNote(meaning) {
   if (!meaning) return "";
-  if (meaning.failed) return " Search by meaning stopped, so answers use key words.";
-  return meaning.ready >= meaning.total ? " Search by meaning is on."
-    : ` Search by meaning: ${meaning.ready} of ${meaning.total} passages ready, the rest are being prepared.`;
+  if (meaning.failed) return " " + t("Search by meaning stopped, so answers use key words.");
+  return " " + (meaning.ready >= meaning.total ? t("Search by meaning is on.")
+    : t("Search by meaning: {ready} of {total} passages ready, the rest are being prepared.", meaning));
 }
 // Suggested questions for one uploaded file, as [button label, question] pairs.
 function fileSuggestions(name) {
-  return [
+  return LANG === "ar" ? [
+    [`اشرح ${name}`, `اشرح ${name}`],
+    ["الأجزاء الرئيسية", `ما هي الدوال أو الأقسام الرئيسية في ${name} وما وظيفة كل منها؟`],
+    ["مراجعة", `راجع ${name}`],
+  ] : [
     [`Explain ${name}`, `Explain ${name}`],
     ["Main parts", `What are the main functions or sections in ${name}, and what does each do?`],
     ["Review", `Review ${name}`],
@@ -489,7 +754,7 @@ function direction(text) {
   const first = text.replace(/`[^`]*`/g, " ").replace(/\S*[\w)]\.\w+(?::\d+(?:-\d+)?)?/g, " ").match(LETTER);
   return first && !/[A-Za-z]/.test(first[0]) ? "rtl" : "ltr";
 }
-const dirAttr = (text) => direction(text) === "rtl" ? ' dir="rtl"' : "";
+const dirAttr = (text) => ` dir="${direction(text)}"`;
 // One line of text as safe HTML: code spans, bold, and clickable citations.
 function inline(text) {
   let html = esc(text);
@@ -557,39 +822,39 @@ const UPLOAD_HINT = $("upload-status").textContent;
 function setIndexed(summary) {
   indexed = Boolean(summary.repository || summary.upload);
   uploaded = Boolean(summary.upload);
-  $("model-name").textContent = summary.model || "a local model";
+  $("model-name").textContent = summary.model || t("a local model");
   setClone(Boolean(summary.clone));
   setSaved(summary);
   setChats(summary.chats);
   if (!indexed) return;
   $("start").hidden = true; $("suggest-label").hidden = false;
-  $("empty-title").textContent = "Ask about your code";
+  $("empty-title").textContent = t("Ask about your code");
   document.body.classList.remove("menu-open"); $("overlay").classList.remove("open");
   $("repo-label").classList.remove("empty");
   $("index-pill").hidden = false;
   const status = $("index-status"), upload = $("upload-status");
   status.classList.remove("error"); upload.classList.remove("error");
   if (summary.upload) {
-    $("repo-label").textContent = `${summary.upload} · uploaded file`;
+    $("repo-label").textContent = t("{name} · uploaded file", {name: summary.upload});
     $("repo-label").title = "";
-    $("index-pill").textContent = "1 file";
-    status.textContent = "Choose a folder, then index it to chat about a whole repository.";
-    upload.replaceChildren("Chatting about ", Object.assign(document.createElement("strong"), {textContent: summary.upload}),
-      ". The copy CodeHaven reads is deleted when you open something else; your original is never touched.");
-    $("empty-text").textContent = `Ask how something in ${summary.upload} works. Answers cite the exact lines they rely on; click a citation to see the code.`;
+    $("index-pill").textContent = count(1, "file");
+    status.textContent = t("Choose a folder, then index it to chat about a whole repository.");
+    upload.replaceChildren(t("Chatting about "), Object.assign(document.createElement("strong"), {textContent: summary.upload}),
+      t(". The copy CodeHaven reads is deleted when you open something else; your original is never touched."));
+    $("empty-text").textContent = t("Ask how something in {name} works. Answers cite the exact lines they rely on; click a citation to see the code.", {name: summary.upload});
     setSuggestions(fileSuggestions(summary.upload));
     setPicture(summary);
   } else {
     setPicture({});
     $("repo-label").textContent = summary.repository.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || summary.repository;
     $("repo-label").title = summary.repository;
-    $("index-pill").textContent = `${summary.files} files indexed`;
-    status.innerHTML = `<strong>${summary.files}</strong> files indexed.` +
-      (summary.limited ? " Index limits were reached, so some files are left out; answers can still search and read them." : "") +
+    $("index-pill").textContent = t("{files} indexed", {files: count(summary.files, "file")});
+    status.innerHTML = t("<strong>{n}</strong> files indexed.", {n: Number(summary.files)}) +
+      (summary.limited ? " " + t("Index limits were reached, so some files are left out; answers can still search and read them.") : "") +
       meaningNote(summary.meaning);
     upload.textContent = UPLOAD_HINT;
     $("path").value = summary.repository;
-    $("empty-text").textContent = "Ask how something in this repository works. Answers cite the exact lines they rely on; click a citation to see the code.";
+    $("empty-text").textContent = t("Ask how something in this repository works. Answers cite the exact lines they rely on; click a citation to see the code.");
     setSuggestions(REPOSITORY_SUGGESTIONS.concat(summary.git ? GIT_SUGGESTIONS : []));
   }
   $("suggestions").hidden = false;
@@ -602,8 +867,8 @@ async function indexRepository() {
   busy = true; updateComposer();
   const status = $("index-status");
   status.classList.remove("error");
-  status.textContent = "Indexing… this usually takes a few seconds.";
-  $("index").textContent = "Indexing…";
+  status.textContent = t("Indexing… this usually takes a few seconds.");
+  $("index").textContent = t("Indexing…");
   try {
     const summary = await api("/api/open", {method: "POST", body: JSON.stringify({path})});
     clearChat(); resetStudy();
@@ -613,7 +878,7 @@ async function indexRepository() {
     status.classList.add("error");
     status.textContent = error.message;
   } finally {
-    $("index").textContent = "Index";
+    $("index").textContent = t("Index");
     busy = false; updateComposer();
   }
 }
@@ -626,15 +891,16 @@ function setSaved(summary, kept) {
   savedCount = summary.saved || 0;
   $("saved-section").hidden = !remembering;
   if (!remembering) return;
-  $("privacy-saved").textContent = " Checked answers and your chats are saved on this computer only.";
-  const answers = `${savedCount} saved answer${savedCount === 1 ? "" : "s"}`;
-  $("saved-status").textContent = uploaded ? "Uploaded files are never remembered."
-    : !indexed ? "Checked answers and chats are kept on this computer."
-    : `${answers} for this project${kept ? " (one just added)" : ""}. An answer is used again only while the files it cites are unchanged.`;
+  $("privacy-saved").textContent = t(" Checked answers and your chats are saved on this computer only.");
+  $("saved-status").textContent = uploaded ? t("Uploaded files are never remembered.")
+    : !indexed ? t("Checked answers and chats are kept on this computer.")
+    : t("{answers} for this project{added}. An answer is used again only while the files it cites are unchanged.",
+        {answers: count(savedCount, "saved answer"), added: kept ? t(" (one just added)") : ""});
   $("forget").disabled = busy || uploaded || !(savedCount || chatCount);
 }
 $("forget").addEventListener("click", async () => {
-  if (!confirm(`Delete the ${savedCount} saved answer${savedCount === 1 ? "" : "s"} and ${chatCount} saved chat${chatCount === 1 ? "" : "s"} for this project? This cannot be undone.`)) return;
+  if (!confirm(t("Delete the {answers} and {chats} for this project? This cannot be undone.",
+                 {answers: count(savedCount, "saved answer"), chats: count(chatCount, "saved chat")}))) return;
   try { const summary = await api("/api/forget", {method: "POST", body: "{}"}); setSaved(summary); setChats(summary.chats); } catch (error) { toast(error.message); }
 });
 
@@ -650,12 +916,12 @@ function setChats(chats) {
     const row = document.createElement("div"); row.className = "chat-row";
     const open = document.createElement("button");
     open.textContent = chat.title; open.dir = "auto";
-    open.title = `${chat.questions} question${chat.questions === 1 ? "" : "s"} · last used ${chat.updated.replace("T", " ")}`;
+    open.title = t("{questions} · last used {when}", {questions: count(chat.questions, "question"), when: chat.updated.replace("T", " ")});
     open.addEventListener("click", () => openChat(chat.id));
     const remove = document.createElement("button"); remove.className = "chat-delete"; remove.textContent = "×";
-    remove.title = "Delete this saved chat"; remove.setAttribute("aria-label", `Delete the saved chat ${chat.title}`);
+    remove.title = t("Delete this saved chat"); remove.setAttribute("aria-label", t("Delete the saved chat {title}", chat));
     remove.addEventListener("click", async () => {
-      if (busy || !confirm(`Delete the saved chat "${chat.title}"? This cannot be undone.`)) return;
+      if (busy || !confirm(t("Delete the saved chat \"{title}\"? This cannot be undone.", chat))) return;
       try { setChats((await api("/api/chat/delete", {method: "POST", body: JSON.stringify({id: chat.id})})).chats); } catch (error) { toast(error.message); }
     });
     row.append(open, remove);
@@ -669,7 +935,7 @@ async function openChat(id) {
     const chat = await api("/api/chat", {method: "POST", body: JSON.stringify({id})});
     setView("chat");
     clearChat();
-    addMessage("note").textContent = `Saved chat, last used ${chat.updated.replace("T", " ")}. The code may have changed since: cited lines open the files as they are now.`;
+    addMessage("note").textContent = t("Saved chat, last used {when}. The code may have changed since: cited lines open the files as they are now.", {when: chat.updated.replace("T", " ")});
     for (const turn of chat.turns) {
       addMessage("user").textContent = turn.question;
       const card = addMessage("assistant");
@@ -677,13 +943,13 @@ async function openChat(id) {
       card.append(answer);
       if (turn.issues.length) {
         const checks = document.createElement("div"); checks.className = "checks";
-        const title = document.createElement("strong"); title.textContent = "Unverified: check the cited lines before relying on this answer.";
+        const title = document.createElement("strong"); title.textContent = t("Unverified: check the cited lines before relying on this answer.");
         const list = document.createElement("ul");
-        for (const issue of turn.issues) { const item = document.createElement("li"); item.textContent = issue; list.append(item); }
+        for (const issue of turn.issues) { const item = document.createElement("li"); item.dir = "auto"; item.textContent = issue; list.append(item); }
         checks.append(title, list); card.append(checks);
       }
     }
-    $("memory-status").textContent = `Reopened a saved chat. Follow-ups remember ${chat.remembered} of its questions.`;
+    $("memory-status").textContent = t("Reopened a saved chat. Follow-ups remember {remembered} of its questions.", chat);
     scrollDown();
   } catch (error) { toast(error.message); }
 }
@@ -696,10 +962,10 @@ function setClone(on) {
   cloneOn = on;
   $("clone-section").hidden = !on;
   if (!on) return;
-  $("offline-pill").textContent = "Offline · GitHub download on";
-  $("offline-pill").title = "CodeHaven connects to the internet only to download a GitHub repository you ask for. Nothing is uploaded.";
-  $("offline-text").textContent = "Your code never leaves this computer. GitHub downloads are on: they run only when you click Download, and upload nothing.";
-  $("privacy-network").textContent = "Only GitHub downloads you ask for use the internet; nothing is sent.";
+  $("offline-pill").textContent = t("Offline · GitHub download on");
+  $("offline-pill").title = t("CodeHaven connects to the internet only to download a GitHub repository you ask for. Nothing is uploaded.");
+  $("offline-text").textContent = t("Your code never leaves this computer. GitHub downloads are on: they run only when you click Download, and upload nothing.");
+  $("privacy-network").textContent = t("Only GitHub downloads you ask for use the internet; nothing is sent.");
 }
 async function cloneRepository() {
   const address = $("github").value.trim();
@@ -707,15 +973,15 @@ async function cloneRepository() {
   busy = true; updateComposer();
   const status = $("clone-status");
   status.classList.remove("error");
-  status.textContent = "Downloading from GitHub… this can take a minute for large repositories.";
+  status.textContent = t("Downloading from GitHub… this can take a minute for large repositories.");
   try {
     const summary = await api("/api/clone", {method: "POST", body: JSON.stringify({address})});
     clearChat(); resetStudy();
     setIndexed(summary);
     remember(summary.repository);
-    status.replaceChildren(summary.cloned ? "Downloaded " : "Opened the copy already on this computer of ",
+    status.replaceChildren(summary.cloned ? t("Downloaded ") : t("Opened the copy already on this computer of "),
       Object.assign(document.createElement("strong"), {textContent: summary.source}),
-      summary.cloned ? ". It is kept on this computer and opens offline from Recent." : ", without using the internet.");
+      summary.cloned ? t(". It is kept on this computer and opens offline from Recent.") : t(", without using the internet."));
     $("github").value = "";
   } catch (error) {
     status.classList.add("error");
@@ -737,11 +1003,11 @@ function lineLink(name, number, text) {  // Opened by the same click handler as 
 // What to say about a picture that was read: how many lines, which to compare, and whether it is valid Python.
 function pictureNotes(summary) {
   const picture = summary.picture, name = summary.upload;
-  const notes = [`Read ${plural(picture.lines, "line")} from the picture ${picture.image} into `, Object.assign(document.createElement("strong"), {textContent: name}),
-    ". Reading a picture can get characters wrong, so check the text before you run it."];
-  if (picture.check.length) notes.push(" Compare with the picture: line ", ...picture.check.flatMap((number, index) => [index ? ", " : "", lineLink(name, number)]), ".");
-  if (picture.syntax) notes.push(Object.assign(document.createElement("strong"), {textContent: ` Not valid Python yet (${picture.syntax}).`}));
-  else if (name.endsWith(".py")) notes.push(" It is valid Python.");
+  const notes = [t("Read {lines} from the picture {image} into ", {lines: count(picture.lines, "line"), image: picture.image}), Object.assign(document.createElement("strong"), {textContent: name}),
+    t(". Reading a picture can get characters wrong, so check the text before you run it.")];
+  if (picture.check.length) notes.push(t(" Compare with the picture: line "), ...picture.check.flatMap((number, index) => [index ? ", " : "", lineLink(name, number)]), ".");
+  if (picture.syntax) notes.push(Object.assign(document.createElement("strong"), {textContent: t(" Not valid Python yet ({problem}).", {problem: picture.syntax})}));
+  else if (name.endsWith(".py")) notes.push(t(" It is valid Python."));
   return notes;
 }
 // The sidebar note and Save button for a picture, notebook, or PDF that was read into text.
@@ -749,13 +1015,13 @@ function setPicture(summary) {
   $("picture-status").hidden = $("save-row").hidden = !(summary.picture || summary.document);
   if (!summary.picture && !summary.document) return;
   $("picture-status").replaceChildren(...(summary.picture ? pictureNotes(summary) : [summary.document.note]));
-  $("save-text").textContent = `Save ${summary.upload}…`;
+  $("save-text").textContent = t("Save {name}…", {name: summary.upload});
 }
 // Save the text read from the upload as a file, through a download link that exists only for the click.
 async function saveText(name) {
   try {
     const file = await api("/api/text");
-    if (name && file.name !== name) throw new Error(`${name} is no longer open, so it cannot be saved. Attach the picture again.`);
+    if (name && file.name !== name) throw new Error(t("{name} is no longer open, so it cannot be saved. Attach the picture again.", {name}));
     const link = Object.assign(document.createElement("a"), {href: URL.createObjectURL(new Blob([file.text], {type: "text/plain"})), download: file.name});
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
@@ -766,12 +1032,12 @@ $("save-text").addEventListener("click", () => saveText());
 function uploadNote(summary, chatting) {
   const name = summary.upload;
   const notes = summary.picture ? pictureNotes(summary)
-    : [summary.document ? summary.document.note + " " : "", "Now chatting about ", Object.assign(document.createElement("strong"), {textContent: name}), "."];
-  if (chatting) notes.push(" The chat above is kept and follow-up questions still remember it, but its citations point to what was open before, so they no longer open.");
+    : [summary.document ? summary.document.note + " " : "", t("Now chatting about "), Object.assign(document.createElement("strong"), {textContent: name}), "."];
+  if (chatting) notes.push(t(" The chat above is kept and follow-up questions still remember it, but its citations point to what was open before, so they no longer open."));
   if (summary.picture || summary.document) {
-    const save = Object.assign(document.createElement("button"), {textContent: `Save ${name}…`});
+    const save = Object.assign(document.createElement("button"), {textContent: t("Save {name}…", {name})});
     save.addEventListener("click", () => saveText(name));
-    notes.push(" ", lineLink(name, 1, `View ${name}`), save);
+    notes.push(" ", lineLink(name, 1, t("View {name}", {name})), save);
   }
   return notes;
 }
@@ -789,13 +1055,14 @@ async function uploadFile(file, fromChat = false) {
     note.classList.toggle("error", failed); note.textContent = text; scrollDown();
   };
   if (file.size > (picture ? PICTURE_BYTES : UPLOAD_BYTES)) {
-    report(isDocument(file) ? `${file.name} is ${Math.ceil(file.size / 1000000)} MB; CodeHaven reads notebooks and PDFs up to 8 MB.`
-      : picture ? `${file.name} is ${Math.ceil(file.size / 1000000)} MB; CodeHaven reads pictures up to 8 MB. Crop it to the code.`
-      : `${file.name} is ${Math.ceil(file.size / 1000)} KB; CodeHaven reads text files up to 64 KB. Index its folder instead to ask about part of it.`, true);
+    const size = {name: file.name, size: Math.ceil(file.size / (picture ? 1000000 : 1000))};
+    report(isDocument(file) ? t("{name} is {size} MB; CodeHaven reads notebooks and PDFs up to 8 MB.", size)
+      : picture ? t("{name} is {size} MB; CodeHaven reads pictures up to 8 MB. Crop it to the code.", size)
+      : t("{name} is {size} KB; CodeHaven reads text files up to 64 KB. Index its folder instead to ask about part of it.", size), true);
     return;
   }
   busy = true; updateComposer();
-  report(isDocument(file) ? `Reading ${file.name} into text…` : picture ? `Reading the code in ${file.name}… this takes a few seconds.` : `Reading ${file.name}…`);
+  report(t(isDocument(file) ? "Reading {name} into text…" : picture ? "Reading the code in {name}… this takes a few seconds." : "Reading {name}…", {name: file.name}));
   try {
     const response = await fetch("/api/upload?name=" + encodeURIComponent(file.name),
                                  {method: "POST", headers: {"Content-Type": "application/octet-stream", "X-CodeHaven-Token": TOKEN}, body: file});
@@ -837,7 +1104,7 @@ document.addEventListener("drop", (event) => {
   event.preventDefault();
   dragDepth = 0; document.body.classList.remove("dropping");
   const files = event.dataTransfer.files;
-  if (files.length > 1) { $("upload-status").classList.add("error"); $("upload-status").textContent = "Drop one file at a time, or index the folder that holds them."; return; }
+  if (files.length > 1) { $("upload-status").classList.add("error"); $("upload-status").textContent = t("Drop one file at a time, or index the folder that holds them."); return; }
   uploadFile(files[0], true);
 });
 
@@ -847,7 +1114,7 @@ async function browse(path) {
   try {
     const data = await api("/api/dirs?path=" + encodeURIComponent(path || ""));
     browsing = data.path;
-    $("browser-path").textContent = data.path + (data.repository ? "  (Git repository)" : "");
+    $("browser-path").textContent = data.path + (data.repository ? t("  (Git repository)") : "");
     $("up").disabled = !data.parent;
     $("up").onclick = () => browse(data.parent);
     const items = data.entries.map((entry) => {
@@ -855,11 +1122,11 @@ async function browse(path) {
       const name = document.createElement("span");
       name.textContent = "📁 " + entry.name;
       button.append(name);
-      if (entry.repository) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "Git repository"; button.append(tag); }
+      if (entry.repository) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = t("Git repository"); button.append(tag); }
       button.addEventListener("click", () => browse(entry.path));
       return button;
     });
-    if (!items.length) { const empty = document.createElement("div"); empty.className = "index-status"; empty.style.padding = "8px 10px"; empty.textContent = "No folders here."; items.push(empty); }
+    if (!items.length) { const empty = document.createElement("div"); empty.className = "index-status"; empty.style.padding = "8px 10px"; empty.textContent = t("No folders here."); items.push(empty); }
     $("browser-list").replaceChildren(...items);
   } catch (error) {
     $("browser-path").textContent = error.message;
@@ -876,11 +1143,11 @@ $("start-file").addEventListener("click", () => { attaching = false; $("file-inp
 // Open the drawer on a file with the cited lines highlighted and a few lines around them.
 async function showCitation(path, start, end) {
   $("drawer-title").textContent = `${path}:${start}${end !== start ? "-" + end : ""}`;
-  $("drawer-code").textContent = "Loading…";
+  $("drawer-code").textContent = t("Loading…");
   $("overlay").classList.add("open"); $("drawer").classList.add("open");
   try {
     const data = await api(`/api/file?path=${encodeURIComponent(path)}&start=${start}&end=${end}`);
-    $("drawer-title").textContent = `${data.path}:${data.start}${data.end !== data.start ? "-" + data.end : ""}  ·  ${data.total} lines`;
+    $("drawer-title").textContent = `${data.path}:${data.start}${data.end !== data.start ? "-" + data.end : ""}  ·  ${LANG === "ar" ? t("{lines} in the file", {lines: data.total}) : data.total + " lines"}`;
     $("drawer-code").replaceChildren(...data.lines.map((text, index) => {
       const number = data.first + index;
       const row = document.createElement("div");
@@ -913,14 +1180,14 @@ async function loadModels() {
     select.replaceChildren(...models.map((model) => {
       const option = document.createElement("option");
       option.value = model.name;
-      option.textContent = model.name + (model.parameters ? ` · ${model.parameters}` : "") + (model.name === data.default ? " · default" : "");
+      option.textContent = model.name + (model.parameters ? ` · ${model.parameters}` : "") + (model.name === data.default ? t(" · default") : "");
       return option;
     }));
     select.value = data.current;
     $("model-name").textContent = data.current;
     $("model-status").textContent = data.current === data.default
-      ? "The default, and the model CodeHaven is tested with."
-      : `Not the tested default (${data.default}), so answers may differ. The first answer is slower while it loads.`;
+      ? t("The default, and the model CodeHaven is tested with.")
+      : t("Not the tested default ({name}), so answers may differ. The first answer is slower while it loads.", {name: data.default});
   } catch (error) {
     $("model-status").textContent = error.message;
   }
@@ -929,7 +1196,7 @@ async function loadModels() {
 $("model").addEventListener("change", async () => {
   const name = $("model").value;
   busy = true; updateComposer();
-  $("model-status").textContent = `Checking ${name}…`;
+  $("model-status").textContent = t("Checking {name}…", {name});
   try {
     await api("/api/model", {method: "POST", body: JSON.stringify({name})});
   } catch (error) {
@@ -959,8 +1226,9 @@ function updateComposer() {
   const ready = indexed && !busy;
   $("question").disabled = !ready;
   $("send").disabled = !ready || !$("question").value.trim();
-  $("question").placeholder = !indexed ? "Open a project or upload a file first" : busy ? "CodeHaven is working…"
-    : uploaded ? "Ask about this file" : "Ask about this repository";
+  $("question").placeholder = t(!indexed ? "Open a project or upload a file first" : busy ? "CodeHaven is working…"
+    : uploaded ? "Ask about this file" : "Ask about this repository");
+  $("language").disabled = busy;
   $("new-chat").disabled = !indexed || busy;
   $("model").disabled = busy;
   $("index").disabled = busy;
@@ -976,6 +1244,9 @@ function updateComposer() {
 }
 // Shorten a step line from the server's log for the status shown while waiting.
 function statusText(line) {
+  // The server's step lines are in English; the Arabic page shows only how far along the steps are.
+  const step = LANG === "ar" && line.match(/^\s*Step (\d+) \(max (\d+)\)/);
+  if (step) return t("Step {step} of at most {most}…", {step: step[1], most: step[2]});
   return line.replace(/^\s+/, "").replace(/\s*\(loading and prompt processing can take time\)\.\.\.$/, "…");
 }
 
@@ -989,15 +1260,15 @@ async function ask(question) {
   const card = addMessage("assistant");
   const status = document.createElement("div"); status.className = "status";
   const dot = document.createElement("span"); dot.className = "dot";
-  const statusLabel = document.createElement("span"); statusLabel.textContent = "Starting…";
+  const statusLabel = document.createElement("span"); statusLabel.textContent = t("Starting…");
   status.append(dot, statusLabel);
   const answer = document.createElement("div"); answer.className = "answer";
   card.append(status, answer);
   scrollDown();
   const logs = [];
-  let streamed = "", phase = "Starting…";
+  let streamed = "", phase = t("Starting…");
   const started = Date.now();
-  const timer = setInterval(() => { statusLabel.textContent = `${phase} ${Math.round((Date.now() - started) / 1000)}s`; }, 1000);
+  const timer = setInterval(() => { statusLabel.textContent = `${phase} ${t("{seconds}s", {seconds: Math.round((Date.now() - started) / 1000)})}`; }, 1000);
   const finish = () => { clearInterval(timer); busy = false; updateComposer(); $("question").focus(); };
   try {
     let done = null;
@@ -1009,44 +1280,44 @@ async function ask(question) {
       } else if (event.type === "text") {
         streamed += event.text;
         answer.innerHTML = render(streamed);
-        phase = "Writing the answer…";
+        phase = t("Writing the answer…");
         scrollDown();
       } else if (event.type === "done" || event.type === "error") {
         done = event;
       }
     }
     status.remove();
-    if (!done) throw new Error("The connection closed before the answer finished.");
+    if (!done) throw new Error(t("The connection closed before the answer finished."));
     if (done.type === "error") throw new Error(done.message);
-    answer.innerHTML = render(done.complete ? done.answer : (streamed || "No final answer: the step limit was reached before CodeHaven finished."));
+    answer.innerHTML = render(done.complete ? done.answer : (streamed || t("No final answer: the step limit was reached before CodeHaven finished.")));
     if (done.issues.length) {
       const checks = document.createElement("div"); checks.className = "checks";
-      const title = document.createElement("strong"); title.textContent = "Unverified: check the cited lines before relying on this answer.";
+      const title = document.createElement("strong"); title.textContent = t("Unverified: check the cited lines before relying on this answer.");
       const list = document.createElement("ul");
-      for (const issue of done.issues) { const item = document.createElement("li"); item.textContent = issue; list.append(item); }
+      for (const issue of done.issues) { const item = document.createElement("li"); item.dir = "auto"; item.textContent = issue; list.append(item); }
       checks.append(title, list); card.append(checks);
     }
     setSaved({saved: done.saved}, done.kept);
     setChats(done.chats);
-    $("memory-status").textContent = `Follow-ups remember ${done.remembered} of the last ${done.memory} questions. Start a new chat when you change topic.`;
+    $("memory-status").textContent = t("Follow-ups remember {remembered} of the last {memory} questions. Start a new chat when you change topic.", done);
     const shownLines = new Set((done.answer || "").split("\n").map((line) => line.trim()).filter(Boolean));
     const steps = logs.filter((line) => line.trim() && !shownLines.has(line.trim()) && !line.startsWith("Answer check:"));
     const details = document.createElement("details"); details.className = "steps";
     const summary = document.createElement("summary");
-    summary.textContent = `${done.steps} step${done.steps === 1 ? "" : "s"} · ${Math.round((Date.now() - started) / 1000)}s · show what CodeHaven did`;
+    summary.textContent = t("{steps} · {seconds}s · show what CodeHaven did", {steps: count(done.steps, "step"), seconds: Math.round((Date.now() - started) / 1000)});
     const pre = document.createElement("pre"); pre.textContent = steps.join("\n").replace(/\n{3,}/g, "\n\n").trim();
     details.append(summary, pre);
-    const copy = document.createElement("button"); copy.className = "copy"; copy.textContent = "Copy";
-    copy.title = "Copy this answer as text";
+    const copy = document.createElement("button"); copy.className = "copy"; copy.textContent = t("Copy");
+    copy.title = t("Copy this answer as text");
     copy.addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(done.answer || streamed); copy.textContent = "Copied"; setTimeout(() => { copy.textContent = "Copy"; }, 1500); }
-      catch { toast("This browser did not allow copying. Select the text and copy it instead."); }
+      try { await navigator.clipboard.writeText(done.answer || streamed); copy.textContent = t("Copied"); setTimeout(() => { copy.textContent = t("Copy"); }, 1500); }
+      catch { toast(t("This browser did not allow copying. Select the text and copy it instead.")); }
     });
     const foot = document.createElement("div"); foot.className = "msg-foot";
     foot.append(details, copy); card.append(foot);
   } catch (error) {
     status.remove();
-    const box = document.createElement("div"); box.className = "error-box"; box.textContent = error.message;
+    const box = document.createElement("div"); box.className = "error-box"; box.dir = "auto"; box.textContent = error.message;
     card.append(box);
   } finally {
     finish(); scrollDown();
@@ -1073,7 +1344,7 @@ $("new-chat").addEventListener("click", async () => {
   try {
     await api("/api/reset", {method: "POST", body: "{}"});
     clearChat();
-    $("memory-status").textContent = "New chat started. Follow-up questions remember the last 8 questions.";
+    $("memory-status").textContent = t("New chat started. Follow-up questions remember the last 8 questions.");
   } catch (error) { toast(error.message); }
 });
 
@@ -1091,8 +1362,8 @@ for (const view of ["chat", "map", "cards"]) $("tab-" + view).addEventListener("
 let selected = [], fileList = null, picking = new Set();
 // Show the chosen files in the bar above the map and above the flashcards.
 function showChosen() {
-  const text = uploaded ? $("repo-label").textContent : !selected.length ? "No files chosen"
-    : selected.length === 1 ? selected[0] : `${selected.length} files: ${selected.map((path) => path.split("/").pop()).join(", ")}`;
+  const text = uploaded ? $("repo-label").textContent : !selected.length ? t("No files chosen")
+    : selected.length === 1 ? selected[0] : `${count(selected.length, "file")}: ${selected.map((path) => path.split("/").pop()).join(", ")}`;
   for (const label of document.querySelectorAll("[data-chosen]")) {
     label.textContent = text;
     label.title = selected.join("\n");
@@ -1118,21 +1389,21 @@ function showPicker() {
     row.append(box, path);
     return row;
   });
-  if (shown.length > rows.length) rows.push(Object.assign(document.createElement("div"), {className: "index-status", textContent: `${shown.length - rows.length} more files: type in the filter to narrow the list.`}));
-  if (!shown.length) rows.push(Object.assign(document.createElement("div"), {className: "index-status", textContent: "No files match."}));
+  if (shown.length > rows.length) rows.push(Object.assign(document.createElement("div"), {className: "index-status", textContent: t("{count} more files: type in the filter to narrow the list.", {count: shown.length - rows.length})}));
+  if (!shown.length) rows.push(Object.assign(document.createElement("div"), {className: "index-status", textContent: t("No files match.")}));
   $("picker-list").replaceChildren(...rows);
   showPickerNote();
 }
 function showPickerNote() {
   const limits = fileList.limits;
-  $("picker-note").textContent = `${picking.size} chosen. A map takes up to ${limits.map} files, flashcards up to ${limits.flashcards}.`;
+  $("picker-note").textContent = t("{count} chosen. A map takes up to {map} files, flashcards up to {flashcards}.", {count: picking.size, ...limits});
 }
 // Open the file picker. The file list is fetched once and kept until something else is opened.
 async function openPicker() {
   $("overlay").classList.add("open"); $("picker").classList.add("open");
   picking = new Set(selected);
   try {
-    if (!fileList) { $("picker-list").textContent = "Loading…"; fileList = await api("/api/files"); }
+    if (!fileList) { $("picker-list").textContent = t("Loading…"); fileList = await api("/api/files"); }
     showPicker();
     $("picker-filter").focus();
   } catch (error) {
@@ -1259,27 +1530,29 @@ function drawGraph(nodes, edges) {
 function plural(count, word) { return `${count} ${word}${count === 1 ? "" : "s"}`; }
 // The map inside one file: its functions and classes, and which calls which.
 function showFileMap(file) {
-  const nodes = file.parts.map((part) => ({id: part.name, label: part.name, kind: part.kind, title: `${part.name} · click to see the code`,
-    sub: `${part.kind === "part" ? "" : part.kind + " · "}lines ${part.start}-${part.end}`, open: () => showCitation(file.path, part.start, part.end)}));
-  const calls = drawGraph(nodes, file.parts.flatMap((part) => part.calls.map((name) => ({from: part.name, to: name, title: "calls"}))));
+  const nodes = file.parts.map((part) => ({id: part.name, label: part.name, kind: part.kind, title: t("{name} · click to see the code", part),
+    sub: `${part.kind === "part" ? "" : part.kind + " · "}${t("lines {start}-{end}", part)}`, open: () => showCitation(file.path, part.start, part.end)}));
+  const calls = drawGraph(nodes, file.parts.flatMap((part) => part.calls.map((name) => ({from: part.name, to: name, title: t("calls")}))));
   $("map-back").hidden = mapData.files.length < 2;
-  $("map-status").textContent = !nodes.length ? `${file.path} has ${plural(file.lines, "line")} but no functions or classes CodeHaven can name, so there is nothing to draw.`
-    : `${file.path}: ${plural(nodes.length, "part")}, ${plural(calls, "call")} between them${file.parts_limited ? " (only the first parts are shown)" : ""}. An arrow points from the caller to what it calls. Click a box to see its code.`;
+  $("map-status").textContent = !nodes.length ? t("{path} has {lines} but no functions or classes CodeHaven can name, so there is nothing to draw.", {path: file.path, lines: count(file.lines, "line")})
+    : t("{path}: {parts}, {calls} between them{limited}. An arrow points from the caller to what it calls. Click a box to see its code.",
+        {path: file.path, parts: count(nodes.length, "part"), calls: count(calls, "call"), limited: file.parts_limited ? t(" (only the first parts are shown)") : ""});
 }
 // The map of several files: which imports which. Clicking a file shows the map inside it.
 function showFilesMap() {
-  const nodes = mapData.files.map((file) => ({id: file.path, label: file.path, kind: "file", title: `${file.path} · click to see inside`,
-    sub: `${plural(file.parts.length, "part")} · ${plural(file.lines, "line")}`, open: () => showFileMap(file)}));
-  nodes.push(...mapData.neighbours.map((path) => ({id: path, label: path, ghost: true, sub: "not chosen", title: `${path} · linked to a chosen file, but not chosen`})));
-  const links = drawGraph(nodes, mapData.links.map((link) => ({from: link.from, to: link.to, title: link.names.length ? "imports " + link.names.join(", ") : "imports it"})));
+  const nodes = mapData.files.map((file) => ({id: file.path, label: file.path, kind: "file", title: t("{path} · click to see inside", file),
+    sub: `${count(file.parts.length, "part")} · ${count(file.lines, "line")}`, open: () => showFileMap(file)}));
+  nodes.push(...mapData.neighbours.map((path) => ({id: path, label: path, ghost: true, sub: t("not chosen"), title: t("{path} · linked to a chosen file, but not chosen", {path})})));
+  const links = drawGraph(nodes, mapData.links.map((link) => ({from: link.from, to: link.to, title: link.names.length ? t("imports {names}", {names: link.names.join(", ")}) : t("imports it")})));
   $("map-back").hidden = true;
-  $("map-status").textContent = `${plural(mapData.files.length, "file")}, ${plural(links, "import")}${mapData.limited ? " (limits reached, so some are left out)" : ""}. An arrow points from a file to the file it imports; dashed boxes are files you did not choose. Click a file to see inside it.`;
+  $("map-status").textContent = t("{files}, {imports}{limited}. An arrow points from a file to the file it imports; dashed boxes are files you did not choose. Click a file to see inside it.",
+    {files: count(mapData.files.length, "file"), imports: count(links, "import"), limited: mapData.limited ? t(" (limits reached, so some are left out)") : ""});
 }
 // Ask the server for the structure of the chosen files and draw it.
 async function drawMap() {
   if (!uploaded && !selected.length) { openPicker(); return; }
   $("map-status").classList.remove("error");
-  $("map-status").textContent = "Reading the code…";
+  $("map-status").textContent = t("Reading the code…");
   try {
     mapData = await api("/api/map", {method: "POST", body: JSON.stringify({paths: selected})});
     if (mapData.files.length === 1 && !mapData.neighbours.length) showFileMap(mapData.files[0]); else showFilesMap();
@@ -1299,14 +1572,14 @@ function showCard() {
   if (!cards.length) return;
   const card = cards[cardAt];
   $("flashcard").classList.toggle("answer", cardAnswer);
-  $("card-side").textContent = cardAnswer ? "Answer" : "Question";
+  $("card-side").textContent = t(cardAnswer ? "Answer" : "Question");
   $("card-text").innerHTML = inline(cardAnswer ? card.answer : card.question);
   $("card-text").dir = direction(cardAnswer ? card.answer : card.question);
   const where = card.start ? `${card.path}:${card.start}${card.end !== card.start ? "-" + card.end : ""}` : "";
-  $("card-source").innerHTML = !cardAnswer ? esc(card.path) : where ? inline(`See ${where}`) + (card.symbol ? ` (<code>${esc(card.symbol)}</code>)` : "")
-    : esc(`${card.path}: the part this answer names was not found, so check it against the file.`);
-  $("card-count").textContent = `Card ${cardAt + 1} of ${cards.length}`;
-  $("card-flip").textContent = cardAnswer ? "Show question" : "Show answer";
+  $("card-source").innerHTML = !cardAnswer ? esc(card.path) : where ? inline(t("See {where}", {where})) + (card.symbol ? ` (<code>${esc(card.symbol)}</code>)` : "")
+    : esc(t("{path}: the part this answer names was not found, so check it against the file.", card));
+  $("card-count").textContent = t("Card {at} of {total}", {at: cardAt + 1, total: cards.length});
+  $("card-flip").textContent = t(cardAnswer ? "Show question" : "Show answer");
   $("card-prev").disabled = cardAt === 0;
   $("card-next").disabled = cardAt === cards.length - 1;
 }
@@ -1320,23 +1593,24 @@ async function makeCards() {
   const status = $("cards-status"), failed = [], started = Date.now();
   status.classList.remove("error");
   cards = []; cardAt = 0; cardAnswer = false; showCard();
-  let phase = "Starting…", finished = false;
-  const tick = () => { status.textContent = `${phase} ${Math.round((Date.now() - started) / 1000)}s`; };
+  let phase = t("Starting…"), finished = false;
+  const tick = () => { status.textContent = `${phase} ${t("{seconds}s", {seconds: Math.round((Date.now() - started) / 1000)})}`; };
   const timer = setInterval(tick, 1000);
   tick();
   try {
-    for await (const event of streamEvents("/api/flashcards", {paths: selected, count: Number($("cards-count").value)})) {
-      if (event.type === "file") { phase = `Writing cards for ${event.path} (file ${event.index} of ${event.of})…`; tick(); }
+    for await (const event of streamEvents("/api/flashcards", {paths: selected, count: Number($("cards-count").value), language: LANG})) {
+      if (event.type === "file") { phase = t("Writing cards for {path} (file {index} of {of})…", event); tick(); }
       else if (event.type === "cards") { cards.push(...event.cards); showCard(); }
       else if (event.type === "error") failed.push(`${event.path}: ${event.message}`);
       else if (event.type === "done") finished = true;
     }
     clearInterval(timer);
-    if (!finished) throw new Error("The connection closed before the cards were finished.");
+    if (!finished) throw new Error(t("The connection closed before the cards were finished."));
     status.classList.toggle("error", !cards.length);
-    status.textContent = (cards.length ? `${plural(cards.length, "card")} in ${Math.round((Date.now() - started) / 1000)}s. Click the card, or press Space, to turn it over; the arrow keys move between cards. `
-                                       : "No cards were made. ")
-      + (failed.length ? `Skipped ${failed.join("; ")}` : "");
+    status.textContent = (cards.length ? t("{cards} in {seconds}s. Click the card, or press Space, to turn it over; the arrow keys move between cards. ",
+                                           {cards: count(cards.length, "card"), seconds: Math.round((Date.now() - started) / 1000)})
+                                       : t("No cards were made. "))
+      + (failed.length ? t("Skipped {files}", {files: failed.join("; ")}) : "");
   } catch (error) {
     clearInterval(timer);
     studyError("cards-status", error.message);
@@ -1355,16 +1629,16 @@ $("cards-shuffle").addEventListener("click", () => {
 });
 $("cards-copy").addEventListener("click", async () => {
   const text = cards.map((card) => `Q: ${card.question}\nA: ${card.answer}\n${card.start ? `${card.path}:${card.start}-${card.end}` : card.path}`).join("\n\n");
-  try { await navigator.clipboard.writeText(text); $("cards-copy").textContent = "Copied"; }
-  catch { $("cards-copy").textContent = "Copying is blocked by the browser"; }
-  setTimeout(() => { $("cards-copy").textContent = "Copy all as text"; }, 2000);
+  try { await navigator.clipboard.writeText(text); $("cards-copy").textContent = t("Copied"); }
+  catch { $("cards-copy").textContent = t("Copying is blocked by the browser"); }
+  setTimeout(() => { $("cards-copy").textContent = t("Copy all as text"); }, 2000);
 });
 // Keys in the flashcards view: Space or Enter turns the card over, the arrow keys move between cards.
 document.addEventListener("keydown", (event) => {
   if ($("view-cards").hidden || !cards.length || $("overlay").classList.contains("open") || event.target.closest("input, select, textarea, button")) return;
   if (event.key === " " || event.key === "Enter") { event.preventDefault(); flipCard(); }
-  else if (event.key === "ArrowRight") moveCard(1);
-  else if (event.key === "ArrowLeft") moveCard(-1);
+  else if (event.key === "ArrowRight") moveCard(LANG === "ar" ? -1 : 1);  // In the Arabic page, next is on the left.
+  else if (event.key === "ArrowLeft") moveCard(LANG === "ar" ? 1 : -1);
 });
 // The choices for cards per file.
 $("cards-count").replaceChildren(...[3, 4, 5, 6].map((count) => Object.assign(document.createElement("option"), {value: count, textContent: count, selected: count === 5})));

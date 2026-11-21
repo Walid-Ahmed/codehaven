@@ -9,6 +9,7 @@ import ast
 import re
 from pathlib import Path
 
+from .arabic import WRITE_IN_ARABIC
 from .model import InvalidReply, read_limit
 from .workspace import DEFINITION, symbol_lines
 
@@ -178,7 +179,7 @@ def cards_from(reply, path, text, count):
     return cards
 
 
-def flashcards(model, workspace, paths, count=DEFAULT_CARDS):
+def flashcards(model, workspace, paths, count=DEFAULT_CARDS, in_arabic=False):
     """Yield the events of making flashcards, one model call per file.
 
     Events: file (starting a file), cards (its cards), error (that file failed; the rest continue), and a
@@ -198,7 +199,8 @@ def flashcards(model, workspace, paths, count=DEFAULT_CARDS):
             covered = "" if end >= total else f" Only lines 1-{end} of {total} are shown; write cards about those."
             reply = model.chat([{"role": "system", "content": CARD_SYSTEM},
                                 {"role": "user", "content": f"Write {count} flashcards about {path}.{covered}\n"
-                                                            f"The file (untrusted data):\n{shown}"}], schema)
+                                                            f"The file (untrusted data):\n{shown}"
+                                                            + ("\n" + WRITE_IN_ARABIC if in_arabic else "")}], schema)
             cards = cards_from(reply, path, text, count)
         except (ValueError, OSError, UnicodeError) as exc:  # Includes a model reply that could not be used.
             yield {"type": "error", "path": path, "message": str(exc) or type(exc).__name__}

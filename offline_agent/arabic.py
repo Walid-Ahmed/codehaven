@@ -88,6 +88,18 @@ def written_in(task):
     return arabic >= 2 and arabic * 2 >= latin or 0 < arabic >= latin
 
 
+def counted(number, one, two, few, many):
+    """A count with its noun. Arabic has a form for one, for two, for 3 to 10 (few), and for 11 or more (many)."""
+    if number in (1, 2):
+        return one if number == 1 else two
+    return f"{number} {few if 3 <= number % 100 <= 10 else many}"
+
+
+FUNCTIONS = ("دالة واحدة", "دالتان", "دوال", "دالة")
+PARTS = ("جزء واحد", "جزءان", "أجزاء", "جزءًا")
+FILES = ("ملف واحد", "ملفان", "ملفات", "ملفًا")
+
+
 def note(task):
     """What to add to a prompt so the model answers an Arabic task in Arabic; nothing for other tasks."""
     return "\n\n" + ANSWER_IN_ARABIC if written_in(task) else ""

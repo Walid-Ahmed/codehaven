@@ -105,6 +105,19 @@ class SymbolTests(unittest.TestCase):
         self.assertIn("shop/session.py:1| LIMIT = 30", text)  # Set in another file: found through the index.
         self.assertIn(("shop/codes.py", 1, 4), {(row["path"], row["line"], row["end_line"]) for row in evidence})
 
+    def test_classes_that_inherit_from_a_named_class_are_listed(self):
+        (Path(self.temp.name) / "shop" / "errors.py").write_text(
+            "class ShopError(Exception):\n    pass\n\n\nclass CartError(ShopError):\n    pass\n\n\n"
+            "class PriceError(ValueError, ShopError):\n    pass\n\n\nclass Other(Exception):\n    pass\n")
+        (Path(self.temp.name) / "web" / "errors.ts").write_text("export class WebError extends ShopError {\n}\n")
+        self.knowledge.refresh()
+        task = "Which classes inherit from ShopError?"
+        text, evidence, _ = symbols.shown(self.workspace, symbols.find(task, self.knowledge), task, knowledge=self.knowledge)
+        self.assertIn("Classes that inherit from ShopError:\nshop/errors.py:5| class CartError(ShopError):\n"
+                      "shop/errors.py:9| class PriceError(ValueError, ShopError):\nweb/errors.ts:1| export class WebError extends ShopError {", text)
+        self.assertNotIn("class Other", text.split("Classes that inherit")[1])
+        self.assertIn(("shop/errors.py", 5), {(row["path"], row["line"]) for row in evidence})
+
     def test_a_point_that_names_the_right_thing_in_the_wrong_place_cites_a_line_that_was_shown(self):
         # The model was shown where LIMIT is set (session.py:1) and where it is used (session.py:7-8), and nothing of api.py.
         evidence = [{"path": "shop/session.py", "line": 1, "end_line": 1, "text": "LIMIT = 30"},

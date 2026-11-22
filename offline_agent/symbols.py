@@ -18,6 +18,7 @@ from .tasks import without_paths
 from .workspace import sections
 
 SYMBOLS, SYMBOL_BYTES = 2, 3500  # Definitions shown for one question, and the bytes they share.
+INHERITORS = 6  # Classes listed as inheriting from a named class.
 CONSTANTS, CONSTANT_LINES = 4, 8  # Constants whose values are shown under those definitions, and the most lines of one.
 CODE_LIKE = re.compile(r"[\d_]|[a-z][A-Z]")
 # Words too common in questions to say where in a long class the answer is.
@@ -125,6 +126,31 @@ def constants(knowledge, workspace, text, skip=()):
     return found
 
 
+def inheritors(knowledge, name):
+    """The classes that say they inherit from a class: [(path, line number, line text)], at most INHERITORS.
+
+    "Which classes inherit from BadParameter?" cannot be answered from BadParameter's own lines, and the model
+    does not search for it; the class lines of the whole project can be checked in a moment.
+    """
+    short = name.rsplit(".", 1)[-1]
+    if not short[:1].isupper():
+        return []
+    # class Child(Base, Other):  or  class Child extends Base implements Other
+    line_of = re.compile(rf"^[ \t]*(?:export[ \t]+|public[ \t]+|abstract[ \t]+|final[ \t]+)*class[ \t]+\w+[ \t]*"
+                         rf"(?:\([^)]*\b{re.escape(short)}\b[^)]*\)|[^{{(]*\b(?:extends|implements)\b[^{{]*\b{re.escape(short)}\b)", re.M)
+    found = []
+    for source, text in sorted((getattr(knowledge, "source_texts", None) or {}).items()):
+        path = source.removeprefix("repo/")
+        if not source.startswith("repo/") or classify(path) == "test":
+            continue
+        for match in line_of.finditer(text):
+            number = text.count("\n", 0, match.start()) + 1
+            found.append((path, number, text.splitlines()[number - 1].strip()[:200]))
+            if len(found) >= INHERITORS:
+                return found
+    return found
+
+
 def shown(workspace, found, task="", budget=SYMBOL_BYTES, knowledge=None):
     """The numbered lines of each found symbol, cut to share budget bytes. Returns (text, evidence rows, log lines).
 
@@ -166,4 +192,10 @@ def shown(workspace, found, task="", budget=SYMBOL_BYTES, knowledge=None):
                 f"{path}:{number + offset}| {line}" for path, number, lines in values for offset, line in enumerate(lines))
             evidence += [{"path": path, "line": number, "end_line": number + len(lines) - 1, "text": "\n".join(lines)}
                          for path, number, lines in values]
+        for _, name, _, _ in found:
+            children = inheritors(knowledge, name)
+            if children:
+                text += f"\n\nClasses that inherit from {name.rsplit('.', 1)[-1]}:\n" + "\n".join(
+                    f"{path}:{number}| {line}" for path, number, line in children)
+                evidence += [{"path": path, "line": number, "end_line": number, "text": line} for path, number, line in children]
     return text, evidence, log

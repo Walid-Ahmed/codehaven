@@ -70,6 +70,8 @@ const ARABIC = {
   "Next →": "← التالية",
   "Shuffle": "اخلط",
   "Copy all as text": "انسخ الكل كنص",
+  "Open in VS Code": "افتح في VS Code",
+  "Opens this file at the cited line in VS Code on this computer. Nothing is sent anywhere.": "يفتح هذا الملف عند السطر المذكور في VS Code على هذا الحاسوب. لا يُرسل أي شيء.",
   "Save for Anki…": "احفظ لـ Anki…",
   "A text file with one card per line, question then answer, separated by a tab. Anki and most flashcard apps import it.": "ملف نصي فيه بطاقة في كل سطر: السؤال ثم الإجابة يفصل بينهما مفتاح الجدولة. يستورده Anki ومعظم تطبيقات البطاقات.",
   "Save chat…": "احفظ المحادثة…",

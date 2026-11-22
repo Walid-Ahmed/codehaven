@@ -41,7 +41,7 @@ In the browser page you can also draw a **structure map** of your files, make **
 - [How it is built](#how-it-is-built)
 - [Chat in your browser](#chat-in-your-browser)
 - [Use it from the terminal](#use-it-from-the-terminal)
-- Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Call trace](#trace-a-function) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning) · [Arabic](#ask-in-arabic)
+- Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Call trace](#trace-a-function) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning) · [Arabic](#ask-in-arabic) · [VS Code](#use-it-from-vs-code)
 - Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.10 does](#what-v010-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
 - [Development](#development)
 - [Technical report](docs/TECHNICAL_REPORT.md)
@@ -173,7 +173,7 @@ Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/
 2. **Pick a model.** **Settings** in the sidebar lists the chat models installed in Ollama on this computer, with `qwen2.5-coder:7b` selected when it is installed. That default is the model all of CodeHaven's tests were tuned and measured on; other models may answer differently, and the first answer after switching is slower while the model loads. Cloud-backed and embedding-only models are never offered.
 3. **Ask questions.** Answers stream in as they are written. While one is being written, the **Ask** button becomes **Stop**: click it to end the answer at once, even while the model is still loading. The text written so far stays on the page, and a stopped question is not remembered by follow-ups or saved. **Make flashcards** turns into **Stop** the same way, and keeps the cards already made. Follow-up questions see your earlier questions and answers, and **New chat** starts over. Try "Explain this project", "Which function calls `checkout_total`?", or "Explain `src/app.py`".
    **Save a chat.** **Save chat…** in the sidebar saves the questions and answers on the page as a Markdown file, through your browser. Nothing is sent anywhere.
-4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat.
+4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat. **Open in VS Code** above the code opens the same file at that line in VS Code, if it is installed; it is a link to a program on this computer, and nothing is sent anywhere.
 5. **See how it got there.** Each answer can show the steps CodeHaven took. If a citation could not be checked against what was actually read, a yellow **Unverified** box says so.
 6. **Study one file or a group of files.** The tabs above the chat add two study aids. Click **Choose files…** to tick the files they are about; with an uploaded file, that file is used.
    - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust; up to 40 files per map. Functions, methods, and types in Go, Java, and Rust are found with the same kind of parser as JavaScript; their imports are still read with line patterns, so unusual import layouts and macros can be missed.
@@ -219,7 +219,7 @@ codehaven --workspace ~/dev/project 'Review inventory/store.py'
 
 CodeHaven checks the file one function at a time, up to 12 functions with one model call each, and lists likely bugs, missing checks, and unclear names, most serious first. Each finding cites the lines of the function it is about; those lines come from parsing the file, not from the model. With an uploaded file, the **Review** button does the same.
 
-Shown a whole file, a small model tends to answer "looks fine". Shown one function and asked to state what it promises and what it really does, it notices when the two differ, such as a docstring that says "at or below" above code that uses `<`. A review is still a list of leads to verify, not proof: the model can miss a bug or flag correct code, and it sees one function at a time, so it cannot judge how functions work together. Nothing is changed; fixes are described, never applied.
+Shown a whole file, a small model tends to answer "looks fine". Shown one function and asked to state what it promises and what it really does, it notices when the two differ, such as a docstring that says "at or below" above code that uses `<`. A review is still a list of leads to verify, not proof: the model can miss a bug or flag correct code, and it sees one function at a time. Under that function it is shown the first lines (the signature and the docstring's first line) of the functions it calls in the same file, so it can notice a call with the wrong arguments; it does not see their bodies, or functions in other files. Nothing is changed; fixes are described, never applied.
 
 ## Test gaps and a project tour
 
@@ -378,6 +378,10 @@ codehaven --workspace /absolute/path/to/project --interactive
 ```
 
 Answers stream to the terminal as the model writes them; add `--no-stream` to print each answer only once it is complete. `codehaven`, `offline-agent`, and `python -m offline_agent` are the same command (on Windows, use `python -m offline_agent`). Reinstall the package after updating to register the commands.
+
+## Use it from VS Code
+
+The [VS Code extension](editors/vscode) adds commands to ask about the open folder, explain the file or the selected lines, and trace the function under the cursor. It turns every `path:line` citation in a terminal into a link that opens the cited lines. It runs the `codehaven` command on this computer and holds no model of its own; see [its README](editors/vscode/README.md) to install it. Its logic is tested without VS Code, but it has not yet been tried inside a running VS Code.
 
 ## Choosing a model
 

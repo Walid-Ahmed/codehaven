@@ -6,6 +6,8 @@ const $ = (id) => document.getElementById(id);
 // busy: a request is running; indexed: something is open; uploaded: it is one uploaded file; browsing: the folder browser's folder.
 // stoppable: the running request is an answer or flashcards, which Stop can end; stopping: Stop was clicked.
 let busy = false, indexed = false, uploaded = false, browsing = "", stoppable = false, stopping = false;
+// The folder of the open repository, for links that open a cited file in an editor; null for an uploaded file.
+let repoRoot = null;
 const UPLOAD_BYTES = 64000;  // The same limit as every file CodeHaven reads.
 const PICTURE_BYTES = 8000000;  // A picture of code is read into text by Tesseract on this computer.
 const isDocument = (file) => /\.(ipynb|pdf)$/i.test(file.name) || file.type === "application/pdf";
@@ -228,6 +230,7 @@ const UPLOAD_HINT = $("upload-status").textContent;
 // Update the whole page from the server's summary of what is open.
 function setIndexed(summary) {
   indexed = Boolean(summary.repository || summary.upload);
+  repoRoot = summary.repository || null;
   uploaded = Boolean(summary.upload);
   $("model-name").textContent = summary.model || t("a local model");
   setClone(Boolean(summary.clone));
@@ -550,14 +553,21 @@ $("start-folder").addEventListener("click", openBrowser);
 $("start-file").addEventListener("click", () => { attaching = false; $("file-input").click(); });
 
 // ---- Cited code.
+// A link VS Code understands on its own, with no extension: vscode://file/<full path>:<line>.
+function editorLink(path, line) {
+  const full = (repoRoot + "/" + path).replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  return "vscode://file" + (full.startsWith("/") ? "" : "/") + encodeURI(full) + ":" + line;
+}
 // Open the drawer on a file with the cited lines highlighted and a few lines around them.
 async function showCitation(path, start, end) {
+  $("drawer-editor").hidden = true;
   $("drawer-title").textContent = `${path}:${start}${end !== start ? "-" + end : ""}`;
   $("drawer-code").textContent = t("Loading…");
   $("overlay").classList.add("open"); $("drawer").classList.add("open");
   try {
     const data = await api(`/api/file?path=${encodeURIComponent(path)}&start=${start}&end=${end}`);
     $("drawer-title").textContent = `${data.path}:${data.start}${data.end !== data.start ? "-" + data.end : ""}  ·  ${LANG === "ar" ? t("{lines} in the file", {lines: data.total}) : data.total + " lines"}`;
+    if (repoRoot) { $("drawer-editor").href = editorLink(data.path, data.start); $("drawer-editor").hidden = false; }
     $("drawer-code").replaceChildren(...data.lines.map((text, index) => {
       const number = data.first + index;
       const row = document.createElement("div");

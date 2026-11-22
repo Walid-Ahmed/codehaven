@@ -1,3 +1,4 @@
+"""The local reference index: bundled notes, the user's own references, ranking, and its limits."""
 import json
 import tempfile
 import unittest

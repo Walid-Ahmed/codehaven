@@ -1,3 +1,4 @@
+"""The short summaries of search and retrieval results shown in the terminal."""
 import json
 import tempfile
 import unittest

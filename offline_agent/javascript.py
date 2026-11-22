@@ -113,6 +113,15 @@ class JavaScriptDependencies:
                             start, end = node.start_point.row + 1, node.end_point.row + 1
                             definitions.setdefault(short, start)
                             spans.append({'name': short if exported else f'{owner}.{short}', 'start': start, 'end': end})
+                # A named function passed as an argument, as in defineGetter(req, 'xhr', function xhr() {...}): the
+                # name is the only handle the code gives it. One assigned to something is already named by that.
+                if node.type == 'function_expression' and node.parent is not None \
+                        and node.parent.type not in {'assignment_expression', 'variable_declarator', 'pair', 'export_statement'}:
+                    own = node.child_by_field_name('name')
+                    if own is not None:
+                        start, end = node.start_point.row + 1, node.end_point.row + 1
+                        definitions.setdefault(self.text(own), start)
+                        spans.append({'name': self.text(own), 'start': start, 'end': end})
             # Every definition of the file is known now, so each exported alias can point at its local definition.
             for exported, local in exported_aliases:
                 if exported and local in definitions:

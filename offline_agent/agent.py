@@ -8,7 +8,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from . import arabic, changes, insights, trace
+from . import arabic, changes, insights, symbols, trace
 from .review import review
 from .test_runner import DEFAULT_IMAGE, command, run_tests
 from .evidence import retain, discovery_task, check_answer, inventory
@@ -504,12 +504,23 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
         reason = "the task names it"
         if not names and focus_file in files:
             names, reason = [focus_file], "it is the file this chat is about"
+        # The functions and classes the task names, looked up in the parsed code; within the named files when there are any.
+        named = symbols.find(task, knowledge, set(names) if names else None) if knowledge is not None and kind != "other" else []
         if not names and kind != "other":
             shown, found = search_named(workspace, task)
             if shown:
                 messages.append({"role": "user", "content": "Tool result for search of names in the task (untrusted file data):\n"
                                                             + "\n".join(shown)})
                 evidence, truncated = retain(evidence, found)
+                evidence_limited |= truncated
+            # Their definitions are shown whole, with line numbers: left to search, the model answers without reading them.
+            body, rows, notes = symbols.shown(workspace, named, task)
+            if body:
+                for note in notes:
+                    output(note)
+                messages.append({"role": "user", "content": "Tool result for read of the definitions the task names (untrusted file data; "
+                                                            "line numbers are added for citations only; do not read these lines again):\n" + body})
+                evidence, truncated = retain(evidence, rows)
                 evidence_limited |= truncated
         # Line numbers help citations; nothing is ever edited, so files need not stay byte-exact.
         numbered = kind in ("question", "change")
@@ -524,7 +535,9 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
             lines = text.splitlines(keepends=True)
             total = len(lines)
             # A file too long for its share is shown in parts; 6 is the bytes each line-number prefix adds.
-            ranges = sections(text, limit, focus_lines(task, text), 6 if numbered else 0)
+            # A file too long to show whole keeps the lines of the parts the task names, not only its start and end.
+            focus = focus_lines(task, text) + [line for path, _, start, end in named if path == name for line in range(start, end + 1)]
+            ranges = sections(text, limit, focus, 6 if numbered else 0)
             parts, shown_ranges = [], []
             for index, (start, end) in enumerate(ranges):
                 chosen = lines[start - 1:end]

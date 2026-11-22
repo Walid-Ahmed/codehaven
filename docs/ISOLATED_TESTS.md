@@ -77,8 +77,8 @@ symlink, and per-file size restrictions as the file tools. Small binary fixtures
 are supported. Discovered files are read using non-following directory-relative
 file descriptors. No symlinks or special files are copied. At most 999 permitted
 files and 16 MB can be staged; reaching the listing cap refuses execution rather
-than silently taking a partial 5,000-file listing. Files above the existing 64 KB
-listing limit are omitted. Missing fixtures/dependencies should produce failures,
+than silently taking a partial 5,000-file listing. Files above the 1 MB listing
+limit are omitted. Missing fixtures/dependencies should produce failures,
 not be interpreted as proof the whole project works.
 
 Filtering and snapshot preparation happen before test execution; the 30-second

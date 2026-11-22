@@ -99,7 +99,7 @@ The model can ask for five actions. None of them writes to your project.
 
 | Action | What it does | Limits |
 |---|---|---|
-| `read` | Reads a UTF-8 file, in pages for long files | 64 KB per file; a page fits in half the prompt budget and names the next range |
+| `read` | Reads a UTF-8 file, in pages for long files | 1 MB per file; a page fits in half the prompt budget and names the next range |
 | `search` | Finds literal text and names the function each match is in | 50 matching lines, 16,000 bytes, 5,000 files |
 | `retrieve` | Fetches ranked passages from the local index | 4,000 bytes by default (`--retrieval-budget`) |
 | `run_tests` | Runs unittest or pytest in a Docker container, after you approve | Networking off, read-only snapshot, 30-second timeout |
@@ -155,7 +155,7 @@ Passages are found four ways:
 | Retrieved context per call | 4,000 bytes by default (`--retrieval-budget`, 2,000 to 16,000) |
 | Documents indexed | 5,000 |
 | Indexed text | 25 MB, at most 40,000 passages |
-| Largest file indexed | 64 KB |
+| Largest file indexed | 1 MB (64 KB before v0.12, which hid the central modules of large projects) |
 
 Hidden files, `.gitignore` and `.agentignore` matches, symlinks, binary files, and invalid UTF-8 are skipped. The keyword index is rebuilt at the start of each run and between questions, so edits you make yourself are picked up.
 

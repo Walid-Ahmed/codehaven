@@ -259,6 +259,8 @@ All code is in [offline_agent/](../offline_agent).
 
 **Evals.** `python3 -m offline_agent.evaluation` runs fixed questions against the real local model: 12 tasks over [evals/sample_repo](../evals/sample_repo), and a second set over [evals/bookings_repo](../evals/bookings_repo) to check that a change is not fitted to the first. Each answer is checked by regular expressions, and a task fails if any file in its copy of the repository changed. The evals use keyword search only, so results stay comparable from run to run.
 
+Three more sets, 34 questions, run on pinned releases of real libraries (requests, click, express) with `--suite NAME`; a developer script downloads them once. Scores are recorded in [EVALS.md](EVALS.md).
+
 Results shift when prompts change, so one pass or fail is weak evidence. All tuning and measurement used `qwen2.5-coder:7b`.
 
 ## Retrieval measurements

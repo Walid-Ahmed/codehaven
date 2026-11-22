@@ -12,3 +12,5 @@ knowledge/
 evals/results/
 # Narration clips recorded by docs/demo-video/build.py.
 docs/demo-video/voice/
+# Real repositories downloaded by scripts/fetch_eval_repos.py.
+evals/real/repos/

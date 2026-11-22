@@ -1,0 +1,118 @@
+[
+ {
+  "id": "default-settings",
+  "task": "Which default value does an Express application set for 'subdomain offset' and for 'etag'?",
+  "checks": {
+   "answer": [
+    "\\b2\\b",
+    "weak"
+   ]
+  }
+ },
+ {
+  "id": "trust-proxy",
+  "task": "What is the default value of the 'trust proxy' setting, and in which file is it set?",
+  "checks": {
+   "answer": [
+    "false",
+    "application\\.js"
+   ]
+  }
+ },
+ {
+  "id": "redirect-status",
+  "task": "What status code does res.redirect use when none is given?",
+  "checks": {
+   "answer": [
+    "\\b302\\b"
+   ]
+  }
+ },
+ {
+  "id": "send-status",
+  "task": "What does res.sendStatus send as the body when the status code has no known message?",
+  "checks": {
+   "answer": [
+    "String|status code|number"
+   ]
+  }
+ },
+ {
+  "id": "req-secure",
+  "task": "How does req.secure decide its value?",
+  "checks": {
+   "answer": [
+    "https",
+    "protocol"
+   ]
+  }
+ },
+ {
+  "id": "req-xhr",
+  "task": "Which request header does req.xhr read, and what value does it look for?",
+  "checks": {
+   "answer": [
+    "X-Requested-With",
+    "xmlhttprequest"
+   ]
+  }
+ },
+ {
+  "id": "powered-by",
+  "task": "Which header does the init middleware set, and to what value?",
+  "checks": {
+   "answer": [
+    "X-Powered-By",
+    "Express"
+   ]
+  }
+ },
+ {
+  "id": "app-listen",
+  "task": "What does app.listen do?",
+  "checks": {
+   "answer": [
+    "createServer"
+   ]
+  }
+ },
+ {
+  "id": "static-export",
+  "task": "Which package provides express.static?",
+  "checks": {
+   "answer": [
+    "serve-static"
+   ]
+  }
+ },
+ {
+  "id": "etag-compile",
+  "task": "In compileETag in lib/utils.js, which values select the weak ETag function, and what happens for an unknown value?",
+  "checks": {
+   "answer": [
+    "weak",
+    "TypeError|throw"
+   ]
+  }
+ },
+ {
+  "id": "follow-subdomains",
+  "task": "How does req.subdomains compute its result?",
+  "checks": {
+   "answer": [
+    "offset",
+    "hostname|host"
+   ]
+  },
+  "followups": [
+   {
+    "task": "What is the default of that offset setting?",
+    "checks": {
+     "answer": [
+      "\\b2\\b"
+     ]
+    }
+   }
+  ]
+ }
+]

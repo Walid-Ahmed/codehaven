@@ -41,9 +41,11 @@ Since v0.9 CodeHaven is read-only and focused on understanding code; editing was
 
 - Run the evals again on the converted question sets, and record a new baseline for the default model.
 - Reduce padded answers. The model often adds invented reference lists after a correct answer; they are flagged as unverified, but they make answers noisy.
-- Evaluate on real repositories. Both eval repositories are small, and the questions are short.
+- Evaluate on larger repositories. The real-repository evals below use libraries of 100 to 220 files.
 
-Done from this list: the browser page has a Stop button. It closes the connection to Ollama, which ends
+Done from this list: real-repository evals. Three question sets, 34 questions in all, run on pinned releases of requests, click, and express; the baseline and every later measurement are recorded in [EVALS.md](EVALS.md).
+
+Also done: the browser page has a Stop button. It closes the connection to Ollama, which ends
 generation and also ends the wait for a model that is still loading or reading its prompt. A stopped question
 is not added to follow-up memory, long-term memory, or the saved chat. Indexing and downloading a repository
 cannot be stopped this way.

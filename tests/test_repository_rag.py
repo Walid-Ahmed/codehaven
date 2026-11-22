@@ -71,6 +71,20 @@ class RepositoryRagTests(unittest.TestCase):
         kb.refresh()
         self.assertEqual(json.loads(kb.retrieve("newrepopattern"))["results"], [])
 
+    def test_refresh_keeps_the_index_when_no_file_changed(self):
+        self.put("code.py", "steadyrepopattern")
+        kb = KnowledgeBase(workspace=self.root)
+        entries = kb.entries
+        self.assertFalse(kb.refresh())
+        self.assertIs(kb.entries, entries)  # Not rebuilt: the same passages are still in use.
+        self.put("more.py", "addedrepopattern")
+        self.assertTrue(kb.refresh())
+        self.assertTrue(json.loads(kb.retrieve("addedrepopattern"))["results"])
+        self.put(".agentignore", "more.py\n")  # A hidden rule file is not listed itself, but it changes what is.
+        self.assertTrue(kb.refresh())
+        self.assertEqual(json.loads(kb.retrieve("addedrepopattern"))["results"], [])
+        self.assertFalse(kb.refresh())
+
     def test_cli_automatically_indexes_workspace(self):
         self.put("src/code.py", "uniquerepositoryterm")
         with patch("offline_agent.cli.Ollama"), patch("offline_agent.cli.run", return_value=0) as agent:

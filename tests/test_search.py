@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from offline_agent.agent import run
 from offline_agent.workspace import Workspace
@@ -97,11 +98,12 @@ class SearchTests(unittest.TestCase):
                             and len(m["text"]) <= 320 for m in result["matches"]))
 
     def test_directory_scope_avoids_global_candidate_limit(self):
-        for i in range(1000):
+        for i in range(30):
             self.put(f"a{i:04}.py", "irrelevant")
         self.put("src/z.py", "needle")
-        self.assertTrue(self.search("needle")["candidate_limit_reached"])
-        self.assertEqual(len(self.search("needle", "src")["matches"]), 1)
+        with patch("offline_agent.workspace.MAX_FILES", 30):  # The real limit is in the thousands.
+            self.assertTrue(self.search("needle")["candidate_limit_reached"])
+            self.assertEqual(len(self.search("needle", "src")["matches"]), 1)
 
     def test_graph_search_result_reaches_model(self):
         self.put("code.py", "needle\n")

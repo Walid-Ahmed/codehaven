@@ -36,7 +36,7 @@ code --install-extension codehaven-0.1.0.vsix
 ## Tests
 
 ```sh
-node --test test
+node --test test/citations.test.js test/extension.test.js
 ```
 
 The tests run without VS Code, against a small stand-in for its API. The extension has not yet been tried inside a running VS Code.

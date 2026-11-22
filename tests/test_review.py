@@ -63,6 +63,22 @@ class ReviewTests(unittest.TestCase):
         self.assertNotIn("def restock", shown)  # Only the one function is shown.
         self.assertEqual((self.root / "store.py").read_text(), STORE)
 
+    def test_a_function_is_shown_the_first_lines_of_what_it_calls(self):
+        (self.root / "cart.py").write_text(
+            'def price_of(name, table):\n    """Price of one item; raises KeyError for an unknown name."""\n    return table[name]\n\n\n'
+            "class Cart:\n    def add(self, name):\n        self.items.append(name)\n\n"
+            "    def total(self, table, extra):\n        self.add(extra)\n        seen = {}.get(extra)\n"
+            "        return sum(price_of(name) for name in self.items)\n\n    def get(self, key):\n        return key\n")
+        model = ScriptedModel([verdict("ok")] * 4)
+        review(model, self.workspace, "cart.py", output=lambda _line: None)
+        alone, total = model.prompts[0][1]["content"], model.prompts[2][1]["content"]
+        self.assertNotIn("It calls these functions", alone)  # price_of calls nothing: its prompt is as before.
+        self.assertIn("It calls these functions of the same file", total)
+        self.assertIn("Cart.add:\n    def add(self, name):", total)
+        self.assertIn('price_of:\ndef price_of(name, table):\n    """Price of one item; raises KeyError for an unknown name."""', total)
+        self.assertNotIn("return table[name]", total)  # Signatures only, never the bodies.
+        self.assertNotIn("Cart.get", total)  # {}.get(extra) is a call on another object.
+
     def test_a_file_without_functions_is_checked_whole_and_long_files_say_what_was_left_out(self):
         (self.root / "settings.toml").write_text("limit = 3\n")
         found = review(ScriptedModel([verdict("ok")]), self.workspace, "settings.toml", output=lambda _line: None)

@@ -114,7 +114,7 @@ These answer one kind of request each. Those that use the model make small, boun
 | Helper | Module | How it works |
 |---|---|---|
 | Git changes | [changes.py](../offline_agent/changes.py) | Runs only `git diff`, `git log`, `git rev-parse`, and `git ls-files`. The diff must fit in half the prompt budget; named files come first, then the smallest changes. |
-| File review | [review.py](../offline_agent/review.py) | Up to 12 functions, one model call each. The model states what the function promises and what it does before giving a verdict. |
+| File review | [review.py](../offline_agent/review.py) | Up to 12 functions, one model call each. The model states what the function promises and what it does before giving a verdict. It is also shown the signatures of the same-file functions the reviewed one calls. |
 | Test gaps | [insights.py](../offline_agent/insights.py) | Lists public functions whose names appear in no test file. No model. |
 | Project tour | [insights.py](../offline_agent/insights.py) | Orders up to 8 files by the import graph; the model adds one sentence per file. |
 | Call trace | [trace.py](../offline_agent/trace.py) | Walks the calls below a named function through the parsed symbols, up to 3 deep and 8 functions, and lists its callers; the model adds one sentence per function. |

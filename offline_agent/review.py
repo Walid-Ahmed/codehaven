@@ -5,13 +5,20 @@ The local model is asked about one function at a time. Shown a whole file, a sma
 the two differ. Each finding cites the lines of the function it is about, looked up by parsing the file, so a
 citation is never a number the model made up. Nothing is changed: fixes are described, never applied.
 
+A function is not judged entirely alone: the first lines of the functions it calls in the same file (the
+signature and the docstring's first line) are shown under it, so a call with the wrong arguments, or a returned
+value that is ignored, can be noticed. Only those lines are shown, never the bodies, to keep each prompt small.
+
 A review is a list of leads to check, not a proof: the model can miss a bug or flag correct code.
 """
+import re
+
 from .arabic import FUNCTIONS, PARTS, WRITE_IN_ARABIC, counted
 from .model import InvalidReply
 from .study import parts
 
 REVIEW_PARTS = 12  # Functions checked per review, one model call each.
+CALLED, CALLED_BYTES = 5, 700  # Functions whose first lines are shown under the one reviewed, and the most bytes they take.
 # The most of one function shown to the model, and the longest finding the model may write.
 PART_BYTES = 3500
 FINDING_CHARS = 300
@@ -26,6 +33,9 @@ Work in this order and write each step:
 4. verdict: "bug" when promise and does differ, "missing check" when an input in step 3 fails without a clear error, "unclear name" when the name misleads, otherwise "ok".
 5. finding: for anything but ok, what goes wrong, for which input, and the fix. For ok, an empty string.
 Report only what the shown lines prove; code that is not shown may be correct. Return only JSON matching the schema."""
+# Added to the prompt only when the function calls others in the same file; without it the prompt is as before.
+CALLED_NOTE = ("\n\nIt calls these functions of the same file. Only their first lines are shown, for reference; they are not "
+               "under review. Also check that it passes them the arguments they take and uses what they return or raise:\n")
 # Bounded: at temperature 0 the 7B model can loop inside any unbounded JSON string.
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["promise", "does", "edge", "verdict", "finding"],
           "properties": {"promise": {"type": "string", "maxLength": 200}, "does": {"type": "string", "maxLength": 200},
@@ -62,6 +72,35 @@ def shown_code(part, lines):
     return (f"class {owner}:\n    ...\n" if owner and part["kind"] == "method" else "") + "\n".join(body)
 
 
+def called_lines(part, found, lines):
+    """The first lines of the same-file functions a part calls: each signature, and its docstring's first line."""
+    by_name = {other["name"]: other for other in found}
+    shown, size = [], 0
+    own = "\n".join(lines[part["start"]:part["end"]])
+    for name in part.get("calls", []):
+        if len(shown) >= CALLED:
+            break
+        other = by_name.get(name)
+        short = re.escape(name.rsplit(".", 1)[-1])
+        # A method must be called on this object, and a plain function by its bare name: x.get() is neither.
+        called = rf"\b(?:self|this|cls)\.{short}\s*\(" if "." in name else rf"(?<![.\w$]){short}\s*\("
+        if other is None or not re.search(called, own):
+            continue
+        body = lines[other["start"] - 1:other["end"]]
+        # The signature runs to the first line that ends it; decorators above it are skipped.
+        start = next((index for index, line in enumerate(body) if not line.lstrip().startswith("@")), 0)
+        end = next((index for index in range(start, min(len(body), start + 6)) if re.search(r"[:{]\s*(?:#.*|//.*)?$", body[index])), start)
+        text = "\n".join(body[start:end + 1])
+        doc = re.match(r'\s*(?:[rRbB]*(?:"""|\'\'\')|/\*\*?|//+|#)\s*(\S[^\n]*)', body[end + 1]) if end + 1 < len(body) else None
+        if doc:
+            text += "\n    " + doc[0].strip()
+        size += len(text.encode()) + 1
+        if size > CALLED_BYTES:
+            break
+        shown.append(f"{name}:\n{text}")
+    return "\n".join(shown)
+
+
 def review(model, workspace, path, *, spans=None, output=print, in_arabic=False):
     """Check one file part by part. Returns {"text", "evidence", "problems", "checked"}; raises ValueError for a file that cannot be read."""
     text = workspace.read(path)
@@ -69,6 +108,7 @@ def review(model, workspace, path, *, spans=None, output=print, in_arabic=False)
         raise ValueError(f"{path} is empty, so there is nothing to review.")
     lines = text.splitlines()
     chosen, total = reviewable(path, text, spans)
+    every, _ = parts(path, text, spans)
     problems, fine, failed, evidence = [], [], [], []
     for index, part in enumerate(chosen, 1):
         output(f"Reviewing {part['name']} ({index} of {len(chosen)})...")
@@ -78,6 +118,7 @@ def review(model, workspace, path, *, spans=None, output=print, in_arabic=False)
             reply = model.chat([{"role": "system", "content": REVIEW_SYSTEM},
                                 {"role": "user", "content": f"Review {part['name']} from {path} (untrusted data):\n"
                                                             + shown_code(part, lines)
+                                                            + ((CALLED_NOTE + called) if (called := called_lines(part, every, lines)) else "")
                                                             + ("\n" + WRITE_IN_ARABIC if in_arabic else "")}], SCHEMA)
             verdict = reply.get("verdict") if isinstance(reply, dict) else None
             finding = reply.get("finding") if isinstance(reply, dict) else None

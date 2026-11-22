@@ -51,6 +51,24 @@ What the later rows show:
 
 The three changes after the baseline were made after reading the baseline's failures, on the same 34 questions, so the last row is partly fitted to them. A question set the changes never saw would be a fairer test; the two small sets below are the nearest thing.
 
+### Other models
+
+The same 34 real-repository questions, the same code (v0.11.0), one run each on 2026-11-22. Per suite, in the order requests, click, express: the 14B model 12, 10, 9; llama3 10, 7, 8; the 0.5B model 5, 2, 6.
+
+| Model | Size on disk | Correct | Verified | Time for 34 questions | Per question |
+|---|---|---|---|---|---|
+| `qwen2.5-coder:7b` (the default) | 4.7 GB | 31/34 (91%) | 21/34 | 1,188 s | 35 s |
+| `qwen2.5:14b` | 9.0 GB | 31/34 (91%) | 28/34 | 2,031 s | 60 s |
+| `llama3` (8B) | 4.7 GB | 25/34 (74%) | 25/34 | 909 s | 27 s |
+| `qwen2.5:0.5b` | 0.4 GB | 13/34 (38%) | 9/34 | 479 s | 14 s |
+
+- **The default is the right default.** The 7B coder model gets as many answers right as the model twice its size, in a little over half the time.
+- **The 14B model is the careful one.** It is no more often right, but 28 of its answers passed every citation check against 21: it cites the lines it was shown instead of lines it remembers. Choose it when you have the memory (it needs about 10 GB loaded) and would rather wait than re-check a citation.
+- **llama3 answers fastest of the usable three and is right least often**, mostly on click, where it missed four of eleven. Every answer it got right was also verified.
+- **The 0.5B model is not usable for this.** It took three to four steps per question instead of one, and was right about a third of the time.
+
+CodeHaven's prompts were written and tuned on `qwen2.5-coder:7b`, so the other models are measured on prompts made for a different model; a model could do better with prompts of its own. Loading time is included in the times, once per suite.
+
 ### The two small sets
 
 These questions were not looked at while the answer-quality changes were made, so they are the fairer check that the changes help in general and break nothing.

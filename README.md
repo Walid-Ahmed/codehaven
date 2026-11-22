@@ -219,7 +219,7 @@ codehaven --workspace ~/dev/project 'Review inventory/store.py'
 
 CodeHaven checks the file one function at a time, up to 12 functions with one model call each, and lists likely bugs, missing checks, and unclear names, most serious first. Each finding cites the lines of the function it is about; those lines come from parsing the file, not from the model. With an uploaded file, the **Review** button does the same.
 
-Shown a whole file, a small model tends to answer "looks fine". Shown one function and asked to state what it promises and what it really does, it notices when the two differ, such as a docstring that says "at or below" above code that uses `<`. A review is still a list of leads to verify, not proof: the model can miss a bug or flag correct code, and it sees one function at a time, so it cannot judge how functions work together. Nothing is changed; fixes are described, never applied.
+Shown a whole file, a small model tends to answer "looks fine". Shown one function and asked to state what it promises and what it really does, it notices when the two differ, such as a docstring that says "at or below" above code that uses `<`. A review is still a list of leads to verify, not proof: the model can miss a bug or flag correct code, and it sees one function at a time. Under that function it is shown the first lines (the signature and the docstring's first line) of the functions it calls in the same file, so it can notice a call with the wrong arguments; it does not see their bodies, or functions in other files. Nothing is changed; fixes are described, never applied.
 
 ## Test gaps and a project tour
 

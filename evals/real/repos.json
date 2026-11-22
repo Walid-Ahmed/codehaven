@@ -1,0 +1,5 @@
+[
+  {"name": "requests", "url": "https://github.com/psf/requests.git", "tag": "v2.32.3", "commit": "0e322af87745eff34caffe4df68456ebc20d9068"},
+  {"name": "click", "url": "https://github.com/pallets/click.git", "tag": "8.1.8", "commit": "934813e4d421071a1b3db3973c02fe2721359a6e"},
+  {"name": "express", "url": "https://github.com/expressjs/express.git", "tag": "4.21.2", "commit": "1faf228935aa0a13111f92c28ee795be64ce3f0f"}
+]

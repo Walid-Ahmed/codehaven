@@ -1,0 +1,42 @@
+# Eval results
+
+This file is the record of how the local model scores on CodeHaven's fixed question sets, so that a change can be compared with what came before it. Add a row when a change is measured; do not rewrite old rows.
+
+## The question sets
+
+| Set | Repository | Questions | What it is for |
+|---|---|---|---|
+| `evals/tasks.json` | [evals/sample_repo](../evals/sample_repo), 12 files | 12 | The set prompts were first tuned against |
+| `evals/bookings_tasks.json` | [evals/bookings_repo](../evals/bookings_repo), 6 files | 20 | A second small repository, to catch tuning that fits only the first |
+| `--suite requests` | [requests](https://github.com/psf/requests) v2.32.3, 102 files | 12 | A real Python library |
+| `--suite click` | [click](https://github.com/pallets/click) 8.1.8, 132 files | 11 | A real Python library with a large public surface |
+| `--suite express` | [express](https://github.com/expressjs/express) 4.21.2, 223 files | 11 | A real JavaScript library, written in the CommonJS style |
+
+The three real repositories are not kept in this repository. Download them once, while online, and the evals then run offline like the others:
+
+```sh
+python3 scripts/fetch_eval_repos.py
+python3 -m offline_agent.evaluation --suite requests
+```
+
+The script is a developer tool and the only step that uses the internet; the installed package never runs it. Each repository is pinned to one release commit in [evals/real/repos.json](../evals/real/repos.json), and a download that is not exactly that commit is refused, so the questions always meet the code they were written for.
+
+Every question is checked by regular expressions on the answer, written from the source at the pinned commit. A pass means the answer contains the facts; **verified** means it also passed CodeHaven's own answer checks, so every citation points at lines the model was shown. Each real-repository question was written before the change it later measured, except where a row says otherwise.
+
+## Results
+
+All runs: `qwen2.5-coder:7b`, default settings, an Apple M4 with 24 GB, no other Ollama client running.
+
+### Real repositories
+
+| Date | Code | requests | click | express | Total | Verified |
+|---|---|---|---|---|---|---|
+| 2026-11-22 | Baseline, before any change measured here | 10/12 | 8/11 | 6/11 | 24/34 (71%) | 16/34 |
+
+Notes on the baseline:
+
+- The first run scored requests at 9/12. One check wanted the literal `500` or `600` and failed the correct answer "status codes 400-599"; the check was loosened to accept `599` and `5xx`, and the saved answer was scored again. No other check was changed.
+- The model finished at its first step on 32 of 34 questions, answering from the passages retrieval gave it. When those passages did not hold the answer, it did not search; it guessed. Examples: a default pool size of 100 (it is 10), `python-requests/2.25.1` as the User-Agent, and "does not read any environment variables" for a function that reads two.
+- Five answers ran on until CodeHaven's loop guard stopped them. Four of those five were wrong.
+
+These are short questions with one right answer each, on three libraries. They do not measure explanations of a whole project, large monorepos, or questions in Arabic.

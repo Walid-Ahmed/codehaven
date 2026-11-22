@@ -11,6 +11,9 @@ This file is the record of how the local model scores on CodeHaven's fixed quest
 | `--suite requests` | [requests](https://github.com/psf/requests) v2.32.3, 102 files | 12 | A real Python library |
 | `--suite click` | [click](https://github.com/pallets/click) 8.1.8, 132 files | 11 | A real Python library with a large public surface |
 | `--suite express` | [express](https://github.com/expressjs/express) 4.21.2, 223 files | 11 | A real JavaScript library, written in the CommonJS style |
+| `--suite flask` | [flask](https://github.com/pallets/flask) 3.1.0, 228 files | 12 | Held out: a Python library the v0.11 changes never saw |
+| `--suite cobra` | [cobra](https://github.com/spf13/cobra) v1.8.1, 55 files | 11 | Held out: a Go library |
+| `--suite axios` | [axios](https://github.com/axios/axios) v1.7.9, 210 files | 11 | Held out: a JavaScript library written as ES modules |
 
 The three real repositories are not kept in this repository. Download them once, while online, and the evals then run offline like the others:
 

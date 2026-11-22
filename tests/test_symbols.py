@@ -91,6 +91,19 @@ class SymbolTests(unittest.TestCase):
         self.assertIn("Preloaded the definition of Session.app_dir (shop/session.py:13-14) because the task names it.", log)
         self.assertIn(("shop/session.py", 13), {(row["path"], row["line"]) for row in session.evidence})
 
+    def test_the_values_of_constants_a_definition_uses_are_shown_with_it(self):
+        (Path(self.temp.name) / "shop" / "codes.py").write_text("REDIRECTS = (\n    301,\n    302,\n)\n")
+        (Path(self.temp.name) / "shop" / "check.py").write_text(
+            "from shop.codes import REDIRECTS\nfrom shop.session import LIMIT\n\n\ndef is_redirect(code, hops):\n"
+            "    return code in REDIRECTS and hops < LIMIT\n")
+        self.knowledge.refresh()
+        task = "What does is_redirect check?"
+        text, evidence, _ = symbols.shown(self.workspace, symbols.find(task, self.knowledge), task, knowledge=self.knowledge)
+        self.assertIn("Constants these lines use, and where each is set:", text)
+        self.assertIn("shop/codes.py:1| REDIRECTS = (\nshop/codes.py:2|     301,\nshop/codes.py:3|     302,\nshop/codes.py:4| )", text)
+        self.assertIn("shop/session.py:1| LIMIT = 30", text)  # Set in another file: found through the index.
+        self.assertIn(("shop/codes.py", 1, 4), {(row["path"], row["line"], row["end_line"]) for row in evidence})
+
     def test_a_task_with_no_code_names_gets_no_extra_message(self):
         model = Finisher()
         Session(model, self.workspace, knowledge=self.knowledge, output=lambda _line: None).ask("What is this project for?")

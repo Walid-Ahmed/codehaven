@@ -18,6 +18,7 @@ from .tasks import without_paths
 from .workspace import sections
 
 SYMBOLS, SYMBOL_BYTES = 2, 3500  # Definitions shown for one question, and the bytes they share.
+CONSTANTS, CONSTANT_LINES = 4, 8  # Constants whose values are shown under those definitions, and the most lines of one.
 CODE_LIKE = re.compile(r"[\d_]|[a-z][A-Z]")
 # Words too common in questions to say where in a long class the answer is.
 COMMON = {"which", "where", "there", "their", "these", "those", "about", "after", "before", "class", "function", "method", "default",
@@ -94,7 +95,37 @@ def keywords(task):
     return [word for word in dict.fromkeys(re.findall(r"[a-z]{5,}", without_paths(task).lower())) if word not in COMMON]
 
 
-def shown(workspace, found, task="", budget=SYMBOL_BYTES):
+def constants(knowledge, workspace, text, skip=()):
+    """Where the constants used in some shown code are set: [(path, first line number, its lines)], at most CONSTANTS.
+
+    A definition often answers a question only together with a value set elsewhere: pool_connections=DEFAULT_POOLSIZE
+    says nothing until DEFAULT_POOLSIZE = 10 is seen, and without it the model invents the number.
+    """
+    known = getattr(knowledge, "symbols", None) or {}
+    found = []
+    for name in dict.fromkeys(re.findall(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b|\b[A-Z]{3,}\b", text)):
+        for path, number in known.get(name, []):
+            try:
+                lines = workspace.read(path).splitlines()
+            except (ValueError, OSError, UnicodeError):
+                continue
+            line = lines[number - 1] if 0 < number <= len(lines) else ""
+            # Only the line that sets it, such as NAME = 10 or const NAME = 10, and not one already on show.
+            if re.match(rf"\s*(?:export\s+)?(?:(?:const|let|var|static|final|pub|public|private)\s+)*(?:[\w.<>\[\]]+\s+)?{name}\b[^=(]*=(?!=)", line) \
+                    and (path, number) not in skip and classify(path) != "test":
+                # A value written over several lines, such as a tuple of codes, is shown to its closing bracket.
+                last = number
+                while last < min(len(lines), number + CONSTANT_LINES - 1) and \
+                        sum(text.count(opener) - text.count(closer) for text in lines[number - 1:last] for opener, closer in ("()", "[]", "{}")) > 0:
+                    last += 1
+                found.append((path, number, [text.rstrip()[:200] for text in lines[number - 1:last]]))
+                break
+        if len(found) >= CONSTANTS:
+            break
+    return found
+
+
+def shown(workspace, found, task="", budget=SYMBOL_BYTES, knowledge=None):
     """The numbered lines of each found symbol, cut to share budget bytes. Returns (text, evidence rows, log lines).
 
     A definition that fits is shown whole. A longer one, usually a class, is shown as its start, its end, and the
@@ -126,4 +157,13 @@ def shown(workspace, found, task="", budget=SYMBOL_BYTES):
                      + ("" if whole else f" (too long to show whole; read other lines of it with a range such as {start}-{min(end, start + 60)})")
                      + "\n" + "\n".join(pieces))
         log.append(f"Preloaded the definition of {name} ({path}:{start}-{end}{'' if whole else ', in parts'}) because the task names it.")
-    return "\n\n".join(parts), evidence, log
+    text = "\n\n".join(parts)
+    if text and knowledge is not None:
+        on_show = {(row["path"], number) for row in evidence for number in range(row["line"], row["end_line"] + 1)}
+        values = constants(knowledge, workspace, text, on_show)
+        if values:
+            text += "\n\nConstants these lines use, and where each is set:\n" + "\n".join(
+                f"{path}:{number + offset}| {line}" for path, number, lines in values for offset, line in enumerate(lines))
+            evidence += [{"path": path, "line": number, "end_line": number + len(lines) - 1, "text": "\n".join(lines)}
+                         for path, number, lines in values]
+    return text, evidence, log

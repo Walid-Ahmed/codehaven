@@ -514,7 +514,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 evidence, truncated = retain(evidence, found)
                 evidence_limited |= truncated
             # Their definitions are shown whole, with line numbers: left to search, the model answers without reading them.
-            body, rows, notes = symbols.shown(workspace, named, task)
+            body, rows, notes = symbols.shown(workspace, named, task, knowledge=knowledge)
             if body:
                 for note in notes:
                     output(note)

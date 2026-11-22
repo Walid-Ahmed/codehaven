@@ -78,7 +78,15 @@ After that, everything works offline. Each time, activate the environment and op
 
 ```sh
 source .venv/bin/activate
-codehaven --gui
+codehaven --gui --start-ollama
+```
+
+`--start-ollama` starts Ollama for this run if it is not already running, on `127.0.0.1` with its cloud features off, and stops it when CodeHaven exits, so step 1 is needed only the first time. If something is missing, `codehaven --doctor` says what and prints the command that fixes it: Ollama itself, the model, and the optional tools for pictures, PDFs, isolated tests, and Git changes.
+
+**A shorter install.** With [pipx](https://pipx.pypa.io/) you can skip the virtual environment and get the `codehaven` command everywhere. This downloads CodeHaven from GitHub once:
+
+```sh
+pipx install git+https://github.com/Walid-Ahmed/codehaven.git
 ```
 
 ## How it is built
@@ -164,11 +172,12 @@ Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/
    **Or upload a picture of code.** The same button and drop area take a screenshot or photo of code, which CodeHaven turns into a file you can chat about and save. See [Read code from a picture](#read-code-from-a-picture).
 2. **Pick a model.** **Settings** in the sidebar lists the chat models installed in Ollama on this computer, with `qwen2.5-coder:7b` selected when it is installed. That default is the model all of CodeHaven's tests were tuned and measured on; other models may answer differently, and the first answer after switching is slower while the model loads. Cloud-backed and embedding-only models are never offered.
 3. **Ask questions.** Answers stream in as they are written. While one is being written, the **Ask** button becomes **Stop**: click it to end the answer at once, even while the model is still loading. The text written so far stays on the page, and a stopped question is not remembered by follow-ups or saved. **Make flashcards** turns into **Stop** the same way, and keeps the cards already made. Follow-up questions see your earlier questions and answers, and **New chat** starts over. Try "Explain this project", "Which function calls `checkout_total`?", or "Explain `src/app.py`".
+   **Save a chat.** **Save chat…** in the sidebar saves the questions and answers on the page as a Markdown file, through your browser. Nothing is sent anywhere.
 4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat.
 5. **See how it got there.** Each answer can show the steps CodeHaven took. If a citation could not be checked against what was actually read, a yellow **Unverified** box says so.
 6. **Study one file or a group of files.** The tabs above the chat add two study aids. Click **Choose files…** to tick the files they are about; with an uploaded file, that file is used.
    - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust; up to 40 files per map. Functions, methods, and types in Go, Java, and Rust are found with the same kind of parser as JavaScript; their imports are still read with line patterns, so unusual import layouts and macros can be missed.
-   - **Flashcards** asks the local model for question-and-answer cards, 3 to 6 per file for up to 8 files, one file at a time. Click a card or press Space to turn it over, use the arrow keys to move, and **Shuffle** or **Copy all as text** when you want. Each answer links to the lines it is about; those line numbers are looked up in the file from the name the model gave, so they are never invented. A card whose named part cannot be found says so.
+   - **Flashcards** asks the local model for question-and-answer cards, 3 to 6 per file for up to 8 files, one file at a time. Click a card or press Space to turn it over, use the arrow keys to move, and **Shuffle** or **Copy all as text** when you want. **Save for Anki…** saves the cards as a text file with one card per line, which Anki and most flashcard apps import. Each answer links to the lines it is about; those line numbers are looked up in the file from the name the model gave, so they are never invented. A card whose named part cannot be found says so.
 
 7. **Come back to a chat.** Chats about a repository are saved on this computer and listed under **Saved chats** in the sidebar. Click one to reopen it: the page shows it again and follow-up questions remember it. See [Saved chats](#saved-chats).
 

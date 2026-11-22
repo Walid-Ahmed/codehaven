@@ -5,6 +5,7 @@ import ipaddress
 import json
 import re
 import socket
+import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -332,6 +333,11 @@ class Ollama:
         if sock is not None:
             with contextlib.suppress(OSError):
                 sock.shutdown(socket.SHUT_RDWR)
+            # On Windows a shutdown does not wake a read that is already waiting; closing the socket does.
+            # _real_close marks the socket closed, so the reader's own close afterwards does nothing.
+            if sys.platform == "win32":
+                with contextlib.suppress(OSError, AttributeError):
+                    sock._real_close()
 
     def allow(self):
         """Let chats run again after a stop(); called when a new request begins."""

@@ -97,6 +97,9 @@ def snapshot(workspace, destination, runner):
     if not any(is_test(name) for name in names):
         raise ValueError('No permitted test files found for the selected runner')
     total = 0
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        # The copy is made with open calls that refuse symlinks at every step, which Windows does not offer.
+        raise ValueError("Isolated tests need macOS or Linux; on Windows, run CodeHaven inside WSL to use them.")
     with_fd = os.open(workspace.root, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for name in names:

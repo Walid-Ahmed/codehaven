@@ -229,8 +229,12 @@ All code is in [offline_agent/](../offline_agent).
 | Module | Role |
 |---|---|
 | [cli.py](../offline_agent/cli.py) | Command-line entry point and flags |
-| [gui.py](../offline_agent/gui.py), [gui.html](../offline_agent/gui.html) | The browser page and its local server |
+| [gui.py](../offline_agent/gui.py) | The local server; it serves the four page files below as one self-contained page |
+| [gui.html](../offline_agent/gui.html), [gui.css](../offline_agent/gui.css), [gui.js](../offline_agent/gui.js), [gui_arabic.js](../offline_agent/gui_arabic.js) | The page's markup, styles, script, and Arabic sentences |
 | [agent.py](../offline_agent/agent.py) | Routing, prompt preparation, the LangGraph loop, and sessions |
+| [prompts.py](../offline_agent/prompts.py) | The prompts, the reply schema, limits, and task patterns |
+| [tasks.py](../offline_agent/tasks.py) | Reading a task: its kind, and the files and code names it mentions |
+| [answers.py](../offline_agent/answers.py) | Checking a reply, looking up cited lines, and formatting tool output |
 | [model.py](../offline_agent/model.py) | The Ollama client: loopback checks, streaming, repetition guard, compaction |
 | [workspace.py](../offline_agent/workspace.py), [exclusions.py](../offline_agent/exclusions.py) | Safe, read-only file listing, reading, and search |
 | [knowledge.py](../offline_agent/knowledge.py) | The index: passages, BM25, definition lookup, retrieval budget |

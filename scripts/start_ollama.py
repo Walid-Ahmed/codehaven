@@ -28,6 +28,7 @@ def existing_ollama():
 
 
 def main(argv=None):
+    """Start `ollama serve` on loopback with cloud features off, unless a server already answers. Returns an exit code."""
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
     executable = shutil.which("ollama")
     if executable is None:

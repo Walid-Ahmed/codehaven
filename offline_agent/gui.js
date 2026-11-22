@@ -79,6 +79,7 @@ const GIT_SUGGESTIONS = LANG === "ar" ? [
 ];
 // A short message that goes away by itself, for errors that do not belong to one part of the page.
 let toastTimer = null;
+// Show a short message at the bottom of the page for a few seconds.
 function toast(message) {
   const box = $("toast");
   box.textContent = message; box.hidden = false;
@@ -153,6 +154,7 @@ const CITE = /(^|[\s(\[>,;:،؛])((?:repo\/)?[\wء-ي./-]+\.[A-Za-z]\w*):(\d+)(?
 // Arabic and Hebrew read right to left. Code and file names are left out when deciding, so an Arabic sentence
 // that starts with store.py:12 or `add` is still laid out right to left.
 const LETTER = /[A-Za-z֐-ࣿיִ-﷿ﹰ-ﻼ]/;
+// "rtl" when the first real letter of text is Arabic or Hebrew, otherwise "ltr". Code and file names are skipped.
 function direction(text) {
   const first = text.replace(/`[^`]*`/g, " ").replace(/\S*[\w)]\.\w+(?::\d+(?:-\d+)?)?/g, " ").match(LETTER);
   return first && !/[A-Za-z]/.test(first[0]) ? "rtl" : "ltr";
@@ -203,10 +205,12 @@ function render(text) {
 
 // ---- Recent repositories live only in this browser.
 function recent() { try { return JSON.parse(localStorage.getItem("codehaven.recent") || "[]"); } catch { return []; } }
+// Put a repository at the top of the recent list (six at most), kept in this browser only.
 function remember(path) {
   try { localStorage.setItem("codehaven.recent", JSON.stringify([path, ...recent().filter((p) => p !== path)].slice(0, 6))); } catch {}
   showRecent();
 }
+// Draw the recent repositories as buttons that reopen them.
 function showRecent() {
   const paths = recent();
   $("recent-section").hidden = !paths.length;
@@ -371,6 +375,7 @@ function setClone(on) {
   $("offline-text").textContent = t("Your code never leaves this computer. GitHub downloads are on: they run only when you click Download, and upload nothing.");
   $("privacy-network").textContent = t("Only GitHub downloads you ask for use the internet; nothing is sent.");
 }
+// Download a GitHub repository by its address, then index the copy. Only offered with --allow-clone.
 async function cloneRepository() {
   const address = $("github").value.trim();
   if (!address || busy) return;
@@ -538,6 +543,7 @@ async function browse(path) {
 }
 // Opening and closing the dialogs, the drawer, and (on a small screen) the sidebar.
 function openBrowser() { document.body.classList.remove("menu-open"); $("overlay").classList.add("open"); $("browser").classList.add("open"); browse($("path").value.trim()); }
+// Close whatever is open on top of the page: the menu, the folder browser, the file picker, and the code drawer.
 function closeOverlays() { document.body.classList.remove("menu-open"); for (const id of ["overlay", "browser", "picker", "drawer"]) $(id).classList.remove("open"); }
 $("menu").addEventListener("click", () => { document.body.classList.add("menu-open"); $("overlay").classList.add("open"); });
 $("start-folder").addEventListener("click", openBrowser);
@@ -624,6 +630,7 @@ function saveFile(name, text, type) {
 }
 // The chat on the page as questions and answers, kept so it can be saved as a file.
 let transcript = [];
+// Add one question and its answer to the transcript, and allow saving once there is something to save.
 function keepTurn(question, answer, issues, stopped) {
   transcript.push({question, answer, issues: issues || [], stopped: Boolean(stopped)});
   $("save-chat").disabled = false;
@@ -653,6 +660,7 @@ function addMessage(kind) {
   $("messages-inner").append(element);
   return element;
 }
+// Keep the newest message in view.
 function scrollDown() { const box = $("messages"); box.scrollTop = box.scrollHeight; }
 // Enable or disable every control to match the state: nothing open, busy, or ready.
 function updateComposer() {
@@ -849,6 +857,7 @@ function showPicker() {
   $("picker-list").replaceChildren(...rows);
   showPickerNote();
 }
+// Say how many files are ticked in the picker, and how many each study aid takes.
 function showPickerNote() {
   const limits = fileList.limits;
   $("picker-note").textContent = t("{count} chosen. A map takes up to {map} files, flashcards up to {flashcards}.", {count: picking.size, ...limits});
@@ -870,6 +879,7 @@ $("picker-filter").addEventListener("input", () => { if (fileList) showPicker();
 $("picker-clear").addEventListener("click", () => { picking.clear(); if (fileList) showPicker(); });
 $("picker-done").addEventListener("click", () => { selected = [...picking]; closeOverlays(); showChosen(); });
 const STUDY_HINTS = {"map-status": $("map-status").textContent, "cards-status": $("cards-status").textContent};
+// Show an error in a study aid's status line.
 function studyError(id, message) { $(id).classList.add("error"); $(id).textContent = message; }
 
 // ---- Structure map: boxes and arrows drawn as SVG by this page; nothing is loaded from anywhere.
@@ -982,6 +992,7 @@ function drawGraph(nodes, edges) {
   picture.replaceChildren(defs, ...lines, ...boxes);
   return edges.length;
 }
+// An English count with its noun: "1 file", "3 files".
 function plural(count, word) { return `${count} ${word}${count === 1 ? "" : "s"}`; }
 // The map inside one file: its functions and classes, and which calls which.
 function showFileMap(file) {
@@ -1038,7 +1049,9 @@ function showCard() {
   $("card-prev").disabled = cardAt === 0;
   $("card-next").disabled = cardAt === cards.length - 1;
 }
+// Go to the next or previous flashcard, showing its question side.
 function moveCard(step) { cardAt = Math.min(cards.length - 1, Math.max(0, cardAt + step)); cardAnswer = false; showCard(); }
+// Turn the current flashcard over.
 function flipCard() { cardAnswer = !cardAnswer; showCard(); }
 // Ask the model for cards. They arrive one file at a time and are shown as they come.
 async function makeCards() {

@@ -1,3 +1,4 @@
+"""The script that starts a loopback-only Ollama server with cloud features off."""
 import contextlib
 import io
 import unittest

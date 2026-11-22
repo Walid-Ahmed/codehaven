@@ -1,3 +1,4 @@
+"""Literal search of file contents: scopes, limits, snippets, and what is skipped."""
 import json
 import tempfile
 import unittest

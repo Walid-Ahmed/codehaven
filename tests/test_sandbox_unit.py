@@ -1,3 +1,4 @@
+"""Isolated test runs, without Docker: the fixed commands, the refusals, and the read-only project copy."""
 import json
 import os
 import subprocess

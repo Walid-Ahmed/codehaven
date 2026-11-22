@@ -58,10 +58,12 @@ LINES = [
 
 
 def run(*command):
+    """Run one program and fail loudly if it does; its output is kept out of the terminal."""
     subprocess.run(command, check=True, capture_output=True)
 
 
 def seconds(path):
+    """The length of an audio or video file in seconds, read with ffprobe."""
     out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
                          check=True, capture_output=True, text=True).stdout
     return float(out)
@@ -78,6 +80,7 @@ def record(missing):
 
 
 def main():
+    """Build the demo video: record each narration line, pair it with its slide, and join the clips."""
     slides = sorted((HERE / "slides").glob("*.png"))
     if len(slides) != len(LINES):
         sys.exit(f"{len(slides)} slides but {len(LINES)} narration lines; they must match.")

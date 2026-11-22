@@ -1,3 +1,4 @@
+"""The workspace's path rules, the model client's safety checks, and one simulated end-to-end task."""
 import json
 import tempfile
 import threading

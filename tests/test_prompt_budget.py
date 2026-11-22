@@ -1,3 +1,4 @@
+"""Keeping a conversation inside the prompt budget: what is compacted, what is kept, and what is refused."""
 import json
 import unittest
 from unittest.mock import patch

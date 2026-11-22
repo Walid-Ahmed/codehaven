@@ -1,3 +1,4 @@
+"""Ignore rules: .gitignore, .agentignore, and --exclude apply the same way to listing, search, indexing, and reads."""
 import contextlib
 import io
 import json

@@ -42,7 +42,7 @@ In the browser page you can also draw a **structure map** of your files, make **
 - [Chat in your browser](#chat-in-your-browser)
 - [Use it from the terminal](#use-it-from-the-terminal)
 - Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Call trace](#trace-a-function) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning) · [Arabic](#ask-in-arabic) · [VS Code](#use-it-from-vs-code)
-- Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.10 does](#what-v010-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
+- Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.11 does](#what-v011-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
 - [Development](#development)
 - [Technical report](docs/TECHNICAL_REPORT.md)
 
@@ -401,7 +401,9 @@ If Ollama is already running, the script checks its local API, prints a friendly
 
 After downloading a model, disconnect from the internet to use it offline. Disabling cloud features does not block model downloads or all network traffic. CodeHaven checks that the model is installed and rejects remote-backed and cloud models; a loopback URL alone cannot guarantee how a separately configured server performs inference. Installation downloads LangGraph and its dependencies; runtime does not require internet access. Reading code from a picture runs Tesseract, a separate program installed once; it works offline and makes no network connection.
 
-## What v0.10 does
+## What v0.11 does
+
+New in 0.11: shows the model the definitions a question names, with the constants they use, before it answers; traces a function's calls and callers; stops an answer in progress; indexes projects of up to 5,000 files and keeps the index while nothing changes; parses Go, Java, and Rust with Tree-sitter; starts Ollama for a run and says what is missing; saves chats and flashcards; adds a VS Code extension; and is tested on macOS, Windows, and Linux, with evals on three real repositories.
 
 New in 0.10: explains Git changes, reviews a file one function at a time, lists functions with no tests, suggests a reading order, reads notebooks and PDFs, saves chats, searches by meaning with a local embedding model, and follows Go, Java, and Rust imports.
 

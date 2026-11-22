@@ -1,6 +1,6 @@
 # CodeHaven technical report
 
-CodeHaven (version 0.10.0) is a read-only, offline assistant for understanding code. It indexes a repository on your machine, answers questions about it with a local model served by Ollama (`qwen2.5-coder:7b` by default), and cites the lines it used. It never changes your files, and at runtime it talks only to Ollama on `127.0.0.1`. The one exception is opt-in: with `--allow-clone`, the browser page can download a GitHub repository you ask for.
+CodeHaven (version 0.11.0) is a read-only, offline assistant for understanding code. It indexes a repository on your machine, answers questions about it with a local model served by Ollama (`qwen2.5-coder:7b` by default), and cites the lines it used. It never changes your files, and at runtime it talks only to Ollama on `127.0.0.1`. The one exception is opt-in: with `--allow-clone`, the browser page can download a GitHub repository you ask for.
 
 This report describes how it is built: the parts and how a question moves through them, the agent loop and its tools, how relevant code is found (RAG), how answers are checked, what is stored, and what the retrieval measurements show. For how to use it, see the [README](../README.md).
 

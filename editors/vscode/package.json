@@ -1,0 +1,51 @@
+{
+  "name": "codehaven",
+  "displayName": "CodeHaven",
+  "description": "Ask CodeHaven about the open project from VS Code, and jump from a cited path:line to the code. Everything stays on your computer.",
+  "version": "0.1.0",
+  "publisher": "walid-ahmed",
+  "repository": {"type": "git", "url": "https://github.com/Walid-Ahmed/codehaven.git"},
+  "engines": {"vscode": "^1.80.0"},
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      {"command": "codehaven.open", "title": "CodeHaven: Open the Chat Page for This Project"},
+      {"command": "codehaven.ask", "title": "CodeHaven: Ask a Question"},
+      {"command": "codehaven.askAboutFile", "title": "CodeHaven: Explain This File"},
+      {"command": "codehaven.askAboutSelection", "title": "CodeHaven: Explain the Selected Code"},
+      {"command": "codehaven.trace", "title": "CodeHaven: Trace the Function Under the Cursor"},
+      {"command": "codehaven.goToCitation", "title": "CodeHaven: Go to a Cited Line (path:line)"},
+      {"command": "codehaven.stop", "title": "CodeHaven: Stop the Chat Page"}
+    ],
+    "menus": {
+      "editor/context": [
+        {"command": "codehaven.askAboutSelection", "when": "editorHasSelection", "group": "codehaven"},
+        {"command": "codehaven.trace", "group": "codehaven"}
+      ]
+    },
+    "configuration": {
+      "title": "CodeHaven",
+      "properties": {
+        "codehaven.command": {
+          "type": "string",
+          "default": "codehaven",
+          "description": "The CodeHaven command. Give the full path if it is installed in a virtual environment, such as /path/to/.venv/bin/codehaven."
+        },
+        "codehaven.startOllama": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add --start-ollama, so CodeHaven starts a local Ollama server (loopback only, cloud features off) when none is running."
+        },
+        "codehaven.extraArguments": {
+          "type": "array",
+          "items": {"type": "string"},
+          "default": [],
+          "description": "More arguments for every CodeHaven run, such as [\"--model\", \"qwen2.5:14b\"]."
+        }
+      }
+    }
+  },
+  "scripts": {"test": "node --test test/citations.test.js test/extension.test.js"}
+}

@@ -1,3 +1,4 @@
+"""The evidence kept for a final answer, and the checks an answer's citations must pass."""
 import json
 import tempfile
 import unittest

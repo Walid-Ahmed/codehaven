@@ -154,7 +154,7 @@ class GraphTests(unittest.TestCase):
                 return action("read", ("first.py", "second.py", "third.py")[len(calls)-2])
 
         output = []
-        with patch.object(self.ws, "read", wraps=self.ws.read) as read:
+        with patch.object(self.ws, "read", wraps=self.ws.read):
             result = run(Model(), self.ws, "Find entry points", max_steps=4, output=output.append)
         self.assertEqual(result, 0)
         self.assertEqual(len(calls), 4)

@@ -100,7 +100,7 @@ The model can ask for five actions. None of them writes to your project.
 | Action | What it does | Limits |
 |---|---|---|
 | `read` | Reads a UTF-8 file, in pages for long files | 64 KB per file; a page fits in half the prompt budget and names the next range |
-| `search` | Finds literal text and names the function each match is in | 50 matching lines, 16,000 bytes, 1,000 files |
+| `search` | Finds literal text and names the function each match is in | 50 matching lines, 16,000 bytes, 5,000 files |
 | `retrieve` | Fetches ranked passages from the local index | 4,000 bytes by default (`--retrieval-budget`) |
 | `run_tests` | Runs unittest or pytest in a Docker container, after you approve | Networking off, read-only snapshot, 30-second timeout |
 | `finish` | Returns the answer and the code parts it relies on | 10 points, 3,000 characters |
@@ -114,9 +114,10 @@ These answer one kind of request each. Those that use the model make small, boun
 | Helper | Module | How it works |
 |---|---|---|
 | Git changes | [changes.py](../offline_agent/changes.py) | Runs only `git diff`, `git log`, `git rev-parse`, and `git ls-files`. The diff must fit in half the prompt budget; named files come first, then the smallest changes. |
-| File review | [review.py](../offline_agent/review.py) | Up to 12 functions, one model call each. The model states what the function promises and what it does before giving a verdict. |
+| File review | [review.py](../offline_agent/review.py) | Up to 12 functions, one model call each. The model states what the function promises and what it does before giving a verdict. It is also shown the signatures of the same-file functions the reviewed one calls. |
 | Test gaps | [insights.py](../offline_agent/insights.py) | Lists public functions whose names appear in no test file. No model. |
 | Project tour | [insights.py](../offline_agent/insights.py) | Orders up to 8 files by the import graph; the model adds one sentence per file. |
+| Call trace | [trace.py](../offline_agent/trace.py) | Walks the calls below a named function through the parsed symbols, up to 3 deep and 8 functions, and lists its callers; the model adds one sentence per function. |
 | Structure map | [study.py](../offline_agent/study.py) | Draws calls inside a file, or imports between files, from parsed code. No model. |
 | Flashcards | [study.py](../offline_agent/study.py) | The model writes 3 to 6 cards per file and names the part each is about; the lines are looked up. |
 | Picture to code | [ocr.py](../offline_agent/ocr.py) | Tesseract reads the picture; indentation is rebuilt from word positions. No model. |
@@ -139,7 +140,7 @@ Passages are found four ways:
 
 **Definition lookup.** When the index is built, CodeHaven records where each function, class, method, and module constant is defined, using Python's `ast` module and Tree-sitter for JavaScript and TypeScript. A word in the question counts as a code name only when it is written like code (underscore, camelCase, `ALL_CAPS`, a dot, backticks, or `()`), or when it sits next to "function", "method", "class", or "constant". Only names defined in one to three files are looked up, and at most three definitions are added. For a method, the passage is the method itself, not its whole class.
 
-**Import following.** For Python, JavaScript, TypeScript, Go, Java, and Rust, CodeHaven adds the definitions that matched files import from other local files, up to two hops and four passages. Python uses `ast` ([dependencies.py](../offline_agent/dependencies.py)), JavaScript and TypeScript use Tree-sitter ([javascript.py](../offline_agent/javascript.py)), and Go, Java, and Rust use line patterns ([languages.py](../offline_agent/languages.py)). Package imports and path aliases are not resolved.
+**Import following.** For Python, JavaScript, TypeScript, Go, Java, and Rust, CodeHaven adds the definitions that matched files import from other local files, up to two hops and four passages. Python uses `ast` ([dependencies.py](../offline_agent/dependencies.py)), JavaScript and TypeScript use Tree-sitter ([javascript.py](../offline_agent/javascript.py)), and Go, Java, and Rust use Tree-sitter for where each part is and line patterns for imports ([languages.py](../offline_agent/languages.py)). Package imports and path aliases are not resolved.
 
 **Meaning search.** [semantic.py](../offline_agent/semantic.py) embeds every passage with a second, small Ollama model (the first installed of `nomic-embed-text`, `embeddinggemma`, and others, or `--embed-model`). The 24 nearest passages above a similarity of 0.2 are mixed with the keyword ranking by reciprocal rank fusion: a passage's place in each list counts, not the two scores, which are on different scales. Exact names therefore still win. Passages are embedded in the background, so a question uses whatever is ready. If the embedding model fails, search goes back to key words for the session.
 
@@ -150,8 +151,8 @@ Passages are found four ways:
 | Limit | Value |
 |---|---|
 | Retrieved context per call | 4,000 bytes by default (`--retrieval-budget`, 2,000 to 16,000) |
-| Documents indexed | 1,000 |
-| Indexed text | 5 MB, at most 8,000 passages |
+| Documents indexed | 5,000 |
+| Indexed text | 25 MB, at most 40,000 passages |
 | Largest file indexed | 64 KB |
 
 Hidden files, `.gitignore` and `.agentignore` matches, symlinks, binary files, and invalid UTF-8 are skipped. The keyword index is rebuilt at the start of each run and between questions, so edits you make yourself are picked up.
@@ -228,8 +229,12 @@ All code is in [offline_agent/](../offline_agent).
 | Module | Role |
 |---|---|
 | [cli.py](../offline_agent/cli.py) | Command-line entry point and flags |
-| [gui.py](../offline_agent/gui.py), [gui.html](../offline_agent/gui.html) | The browser page and its local server |
+| [gui.py](../offline_agent/gui.py) | The local server; it serves the four page files below as one self-contained page |
+| [gui.html](../offline_agent/gui.html), [gui.css](../offline_agent/gui.css), [gui.js](../offline_agent/gui.js), [gui_arabic.js](../offline_agent/gui_arabic.js) | The page's markup, styles, script, and Arabic sentences |
 | [agent.py](../offline_agent/agent.py) | Routing, prompt preparation, the LangGraph loop, and sessions |
+| [prompts.py](../offline_agent/prompts.py) | The prompts, the reply schema, limits, and task patterns |
+| [tasks.py](../offline_agent/tasks.py) | Reading a task: its kind, and the files and code names it mentions |
+| [answers.py](../offline_agent/answers.py) | Checking a reply, looking up cited lines, and formatting tool output |
 | [model.py](../offline_agent/model.py) | The Ollama client: loopback checks, streaming, repetition guard, compaction |
 | [workspace.py](../offline_agent/workspace.py), [exclusions.py](../offline_agent/exclusions.py) | Safe, read-only file listing, reading, and search |
 | [knowledge.py](../offline_agent/knowledge.py) | The index: passages, BM25, definition lookup, retrieval budget |
@@ -275,7 +280,7 @@ What they show:
 - **Long data lists.** Index each passage with its file's path, so a question that names `inventory/catalog.py` and `SKU-0042` reaches the right rows.
 - **"Who calls X?"** Retrieval favours a function's definition over its callers. The search that runs before the model's first step already finds callers for named functions; retrieval could add the passages that call a named function.
 - **Reviews see one function at a time.** A review cannot judge how functions work together, and it can miss a bug or flag correct code.
-- **Line-pattern parsing.** Go, Java, and Rust imports are read with line patterns, so unusual layouts and macros can be missed.
+- **Line-pattern imports.** Go, Java, and Rust files are outlined with Tree-sitter, but their imports are read with line patterns, so unusual import layouts and macros can be missed. A file whose syntax tree has errors is outlined with line patterns too.
 - **Arabic is unmeasured.** Add Arabic questions to the evals to learn how well the 7B model answers them.
 - **Small models.** Results shift when prompts change, and other models may answer differently from `qwen2.5-coder:7b`.
 - **Not an OS sandbox.** File access relies on path checks, which are not hardened against files being moved while CodeHaven runs.

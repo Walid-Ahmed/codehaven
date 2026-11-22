@@ -4,7 +4,7 @@ import sys
 from functools import partial
 from pathlib import Path
 
-from . import ocr
+from . import doctor, ocr
 from .agent import Session, run
 from .chats import Chats
 from .knowledge import KnowledgeBase
@@ -101,7 +101,11 @@ def main(argv=None):
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
     parser.add_argument("--model", default=MODEL, help=f"Installed local Ollama model (default {MODEL}, the tested one)")
     parser.add_argument("--max-steps", type=int, default=12, choices=range(1, 31), metavar="1..30")
-    parser.add_argument("--doctor", action="store_true", help="Check local server and installed model")
+    parser.add_argument("--doctor", action="store_true",
+                        help="Check the local server, the model, and the optional tools, and say how to get what is missing")
+    parser.add_argument("--start-ollama", action="store_true",
+                        help="If no Ollama server is running, start one for this run on 127.0.0.1 with cloud features "
+                             "off, and stop it on exit")
     parser.add_argument("-i", "--interactive", action="store_true",
                         help="Ask several tasks in one session; follow-ups see earlier answers")
     parser.add_argument("--no-stream", action="store_true", help="Print the final answer only once it is complete")
@@ -161,16 +165,26 @@ def main(argv=None):
         parser.error("a task is required unless --doctor, --interactive, --gui, or --forget is used")
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
+    server = model = None
     try:
         model = Ollama(model=args.model, endpoint=args.endpoint, max_output_tokens=args.max_output_tokens,
                        prompt_budget=args.prompt_budget)
+        if args.start_ollama:
+            server = doctor.start_ollama(model, partial(print, flush=True))
         try:
             model.check_model()
-        except ValueError:
+        except ValueError as exc:
             # The GUI can start with another installed model, which the page lets the user change.
-            available = [m["name"] for m in model.local_models()] if args.gui else []
+            try:
+                available = [m["name"] for m in model.local_models()] if args.gui else []
+            except ValueError:
+                available = []
             if not available:
-                raise
+                # Say what is missing and the command that fixes it, not only that the request failed.
+                print(f"Error: {exc}", file=sys.stderr)
+                for line in doctor.missing_server(model):
+                    print("  " + line, file=sys.stderr)
+                return 1
             model.use(available[0])
             print(f"{args.model} is not available; starting with {available[0]}. Choose another model in the page.")
         embed_model = choose_model(model, args.embed_model) if args.semantic else None
@@ -185,6 +199,9 @@ def main(argv=None):
             print(f"Meaning search: {embed_model}" if embed_model else "Meaning search: off (--no-semantic)" if not args.semantic
                   else "Meaning search: off, no embedding model is installed. To turn it on, run once while online: "
                        "ollama pull nomic-embed-text")
+            for line in doctor.extras(args.test_image) + [doctor.default_model_hint(model)]:
+                if line:
+                    print(line)
             return 0
         if args.gui:
             # Imported only here, so the web server is loaded only when --gui asks for it.
@@ -239,3 +256,5 @@ def main(argv=None):
         print("\nStopped.", file=sys.stderr)
         # The usual exit code for a program stopped by Ctrl+C (128 + SIGINT's number, 2).
         return 130
+    finally:
+        doctor.stop_ollama(server)

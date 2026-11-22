@@ -63,6 +63,6 @@ class OfflineTests(unittest.TestCase):
     def test_package_source_has_no_tracing_client_or_tracer(self):
         package = Path(offline_agent.__file__).parent
         for source in package.glob("*.py"):
-            text = source.read_text()
+            text = source.read_text(encoding="utf-8")
             for banned in ("LangChainTracer", "langsmith import Client", "langsmith.Client"):
                 self.assertNotIn(banned, text, f"{source.name} references {banned}")

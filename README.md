@@ -30,6 +30,7 @@ Watch the [narrated demo video on YouTube](https://youtu.be/d18wHCz8LFs) (or the
 | "Review `inventory/store.py`" | [Likely bugs](#review-a-file), one function at a time, most serious first |
 | "Which functions have no tests?" | [A list of test gaps](#test-gaps-and-a-project-tour), instantly, with no model |
 | "Give me a project tour" | An ordered reading list of up to 8 files |
+| "Trace `checkout_total`" | [The calls below it](#trace-a-function), step by step, and who calls it |
 | "اشرح الدالة `checkout_total`" | [The answer in Arabic](#ask-in-arabic), with the same checked citations |
 
 In the browser page you can also draw a **structure map** of your files, make **flashcards** to study them, chat about a [notebook or PDF](#notebooks-and-pdfs), and turn a [screenshot of code](#read-code-from-a-picture) into a file. CodeHaven [remembers checked answers](#long-term-memory) and [your chats](#saved-chats) between sessions, on your computer only.
@@ -40,7 +41,7 @@ In the browser page you can also draw a **structure map** of your files, make **
 - [How it is built](#how-it-is-built)
 - [Chat in your browser](#chat-in-your-browser)
 - [Use it from the terminal](#use-it-from-the-terminal)
-- Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning) · [Arabic](#ask-in-arabic)
+- Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Call trace](#trace-a-function) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning) · [Arabic](#ask-in-arabic) · [VS Code](#use-it-from-vs-code)
 - Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.10 does](#what-v010-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
 - [Development](#development)
 - [Technical report](docs/TECHNICAL_REPORT.md)
@@ -77,7 +78,15 @@ After that, everything works offline. Each time, activate the environment and op
 
 ```sh
 source .venv/bin/activate
-codehaven --gui
+codehaven --gui --start-ollama
+```
+
+`--start-ollama` starts Ollama for this run if it is not already running, on `127.0.0.1` with its cloud features off, and stops it when CodeHaven exits, so step 1 is needed only the first time. If something is missing, `codehaven --doctor` says what and prints the command that fixes it: Ollama itself, the model, and the optional tools for pictures, PDFs, isolated tests, and Git changes.
+
+**A shorter install.** With [pipx](https://pipx.pypa.io/) you can skip the virtual environment and get the `codehaven` command everywhere. This downloads CodeHaven from GitHub once:
+
+```sh
+pipx install git+https://github.com/Walid-Ahmed/codehaven.git
 ```
 
 ## How it is built
@@ -118,6 +127,7 @@ No tool writes files. `edit` and `write` do not exist, and the model is correcte
 | Git changes | Yes | Reads the diff with read-only git commands, then explains it |
 | File review | Yes | One function per model call, because a small model shown a whole file says "looks fine" |
 | Project tour | Yes | The order comes from the import graph; the model adds one sentence per file |
+| Call trace | Yes | The calls and callers come from parsed code; the model adds one sentence per function |
 | Flashcards | Yes | The model writes the cards; the lines each answer is about are looked up |
 | Test gaps | No | Lists public functions that no test file mentions |
 | Structure map | No | Draws calls and imports from parsed code |
@@ -162,11 +172,12 @@ Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/
    **Or upload a picture of code.** The same button and drop area take a screenshot or photo of code, which CodeHaven turns into a file you can chat about and save. See [Read code from a picture](#read-code-from-a-picture).
 2. **Pick a model.** **Settings** in the sidebar lists the chat models installed in Ollama on this computer, with `qwen2.5-coder:7b` selected when it is installed. That default is the model all of CodeHaven's tests were tuned and measured on; other models may answer differently, and the first answer after switching is slower while the model loads. Cloud-backed and embedding-only models are never offered.
 3. **Ask questions.** Answers stream in as they are written. While one is being written, the **Ask** button becomes **Stop**: click it to end the answer at once, even while the model is still loading. The text written so far stays on the page, and a stopped question is not remembered by follow-ups or saved. **Make flashcards** turns into **Stop** the same way, and keeps the cards already made. Follow-up questions see your earlier questions and answers, and **New chat** starts over. Try "Explain this project", "Which function calls `checkout_total`?", or "Explain `src/app.py`".
-4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat.
+   **Save a chat.** **Save chat…** in the sidebar saves the questions and answers on the page as a Markdown file, through your browser. Nothing is sent anywhere.
+4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat. **Open in VS Code** above the code opens the same file at that line in VS Code, if it is installed; it is a link to a program on this computer, and nothing is sent anywhere.
 5. **See how it got there.** Each answer can show the steps CodeHaven took. If a citation could not be checked against what was actually read, a yellow **Unverified** box says so.
 6. **Study one file or a group of files.** The tabs above the chat add two study aids. Click **Choose files…** to tick the files they are about; with an uploaded file, that file is used.
-   - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust; up to 40 files per map. Go, Java, and Rust are read with line patterns rather than a full parser, so unusual layouts and macros can be missed.
-   - **Flashcards** asks the local model for question-and-answer cards, 3 to 6 per file for up to 8 files, one file at a time. Click a card or press Space to turn it over, use the arrow keys to move, and **Shuffle** or **Copy all as text** when you want. Each answer links to the lines it is about; those line numbers are looked up in the file from the name the model gave, so they are never invented. A card whose named part cannot be found says so.
+   - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust; up to 40 files per map. Functions, methods, and types in Go, Java, and Rust are found with the same kind of parser as JavaScript; their imports are still read with line patterns, so unusual import layouts and macros can be missed.
+   - **Flashcards** asks the local model for question-and-answer cards, 3 to 6 per file for up to 8 files, one file at a time. Click a card or press Space to turn it over, use the arrow keys to move, and **Shuffle** or **Copy all as text** when you want. **Save for Anki…** saves the cards as a text file with one card per line, which Anki and most flashcard apps import. Each answer links to the lines it is about; those line numbers are looked up in the file from the name the model gave, so they are never invented. A card whose named part cannot be found says so.
 
 7. **Come back to a chat.** Chats about a repository are saved on this computer and listed under **Saved chats** in the sidebar. Click one to reopen it: the page shows it again and follow-up questions remember it. See [Saved chats](#saved-chats).
 
@@ -208,7 +219,7 @@ codehaven --workspace ~/dev/project 'Review inventory/store.py'
 
 CodeHaven checks the file one function at a time, up to 12 functions with one model call each, and lists likely bugs, missing checks, and unclear names, most serious first. Each finding cites the lines of the function it is about; those lines come from parsing the file, not from the model. With an uploaded file, the **Review** button does the same.
 
-Shown a whole file, a small model tends to answer "looks fine". Shown one function and asked to state what it promises and what it really does, it notices when the two differ, such as a docstring that says "at or below" above code that uses `<`. A review is still a list of leads to verify, not proof: the model can miss a bug or flag correct code, and it sees one function at a time, so it cannot judge how functions work together. Nothing is changed; fixes are described, never applied.
+Shown a whole file, a small model tends to answer "looks fine". Shown one function and asked to state what it promises and what it really does, it notices when the two differ, such as a docstring that says "at or below" above code that uses `<`. A review is still a list of leads to verify, not proof: the model can miss a bug or flag correct code, and it sees one function at a time. Under that function it is shown the first lines (the signature and the docstring's first line) of the functions it calls in the same file, so it can notice a call with the wrong arguments; it does not see their bodies, or functions in other files. Nothing is changed; fixes are described, never applied.
 
 ## Test gaps and a project tour
 
@@ -218,6 +229,29 @@ Two answers come from parsing the whole project rather than from searching it:
 - **Project tour.** "Give me a project tour" returns an ordered reading list of up to 8 files: the README, then the entry point (the file that reaches the most of the project through its imports), then what it imports, most widely used first. The order and the reason for each step come from the import graph; the local model adds one sentence per file. Tests are left out. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust.
 
 Both have buttons on the empty chat in the browser page, and neither is saved to long-term memory, because a saved copy would not notice a new test or file.
+
+## Trace a function
+
+```sh
+codehaven --workspace ~/dev/project 'Trace checkout_total'
+codehaven --workspace ~/dev/project 'What happens when Store.add is called?'
+```
+
+CodeHaven lists the functions the named one calls, the functions those call, and where it is called from:
+
+```text
+Call path of checkout_total: 3 functions, up to 3 calls deep, found by parsing the code.
+1. inventory/pricing.py:15-18 checkout_total: Applies the discount to the subtotal and returns it with tax.
+  2. inventory/pricing.py:5-8 apply_discount (called by checkout_total): ...
+  3. inventory/pricing.py:11-12 with_tax (called by checkout_total): ...
+Called from: app/main.py:21 in checkout
+```
+
+- **The path is parsed, not guessed.** The order, the line ranges, and the callers come from the parsed code. The local model writes only the one sentence after each function, from that function alone.
+- **Limits.** Up to 3 calls deep and 8 functions; the answer says how many calls were left out, and you can trace one of them by name.
+- **What is followed.** A call to a function in the same file, in a file it imports, or to the only function of that name in the project. `self.add()` means the same class. A call on another object, such as `file.flush()`, is not followed, and neither are calls through a variable, a decorator, or inheritance. A name inside a string or a comment is not a call.
+- **Same name twice.** Name the method with its class (`Store.add`); otherwise the first match is traced and the others are listed.
+- Works for Python, JavaScript, TypeScript, Go, Java, and Rust. A question with a condition, such as "what happens when `add` is called with a negative price?", is answered by the normal workflow instead.
 
 ## Notebooks and PDFs
 
@@ -345,6 +379,10 @@ codehaven --workspace /absolute/path/to/project --interactive
 
 Answers stream to the terminal as the model writes them; add `--no-stream` to print each answer only once it is complete. `codehaven`, `offline-agent`, and `python -m offline_agent` are the same command (on Windows, use `python -m offline_agent`). Reinstall the package after updating to register the commands.
 
+## Use it from VS Code
+
+The [VS Code extension](editors/vscode) adds commands to ask about the open folder, explain the file or the selected lines, and trace the function under the cursor. It turns every `path:line` citation in a terminal into a link that opens the cited lines. It runs the `codehaven` command on this computer and holds no model of its own; see [its README](editors/vscode/README.md) to install it. Its logic is tested without VS Code, but it has not yet been tried inside a running VS Code.
+
 ## Choosing a model
 
 `qwen2.5-coder:7b` is the default and the tested model. To use another installed local model, choose it in the browser page or pass `--model`:
@@ -368,7 +406,7 @@ After downloading a model, disconnect from the internet to use it offline. Disab
 New in 0.10: explains Git changes, reviews a file one function at a time, lists functions with no tests, suggests a reading order, reads notebooks and PDFs, saves chats, searches by meaning with a local embedding model, and follows Go, Java, and Rust imports.
 
 - Never changes files. The only actions are `read`, `search`, `retrieve`, `run_tests`, and `finish`, and the workspace layer has no write method. The one file CodeHaven writes for you is the new file `--ocr` makes from a picture, and it refuses to replace an existing file.
-- Lists up to 1,000 visible project files and lets the model read selected UTF-8 files.
+- Lists up to 5,000 visible project files and lets the model read selected UTF-8 files.
 - Reads long files in pages. Content such as `120-180` asks for a line range. A read that would not fit in half the prompt budget returns whole lines up to that size and names the next range to request, so evidence is never silently truncated.
 - Preloads up to two files that your task names, such as `explain chapter-06/gateway/app/main.py`, with line numbers for citing. The model starts with the file's lines instead of spending steps finding and reading it, and those lines count as evidence for citations. A file too long to fit shows its start, its end, and the lines around any code-like name in the task, such as `SKU-0042`, because the answer is often not on the first page. A plain file name like `store.py` counts only if exactly one file has that name. Hidden and excluded files are never preloaded.
 - Searches the project for code names in a question, such as `apply_discount` or `applyCoupon`, before the model's first step, and shows each match with the function it is in. Left alone, the model often answered "who calls X?" from the definition without searching.
@@ -412,7 +450,7 @@ codehaven --workspace /path/to/project --knowledge-base /path/to/references \
   'Use my references to explain LangGraph conditional edges'
 ```
 
-The model can call `retrieve` for more passages, with source and line citations. Indexing and retrieval run entirely on your device using BM25 keyword ranking. No vector database, embeddings, extra model, or internet access is needed. Startup reports the repository-file count and warns if index limits were reached. The index is rebuilt at the start of each run and between questions in a session, so edits you make yourself are picked up. See [how to add manuals and your own references](docs/KNOWLEDGE_BASE.md) for supported formats, limits, and examples.
+The model can call `retrieve` for more passages, with source and line citations. Indexing and retrieval run entirely on your device using BM25 keyword ranking. No vector database, embeddings, extra model, or internet access is needed. Startup reports the repository-file count and warns if index limits were reached. The index is built at the start of each run. Between questions in a session CodeHaven lists the files again and rebuilds the index only if a file was added, removed, or changed, so edits you make yourself are picked up and an unchanged project costs almost nothing. A project at the 5,000-file limit takes about 8 seconds to index and about 1 second to check. For a larger project, open the subfolder you are working in. See [how to add manuals and your own references](docs/KNOWLEDGE_BASE.md) for supported formats, limits, and examples.
 
 ## Dependency-aware retrieval and complete functions
 
@@ -472,7 +510,7 @@ codehaven --workspace /absolute/path/to/project 'Search for validate_order and e
 
 The model can call `search` with the literal query in `content` and an optional relative file or directory in `path`. An empty path searches the workspace. Search needs no approval. Matching is case-sensitive, single-line, and literal (no regex); queries must be nonblank and at most 256 characters.
 
-Results contain relative paths, 1-based line numbers, up to 320 characters of text around the first match on each matching line, and the function or class each match is in. Search returns at most 50 matching lines and 16,000 bytes of JSON. It considers up to 1,000 eligible files per scope and skips hidden/excluded paths, symlinks, files over 64 KB, binary data, unreadable files, and invalid UTF-8. Narrow the scope when a limit is reported. `files_searched` and `files_skipped` describe attempted candidates; `limit_reached` and `candidate_limit_reached` flag potentially incomplete results. A no-match result only describes the files actually searched. Search uses the same ignore and exclusion policy as file listing and RAG. The terminal shows a short summary (counts, limits, and up to 20 `path:line` matches); the model always receives the full JSON.
+Results contain relative paths, 1-based line numbers, up to 320 characters of text around the first match on each matching line, and the function or class each match is in. Search returns at most 50 matching lines and 16,000 bytes of JSON. It considers up to 5,000 eligible files per scope and skips hidden/excluded paths, symlinks, files over 64 KB, binary data, unreadable files, and invalid UTF-8. Narrow the scope when a limit is reported. `files_searched` and `files_skipped` describe attempted candidates; `limit_reached` and `candidate_limit_reached` flag potentially incomplete results. A no-match result only describes the files actually searched. Search uses the same ignore and exclusion policy as file listing and RAG. The terminal shows a short summary (counts, limits, and up to 20 `path:line` matches); the model always receives the full JSON.
 
 Search results also report the exact `query`, `scope`, and `literal: true`. Queries are source text, not filename filters: searching for `FastAPI(` finds constructors; `FastAPI(.py` searches for those exact characters and will usually find nothing. File extensions and globs must not be appended to the query.
 

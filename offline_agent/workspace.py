@@ -10,7 +10,7 @@ from .exclusions import Exclusions, IgnoreConfigurationError
 EXCLUDED = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build",
             ".aws", ".ssh", ".codex", ".agents"}
 MAX_BYTES = 64_000  # The largest file read, listed, or indexed.
-MAX_FILES = 1000  # The most files one listing returns; callers report the listing as limited at this size.
+MAX_FILES = 5000  # The most files one listing returns; callers report the listing as limited at this size.
 MAX_MATCHES, SEARCH_BYTES = 50, 15_800  # Bounds on one search result, so it always fits in a prompt.
 
 
@@ -250,7 +250,9 @@ class Workspace:
             raw = handle.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES or b"\0" in raw:
             raise ValueError(f"Only UTF-8 text files up to {MAX_BYTES // 1000} KB can be read")
-        return raw.decode("utf-8")
+        # Windows line endings become plain ones, so a stray carriage return never reaches the model or a citation.
+        # Nothing is written back: the file on disk keeps its own line endings.
+        return raw.decode("utf-8").replace("\r\n", "\n")
 
     def page(self, name, spec="", limit=MAX_BYTES):
         """Return (text, start, end, total) for a line range, cut at a line boundary to fit limit bytes."""

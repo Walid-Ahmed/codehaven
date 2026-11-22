@@ -1,4 +1,5 @@
 """Long-term memory: opt-in, checked answers only, and never trusted once the code they cite has changed."""
+import os
 import contextlib
 import io
 import json
@@ -49,7 +50,8 @@ class MemoryTests(unittest.TestCase):
         self.assertTrue(memory.add("How is the discount applied?", "apply_discount multiplies by 1 - RATE (pricing.py:4-5)."))
         self.assertEqual(sorted(path.name for path in self.root.iterdir()), ["pricing.py", "stock.py"])
         self.assertEqual(memory.path.parent, self.folder)
-        self.assertEqual(stat.S_IMODE(memory.path.stat().st_mode), 0o600)
+        if os.name != "nt":  # Windows keeps a user's files private through the profile folder, not file modes.
+            self.assertEqual(stat.S_IMODE(memory.path.stat().st_mode), 0o600)
         self.assertEqual([note["question"] for note in self.memory().notes], ["How is the discount applied?"])
 
     def test_answers_without_readable_citations_are_not_saved(self):

@@ -130,8 +130,8 @@ At most three definitions are added, within the same byte budget.
 
 The index is rebuilt for each new task. External edits and deletions are picked
 up on the next run. No database, persistent index, account, or API key is required.
-Indexing considers at most 1,000 candidate files per root, 1,000 documents total across references and repository code,
-5 MB of document text, and 8,000 passages. Hidden/excluded paths, symlinks, binary
+Indexing considers at most 5,000 candidate files per root, 5,000 documents total across references and repository code,
+25 MB of document text, and 40,000 passages. Hidden/excluded paths, symlinks, binary
 files, invalid UTF-8, and files over 64 KB are excluded. Metadata flags report
 index/result limits; a no-match result is not proof the full library has no answer.
 The skipped-document count covers read failures among eligible text candidates,

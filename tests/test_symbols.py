@@ -5,6 +5,7 @@ from pathlib import Path
 
 from offline_agent import symbols
 from offline_agent.agent import Session
+from offline_agent.answers import with_points
 from offline_agent.knowledge import KnowledgeBase
 from offline_agent.workspace import Workspace
 
@@ -103,6 +104,22 @@ class SymbolTests(unittest.TestCase):
         self.assertIn("shop/codes.py:1| REDIRECTS = (\nshop/codes.py:2|     301,\nshop/codes.py:3|     302,\nshop/codes.py:4| )", text)
         self.assertIn("shop/session.py:1| LIMIT = 30", text)  # Set in another file: found through the index.
         self.assertIn(("shop/codes.py", 1, 4), {(row["path"], row["line"], row["end_line"]) for row in evidence})
+
+    def test_a_point_that_names_the_right_thing_in_the_wrong_place_cites_a_line_that_was_shown(self):
+        # The model was shown where LIMIT is set (session.py:1) and where it is used (session.py:7-8), and nothing of api.py.
+        evidence = [{"path": "shop/session.py", "line": 1, "end_line": 1, "text": "LIMIT = 30"},
+                    {"path": "shop/session.py", "line": 7, "end_line": 8, "text": "    def __init__(self):\n        self.max_redirects = LIMIT"}]
+
+        def cited(path, symbol):
+            reply = {"action": "finish", "path": "", "content": "Thirty.", "message": "",
+                     "points": [{"path": path, "symbol": symbol, "text": "the limit"}]}
+            return with_points(reply, self.workspace, evidence)[0]["content"].splitlines()[1]
+        # Named in a file that does not contain it: the shown line that sets it is cited instead of "not found".
+        self.assertEqual(cited("shop/api.py", "LIMIT"), "- shop/session.py:1 `LIMIT`: the limit")
+        # Found in the named file, on lines that were shown: left as looked up.
+        self.assertEqual(cited("shop/session.py", "max_redirects"), "- shop/session.py:8 `max_redirects`: the limit")
+        # Found only on lines that were never shown, with no shown line naming it: left alone, to be flagged.
+        self.assertEqual(cited("shop/session.py", "mount"), "- shop/session.py:376-377 `mount`: the limit")
 
     def test_a_task_with_no_code_names_gets_no_extra_message(self):
         model = Finisher()

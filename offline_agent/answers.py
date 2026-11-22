@@ -95,6 +95,25 @@ def seen_span(path, span, evidence, symbol=""):
     return (named["line"], named["line"]) if named else span
 
 
+def observed_line(symbol, path, evidence):
+    """(path, line) of a line the model was shown that contains the symbol's name, or None. The point's own file comes first.
+
+    The model names the right thing but often the wrong place: the file that imports a constant instead of the one
+    that sets it, or the line of an import. When the lines it was actually shown contain the name, citing one of
+    those is both true and checkable, where the looked-up line would be flagged as never read.
+    """
+    short = symbol.strip("`'\" ").removesuffix("()").rsplit(".", 1)[-1]
+    if len(short) < 3:
+        return None
+    named = re.compile(rf"(?<![\w$]){re.escape(short)}(?![\w$])")
+    rows = sorted(evidence, key=lambda row: row["path"].removeprefix("repo/") != path)  # Stable: the point's own file first.
+    for row in rows:
+        for offset, text in enumerate(str(row.get("text") or "").splitlines()):
+            if named.search(text) and row["line"] + offset <= row.get("end_line", row["line"]):
+                return row["path"].removeprefix("repo/"), row["line"] + offset
+    return None
+
+
 def file_named(workspace, path, symbol, files):
     """The workspace file a point names, when the point is about a whole file rather than a part of one.
 
@@ -141,6 +160,12 @@ def with_points(reply, workspace, evidence=()):
             else:
                 span = symbol_lines(path, workspace.read(path), symbol)
                 span = span and seen_span(path, span, evidence, symbol)
+                # Looked up, but on lines the model never saw (or not found at all): cite a shown line that names it instead.
+                shown = any(row["path"].removeprefix("repo/") == path and span and row["line"] <= span[1]
+                            and span[0] <= row.get("end_line", row["line"]) for row in evidence)
+                seen = None if shown else observed_line(symbol, path, evidence)
+                if seen:
+                    path, span = seen[0], (seen[1], seen[1])
         except (ValueError, OSError, UnicodeError):
             # Not a workspace file; it may be a retrieved reference document such as user/team.md.
             reference = next((row for row in evidence if row["path"] == point["path"]), None)

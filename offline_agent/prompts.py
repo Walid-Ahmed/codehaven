@@ -88,6 +88,10 @@ ANSWER_FROM_PRELOAD = ("For finish, put a one or two sentence overview in conten
 POINTS, POINT_CHARS, OVERVIEW_CHARS = 10, 300, 600
 # Cap, in characters, on any other final answer.
 FINAL_ANSWER_CHARS = 3000
+# Cap on the answer text of a plain question. Measured on real repositories: with room for 3,000 characters the model
+# gave the answer in two sentences and then ran on until the loop guard cut it, which also threw away the cited
+# points that come after the text. A short cap makes it close the answer and write the points.
+ANSWER_CHARS = 800
 # Answers about code cite by naming parts of it, so every answer gets real line ranges, not only explanations of named files.
 # The second sentence was added after evals on real repositories: answers there ran on with unasked background
 # ("it is a crucial part of the library...") until they looped, and pasted long code blocks instead of answering.

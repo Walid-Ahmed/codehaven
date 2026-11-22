@@ -100,7 +100,7 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
         kind = state.get("kind", "other")
         # Change requests are answered like questions: CodeHaven explains the change, with citations, and never makes it.
         question = kind in ("question", "change") and not state.get("discovery")
-        schema = cited_schema(cite_files) if question else SCHEMA
+        schema = cited_schema(cite_files, brief=kind == "question") if question else SCHEMA
         messages = state["messages"]
         if finishing:
             # A forced answer is capped so even rambling ends in a complete, valid reply.

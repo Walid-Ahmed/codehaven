@@ -77,6 +77,29 @@ class LanguageTests(unittest.TestCase):
         self.assertEqual(found.definitions["src/pricing.rs"], {"RATE": 1, "total": 3})
         self.assertEqual(expand("crate::a::{b, c::{D, E as F}}"), ["crate::a::b", "crate::a::c::D", "crate::a::c::E"])
 
+    def test_syntax_trees_handle_what_line_patterns_cannot(self):
+        go = ("package shop\n\nconst (\n\tRate = 2\n\tLimit = 9\n)\n\nvar banner = `\n}\n`\n\n"
+              "func Total(\n\tn int,\n) int {\n\t/* } */\n\treturn n * Rate\n}\n")
+        java = ("package shop;\n\npublic class Cart {\n    private int items;\n\n    /* a stray } in a comment */\n"
+                "    public Cart(int items) {\n        this.items = items;\n    }\n\n    @Override\n    public String toString(\n"
+                "            ) {\n        return \"}\";\n    }\n\n    interface Listener {\n        void changed();\n    }\n}\n")
+        rust = ("pub struct Cart<T> {\n    items: Vec<T>,\n}\n\nimpl<T: Clone> Cart<T> {\n    /* } */\n    pub fn total<F>(\n"
+                "        &self,\n        price: F,\n    ) -> usize\n    where\n        F: Fn(&T) -> usize,\n    {\n"
+                "        self.items.iter().map(price).sum()\n    }\n}\n")
+        found = OtherDependencies({"shop.go": go, "Cart.java": java, "cart.rs": rust})
+        self.assertEqual(found.parse_failures, 0)
+        self.assertEqual(found.definitions["shop.go"], {"Rate": 4, "Limit": 5, "banner": 8, "Total": 12})
+        self.assertEqual(spans(found, "shop.go")["Total"], (12, 17))
+        self.assertEqual(spans(found, "Cart.java"),
+                         {"Cart": (3, 20), "Cart.Cart": (7, 9), "Cart.toString": (11, 15), "Cart.Listener": (17, 19)})
+        self.assertEqual(spans(found, "cart.rs"), {"Cart": (1, 3), "Cart.total": (7, 15)})
+
+    def test_a_file_that_does_not_parse_falls_back_to_line_patterns(self):
+        broken = "package shop\n\nfunc Total(n int) int {\n\treturn n *\n}\n\nfunc Count() int {\n\treturn 1\n}\n@@@\n"
+        found = OtherDependencies({"shop.go": broken})
+        self.assertEqual(found.parse_failures, 1)
+        self.assertEqual(spans(found, "shop.go"), {"Total": (3, 5), "Count": (7, 9)})
+
     def test_the_map_and_retrieval_use_them(self):
         with tempfile.TemporaryDirectory() as folder:
             for name, text in {**GO, **RUST}.items():

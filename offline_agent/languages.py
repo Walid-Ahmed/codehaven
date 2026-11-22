@@ -1,10 +1,10 @@
 """Static import and definition analysis for Go, Java, and Rust. Files are read as text, never compiled or run.
 
-Python is parsed with its own ast module and JavaScript/TypeScript with tree-sitter. These three languages are
-handled here with line patterns and brace matching instead, so they need no extra packages. That is enough for
-what CodeHaven draws and retrieves: which file imports which, and where each function, method, and type starts
-and ends. It is an approximation: macros, generated code, and unusual layouts can be missed, and a brace inside
-a multi-line string or block comment can end a span early.
+Where each function, method, and type starts and ends is found with the Tree-sitter grammar of each language, the
+same way JavaScript and TypeScript are parsed, so multi-line strings, block comments, and signatures spread over
+several lines are handled. A file the grammar cannot parse cleanly, or a missing grammar package, falls back to
+line patterns and brace matching, which is an approximation: there a brace inside a multi-line string or block
+comment can end a span early. Imports are found with line patterns in both cases.
 
 What counts as an import between files:
 - Go: an import of a package in this module (from go.mod, or a folder matching the end of the import path)
@@ -13,9 +13,12 @@ What counts as an import between files:
   from the same package.
 - Rust: `mod name;` and `use crate::...`, `use super::...`, or `use self::...` paths that lead to a file.
 """
+import importlib
 import posixpath
 import re
 from pathlib import PurePosixPath
+
+from tree_sitter import Language, Parser
 
 SUFFIXES = {".go", ".java", ".rs"}
 SPAN_LINES = 3000  # The farthest a closing brace is looked for.
@@ -86,17 +89,138 @@ def expand(path):
     return [found for part in split_top(path[brace + 1:close if close > brace else len(path)]) for found in expand(prefix + part)]
 
 
+GRAMMARS = {".go": "tree_sitter_go", ".java": "tree_sitter_java", ".rs": "tree_sitter_rust"}
+JAVA_TYPES = {"class_declaration", "interface_declaration", "enum_declaration", "record_declaration", "annotation_type_declaration"}
+RUST_ITEMS = {"function_item", "struct_item", "enum_item", "union_item", "trait_item", "type_item", "static_item", "const_item"}
+RUST_VALUES = {"type_item", "static_item", "const_item"}  # Definitions, but not blocks worth showing as a span.
+_parsers = {}
+
+
+def parser(suffix):
+    """The Tree-sitter parser for a file suffix, made once; None when its grammar package cannot be loaded."""
+    if suffix not in _parsers:
+        try:
+            _parsers[suffix] = Parser(Language(importlib.import_module(GRAMMARS[suffix]).language()))
+        except Exception:  # Not installed, or built for another Tree-sitter version: the line patterns take over.
+            _parsers[suffix] = None
+    return _parsers[suffix]
+
+
+def node_name(node, field="name"):
+    """The text of a node's name field, or "" when it has none."""
+    found = node.child_by_field_name(field) if node is not None else None
+    return found.text.decode("utf-8", "replace") if found is not None else ""
+
+
+def parsed_outline(suffix, text):
+    """(definitions, spans) of one file from its syntax tree, or None when it cannot be parsed cleanly.
+
+    Names follow the line patterns' conventions: Type.method for methods, Outer.Inner for nested Java types.
+    """
+    found = parser(suffix)
+    if found is None:
+        return None
+    try:
+        root = found.parse(text.encode("utf-8")).root_node
+    except (ValueError, UnicodeError):
+        return None
+    if root.has_error:
+        return None
+    definitions, spans = {}, []
+
+    def add(symbol, node, *, span=True, shared=None):
+        """Record one symbol. shared is the name other files use for it, when that differs from needing no dot."""
+        if not symbol or symbol.endswith("."):
+            return
+        start, end = node.start_point[0] + 1, node.end_point[0] + 1
+        public = shared if shared is not None else (symbol if "." not in symbol else None)
+        if public:
+            definitions.setdefault(public, start)
+        if span:
+            spans.append({"name": symbol, "start": start, "end": end})
+
+    if suffix == ".go":
+        for node in root.named_children:
+            if node.type == "function_declaration":
+                add(node_name(node), node)
+            elif node.type == "method_declaration":
+                receiver = node.child_by_field_name("receiver")
+                owner = next((child.text.decode() for child in walk(receiver) if child.type == "type_identifier"), "") if receiver else ""
+                name = node_name(node)
+                # Another file calls a method by its short name, so that is what it is looked up by.
+                add((owner + "." if owner else "") + name, node, shared=name)
+            elif node.type in ("type_declaration", "var_declaration", "const_declaration"):
+                specs = [child for child in walk(node) if child.type in ("type_spec", "type_alias", "var_spec", "const_spec")]
+                for spec in specs:
+                    names = [child for child in spec.children_by_field_name("name")]
+                    for name in names:
+                        # A declaration of one thing is shown whole, with its keyword; a grouped one item by item.
+                        add(name.text.decode(), node if len(specs) == 1 and len(names) == 1 else spec)
+    elif suffix == ".java":
+        def visit(body, owner):
+            """Record the types and methods directly inside one type body, or at the top of the file."""
+            for node in body.named_children:
+                if node.type == "enum_body_declarations":
+                    visit(node, owner)
+                elif node.type in JAVA_TYPES:
+                    symbol = (owner + "." if owner else "") + node_name(node)
+                    add(symbol, node)
+                    inner = node.child_by_field_name("body")
+                    if inner is not None:
+                        visit(inner, symbol)
+                elif owner and node.type in ("method_declaration", "constructor_declaration") \
+                        and node.child_by_field_name("body") is not None:
+                    add(owner + "." + node_name(node), node)
+        visit(root, "")
+    else:
+        for node in root.named_children:
+            if node.type in RUST_ITEMS:
+                symbol = node_name(node)
+                add(symbol, node, span=node.type not in RUST_VALUES)
+                if node.type == "trait_item":
+                    members(node, symbol, add)
+            elif node.type == "impl_item":
+                # An impl block defines nothing itself; it names the type that the functions inside belong to.
+                kind = node.child_by_field_name("type")
+                owner = re.findall(r"[A-Za-z_]\w*", re.sub(r"<.*", "", kind.text.decode(), flags=re.S))[-1:] if kind else []
+                if owner:
+                    members(node, owner[0], add)
+    return definitions, spans
+
+
+def members(node, owner, add):
+    """Record the functions inside a Rust trait or impl block as Owner.function."""
+    body = node.child_by_field_name("body")
+    for child in body.named_children if body is not None else ():
+        if child.type in ("function_item", "function_signature_item"):
+            add(owner + "." + node_name(child), child)
+
+
+def walk(root):
+    """Every named node under root, parents before children, in source order."""
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        yield node
+        stack.extend(reversed(node.named_children))
+
+
 class OtherDependencies:
     """Edges, definitions, and spans for the Go, Java, and Rust files among files, shaped like the Python analyser's."""
 
     def __init__(self, files, manifests=None):
         """files maps paths to text. manifests maps go.mod paths to their text, which names each Go module's import prefix."""
         self.edges, self.definitions, self.spans = {}, {}, {}
-        self.parse_failures = 0
+        self.parse_failures = 0  # Files outlined with line patterns because their syntax tree had errors.
         self.files = {name: text for name, text in files.items() if PurePosixPath(name).suffix in SUFFIXES}
         self.names = set(self.files)
         for name, text in self.files.items():
-            self.outline(name, text)
+            parsed = parsed_outline(PurePosixPath(name).suffix, text)
+            if parsed is None:
+                self.parse_failures += parser(PurePosixPath(name).suffix) is not None
+                self.outline(name, text)
+            else:
+                self.definitions[name], self.spans[name] = parsed
         # (folder, module path) for each go.mod, longest folder first.
         go_modules = sorted(((posixpath.dirname(name), match[1]) for name, text in (manifests or {}).items()
                              if (match := re.search(r"^module\s+(\S+)", text, re.M))), key=lambda row: -len(row[0]))
@@ -113,7 +237,7 @@ class OtherDependencies:
             self.edges[name] = {target: sorted(symbols) for target, symbols in sorted(found.items()) if target != name}
 
     def outline(self, name, text):
-        """Where each function, method, and type of one file is: definitions (top level) and spans (all)."""
+        """The fallback outline, from line patterns: definitions (top level) and spans (all) of one file."""
         lines = text.splitlines()
         cleaned = [clean(line) for line in lines]
         suffix = PurePosixPath(name).suffix

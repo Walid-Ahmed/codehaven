@@ -1,4 +1,5 @@
 """Offline, in-memory BM25 retrieval over local reference documents."""
+import hashlib
 import json
 import math
 import re
@@ -22,6 +23,10 @@ CODE_EXTENSIONS = EXTENSIONS | JS_EXTENSIONS | {
     ".ex", ".exs", ".erl", ".hs", ".clj", ".dart",
 }
 MAX_DOCUMENTS = MAX_FILES  # The same bound as Workspace.files, so a mid-sized repository is indexed in full.
+# The most passages and bytes of text one index holds. Building the index for a project at these limits takes
+# about a quarter of a minute on a laptop; beyond them the index is reported as limited.
+MAX_PASSAGES = 40_000
+MAX_INDEX_BYTES = 25_000_000
 BUNDLED_TOPICS = {"stategraph", "checkpoint", "checkpoints", "checkpointer", "interrupt", "interrupts"}
 CODE_NAMES = {"Dockerfile", "Makefile", "CMakeLists.txt", "Justfile", "Gemfile"}
 
@@ -99,6 +104,7 @@ class KnowledgeBase:
             roots.append(("repo", self.workspace_root, CODE_EXTENSIONS))
         total_bytes = 0
         seen = set()
+        listings = []  # What was listed from the reference folder and the repository, for the stamp below.
         code_files, manifests = {}, {}
         for label, root, extensions in roots:
             root = Path(root).resolve(strict=True)
@@ -116,6 +122,8 @@ class KnowledgeBase:
             workspace = repository if label == "repo" else Workspace(root, excludes=self.excludes)
             names = workspace.files()
             self.limited |= len(names) >= MAX_FILES
+            if label != "builtin":
+                listings.append((label, workspace, names))
             for name in names:
                 if label == "repo" and Path(name).name == "go.mod":
                     try:
@@ -136,8 +144,8 @@ class KnowledgeBase:
                         continue
                 if identity in seen:
                     continue
-                # At most 8,000 passages and 5 MB of text are indexed; index_limited tells the caller when a limit cut in.
-                if self.documents >= MAX_DOCUMENTS or len(self.entries) >= 8000:
+                # At most MAX_PASSAGES passages and MAX_INDEX_BYTES of text are indexed; index_limited tells the caller when a limit cut in.
+                if self.documents >= MAX_DOCUMENTS or len(self.entries) >= MAX_PASSAGES:
                     self.limited = True
                     break
                 try:
@@ -146,7 +154,7 @@ class KnowledgeBase:
                     self.skipped += 1
                     continue
                 size = len(text.encode())
-                if total_bytes + size > 5_000_000:
+                if total_bytes + size > MAX_INDEX_BYTES:
                     self.limited = True
                     continue
                 total_bytes += size
@@ -161,13 +169,14 @@ class KnowledgeBase:
                     counts = Counter(tokens(passage))
                     if not counts:
                         continue
-                    if len(self.entries) >= 8000:
+                    if len(self.entries) >= MAX_PASSAGES:
                         self.limited = True
                         break
                     self.entries.append({"source": f"{label}/{name}", "start_line": start,
                                          "end_line": end, "text": passage,
                                          "counts": counts, "length": sum(counts.values())})
                     self.frequencies.update(counts.keys())
+        self.stamp = self.stamp_of(listings)
         self.average_length = (sum(e["length"] for e in self.entries) / len(self.entries)
                                if self.entries else 1)
         self.dependencies = PythonDependencies({name: text for name, text in code_files.items()
@@ -197,10 +206,44 @@ class KnowledgeBase:
         if self.semantic is not None:
             self.semantic.start(self.entries)  # Embeds new or changed passages in the background.
 
+    @staticmethod
+    def stamp_of(listings):
+        """A fingerprint of the listed files: their names, sizes, and modification times. Nothing is read."""
+        digest = hashlib.sha256()
+        for label, workspace, names in listings:
+            for name in names:
+                try:
+                    status = (workspace.root / name).stat()
+                    row = (label, name, status.st_size, status.st_mtime_ns)
+                except OSError:
+                    row = (label, name, None, None)
+                digest.update(repr(row).encode())
+        return digest.hexdigest()
+
+    def current_stamp(self):
+        """The fingerprint of what is on disk now, listed afresh so changed ignore rules count too."""
+        listings = []
+        directory = Path(self.directory).expanduser() if self.directory is not None else None
+        for label, root in (("user", directory), ("repo", self.workspace_root)):
+            if root is not None and Path(root).exists():
+                workspace = Workspace(root, excludes=self.excludes)
+                listings.append((label, workspace, workspace.files()))
+        return self.stamp_of(listings)
+
     def refresh(self):
-        """Rebuild the bounded local snapshot, picking up files that changed on disk since it was built."""
+        """Pick up files that changed on disk since the index was built. Returns whether it was rebuilt.
+
+        Listing the files is far cheaper than reading and indexing them again, so an unchanged project, the
+        usual case between two questions, keeps its index.
+        """
+        try:
+            if self.current_stamp() == self.stamp:
+                return False
+        except (ValueError, OSError):
+            pass  # Whatever is wrong is reported by the rebuild below.
         self.__init__(self.directory, workspace=self.workspace_root, context_budget=self.context_budget,
                       excludes=self.excludes, semantic=self.semantic)
+        return True
 
     def _expanded(self, entry, terms, definition_line=None):
         """Prefer complete syntactic symbols over arbitrary line chunks."""

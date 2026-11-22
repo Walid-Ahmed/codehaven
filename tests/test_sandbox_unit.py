@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from offline_agent.test_runner import (command, container_command, docker_environment,
                                        inspect_image, local_socket, run_tests, snapshot)
-from offline_agent.workspace import Workspace
+from offline_agent.workspace import MAX_FILES, Workspace
 
 IMAGE_ID = 'sha256:' + 'a' * 64
 
@@ -94,7 +94,7 @@ class SandboxUnitTests(unittest.TestCase):
                 snapshot(Workspace(self.root), Path(destination), 'pytest')
 
     def test_snapshot_limit_refuses_partial_project(self):
-        with patch.object(self.ws, 'files', return_value=['tests/test_ok.py'] * 1000):
+        with patch.object(self.ws, 'files', return_value=['tests/test_ok.py'] * MAX_FILES):
             with tempfile.TemporaryDirectory() as destination, self.assertRaisesRegex(ValueError, 'file limit'):
                 snapshot(self.ws, Path(destination), 'pytest')
 

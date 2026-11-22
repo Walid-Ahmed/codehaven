@@ -77,7 +77,7 @@ class GraphTests(unittest.TestCase):
                 return action("finish", content="The value is 42. [code.py:1]")
 
         output = []
-        with patch.object(self.ws, "read", wraps=self.ws.read) as read:
+        with patch.object(self.ws, "read", wraps=self.ws.read):
             result = run(Model(), self.ws, "Explain value", max_steps=4, output=output.append)
         self.assertEqual(result, 0)
         self.assertEqual(read.call_count, 1)
@@ -154,7 +154,7 @@ class GraphTests(unittest.TestCase):
                 return action("read", ("first.py", "second.py", "third.py")[len(calls)-2])
 
         output = []
-        with patch.object(self.ws, "read", wraps=self.ws.read) as read:
+        with patch.object(self.ws, "read", wraps=self.ws.read):
             result = run(Model(), self.ws, "Find entry points", max_steps=4, output=output.append)
         self.assertEqual(result, 0)
         self.assertEqual(len(calls), 4)

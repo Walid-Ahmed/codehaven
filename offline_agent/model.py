@@ -1,7 +1,11 @@
 """Ollama transport: numeric loopback only, no proxies or redirects."""
+import contextlib
+import http.client
 import ipaddress
 import json
 import re
+import socket
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,6 +32,13 @@ def read_limit(model):
 
 class InvalidReply(ValueError):
     """The model answered, but not with a usable action; the agent may ask it to correct itself."""
+
+
+class Stopped(Exception):
+    """The user stopped the answer. Not a ValueError, so no helper mistakes it for a bad reply and carries on."""
+
+    def __init__(self):
+        super().__init__("Stopped.")
 
 
 class RepeatedAnswer(InvalidReply):
@@ -236,6 +247,32 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError("Model server redirects are disabled")
 
 
+class ChatHandler(urllib.request.HTTPHandler):
+    """Opens connections like the standard handler, and lets the client keep hold of a chat's socket.
+
+    urllib hides the socket while it waits for the first byte of a reply, which with a local model can be
+    minutes of loading and prompt processing. Keeping the socket is what lets Ollama.stop() end that wait.
+    """
+
+    def __init__(self, client):
+        super().__init__()
+        self.client = client
+
+    def http_open(self, req):
+        """Open req on a connection that reports its socket to the client as soon as it is connected."""
+        client = self.client
+
+        class Connection(http.client.HTTPConnection):
+            """A plain HTTP connection that tells the client about its socket."""
+
+            def connect(self):
+                """Connect, then hand the socket over; this raises Stopped if the answer was already stopped."""
+                super().connect()
+                client.connected(self.sock)
+
+        return self.do_open(Connection, req)
+
+
 class Ollama:
     """Client for one local Ollama server. Only plain HTTP on a numeric loopback address is accepted."""
 
@@ -270,7 +307,35 @@ class Ollama:
         self.timeout = timeout
         # An empty ProxyHandler ignores the proxy environment variables, and NoRedirect refuses redirects,
         # so every request goes straight to the loopback address and nowhere else.
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(), ChatHandler(self))
+        # Stopping an answer: the flag stop() sets, the thread a chat is running on, and that chat's socket.
+        self.stopping = threading.Event()
+        self.chat_thread = self.chat_socket = None
+
+    def connected(self, sock):
+        """Called for every new connection: keep a chat's socket, so stop() can end a wait on it."""
+        if threading.get_ident() != self.chat_thread:
+            return  # Another request, such as an embedding, which stop() leaves alone.
+        self.chat_socket = sock
+        # stop() sets the flag before it looks for the socket, so one of the two always notices the other.
+        if self.stopping.is_set():
+            raise Stopped()
+
+    def stop(self):
+        """Stop the chat in progress, and refuse later ones until allow() is called. Safe from any thread.
+
+        Closing the connection is what stops Ollama generating, and it ends a wait for a model that is still
+        loading or reading its prompt, which a flag checked between pieces of the reply would not.
+        """
+        self.stopping.set()
+        sock = self.chat_socket
+        if sock is not None:
+            with contextlib.suppress(OSError):
+                sock.shutdown(socket.SHUT_RDWR)
+
+    def allow(self):
+        """Let chats run again after a stop(); called when a new request begins."""
+        self.stopping.clear()
 
     def request(self, path, payload=None):
         """Send one request (GET without a payload, POST with one) and return the JSON object in the reply."""
@@ -293,8 +358,11 @@ class Ollama:
     def stream_chat(self, payload, on_text=None):
         """POST a streaming chat, guard the finish answer against loops, and pass its text to on_text.
 
-        Raising inside the read loop closes the connection, which stops Ollama generating.
+        Raising inside the read loop closes the connection, which stops Ollama generating. stop(), called from
+        another thread, ends this call with Stopped whether it is waiting for the reply or reading it.
         """
+        if self.stopping.is_set():
+            raise Stopped()
         req = urllib.request.Request(self.endpoint + "/api/chat", data=json.dumps(payload).encode(),
                                      headers={"Content-Type": "application/json"})
         guard = RepetitionGuard()
@@ -307,10 +375,13 @@ class Ollama:
 
         decoder = FinishContent(answer_text)
         pieces, received, final = [], 0, {}
+        self.chat_thread = threading.get_ident()
         try:
             with self.opener.open(req, timeout=self.timeout) as response:
                 # Ollama streams one JSON object per line.
                 for raw in response:
+                    if self.stopping.is_set():
+                        raise Stopped()
                     received += len(raw)
                     if received > MAX_RESPONSE_BYTES:
                         raise ValueError("Model response exceeds 2 MB")
@@ -334,8 +405,19 @@ class Ollama:
                         final = chunk
                         break
             self.last_raw = "".join(pieces)
-        except (urllib.error.URLError, TimeoutError) as exc:
-            raise ValueError(f"Local Ollama request failed: {exc}. Start Ollama and check the installed model.") from exc
+        except Stopped:
+            raise
+        except Exception as exc:
+            # A connection closed by stop() fails in whatever way the read happened to be waiting.
+            if self.stopping.is_set():
+                raise Stopped() from None
+            if isinstance(exc, (urllib.error.URLError, TimeoutError)):
+                raise ValueError(f"Local Ollama request failed: {exc}. Start Ollama and check the installed model.") from exc
+            raise
+        finally:
+            self.chat_thread = self.chat_socket = None
+        if self.stopping.is_set():
+            raise Stopped()  # The closed connection read as a reply that simply ended early.
         return {**final, "message": {"content": "".join(pieces)}}
 
     def check_model(self):

@@ -218,6 +218,7 @@ The answer checks are the same for both languages. Answer quality in Arabic has 
 - The server listens on `127.0.0.1` only.
 - Every request must carry a secret token from the link printed in the terminal and name this machine in its Host header, so another website open in your browser cannot use the server to read your files.
 - Answers stream to the page as the model writes them.
+- **Stop** ends an answer or flashcards in progress. The server closes its connection to Ollama ([model.py](../offline_agent/model.py)), which stops generation and also ends the wait for a model that is still loading. A stopped question is not remembered or saved.
 - An uploaded file is copied to a private temporary folder and deleted when you open something else or stop the server.
 
 ## Code map

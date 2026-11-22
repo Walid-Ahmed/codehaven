@@ -42,7 +42,11 @@ Since v0.9 CodeHaven is read-only and focused on understanding code; editing was
 - Run the evals again on the converted question sets, and record a new baseline for the default model.
 - Reduce padded answers. The model often adds invented reference lists after a correct answer; they are flagged as unverified, but they make answers noisy.
 - Evaluate on real repositories. Both eval repositories are small, and the questions are short.
-- Add a Stop button to the browser page for an answer in progress.
+
+Done from this list: the browser page has a Stop button. It closes the connection to Ollama, which ends
+generation and also ends the wait for a model that is still loading or reading its prompt. A stopped question
+is not added to follow-up memory, long-term memory, or the saved chat. Indexing and downloading a repository
+cannot be stopped this way.
 
 ## Version 0.2.1: approved unittest execution
 

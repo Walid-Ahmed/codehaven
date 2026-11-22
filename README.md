@@ -582,7 +582,7 @@ python3 -m offline_agent.evaluation --tasks evals/bookings_tasks.json --repo eva
 
 See [the implementation plan and roadmap](docs/PLAN.md) for architecture, acceptance criteria, and next steps. API integration follows [Ollama chat](https://docs.ollama.com/api/chat) and [structured outputs](https://docs.ollama.com/capabilities/structured-outputs).
 
-**Real repositories.** Three more question sets run on real open-source libraries: requests, click, and express, each pinned to one release. They are not kept in this repository, so download them once, while online:
+**Real repositories.** Six more question sets run on real open-source libraries, each pinned to one release: requests, click, and express, and a held-out group of flask, cobra, and axios whose questions were written before any change was tried on them. They are not kept in this repository, so download them once, while online:
 
 ```sh
 python3 scripts/fetch_eval_repos.py

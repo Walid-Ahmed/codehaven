@@ -39,8 +39,7 @@ Implemented a typed in-memory StateGraph with model, read, write, and limit node
 
 Since v0.9 CodeHaven is read-only and focused on understanding code; editing was removed (see Version 0.9). Next, in order:
 
-- Find answers that are one line somewhere in the project, such as a setting's default or which package an export comes from. The three questions still failing on the real repositories are of this kind: the question names no function, so no definition is shown, and keyword retrieval brings examples and documentation first.
-- Write a question set the answer-quality changes of v0.11 never saw, and score it once. The 34 real-repository questions were also the ones the changes were worked out on.
+- Find answers that are one line somewhere in the project, such as a setting's default or which package an export comes from. The questions still failing on the real repositories, three on the first set and three on cobra in the held-out set, are of this kind: the question names no function, so no definition is shown, and keyword retrieval brings examples and documentation first.
 - Evaluate on larger repositories. The real-repository evals use libraries of 100 to 220 files; the index now takes 5,000.
 - Follow Go, Java, and Rust imports from the syntax tree. Their functions and types are parsed with Tree-sitter, but their imports are still read with line patterns.
 - Try the VS Code extension inside VS Code. Its logic is tested against a stand-in for the editor's API only.
@@ -251,7 +250,7 @@ Everything in the earlier "Next" list was done, and each change that touches ans
 - **Evals on real repositories.** 34 questions on pinned releases of requests, click, and express. The baseline was 24 of 34. Nearly every answer came at the model's first step, from whatever retrieval had brought, and was a guess when that did not hold the answer.
 - **Named definitions.** The function, method, or class a question names is looked up in the parsed code and shown with line numbers before the first step, with the values of the constants it uses and, for a class, the classes that inherit from it.
 - **Padded answers.** The answer text of a plain question is capped at 800 characters. Before, a correct two-sentence answer ran on until the loop guard cut it, and the citations that follow the text were lost with it. A point that names the right thing in the wrong file now cites a line the model was shown.
-- **Result.** 31 of 34 on the real repositories, 21 of them passing CodeHaven's own answer checks (16 before), in two thirds of the time.
+- **Result.** 31 of 34 on the real repositories, 21 of them passing CodeHaven's own answer checks (16 before), in two thirds of the time. On 34 held-out questions about flask, cobra, and axios, written before any run, the score went from 28 to 30: the gain is real and smaller than on the questions the changes were worked out on.
 - **Also in this version:** a Stop button; a call trace helper; file review that sees the signatures of called functions; an index of up to 5,000 files that is rebuilt only when a file changed; Tree-sitter outlines for Go, Java, and Rust; `--start-ollama` and a fuller `--doctor`; saving chats and flashcards; a VS Code extension; tests on macOS and Windows as well as Linux, which found and fixed five Windows problems; and the page and the agent module split into smaller files.
 
 Not done: the keyword index is not saved to disk between runs, because that would put the text of the code on disk outside the repository to save a few seconds; CodeHaven is not published to PyPI; and `langsmith` stays a dependency, because LangGraph installs it in any case and the one thing CodeHaven imports from it is the switch that turns tracing off.

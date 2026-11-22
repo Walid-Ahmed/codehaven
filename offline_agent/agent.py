@@ -15,7 +15,7 @@ from .evidence import retain, discovery_task, check_answer, inventory
 from .model import PROMPT_BUDGET, InvalidReply, RepeatedAnswer, compact_messages, read_limit
 from .workspace import line_range, sections
 from .prompts import (  # noqa: F401  (also imported from here by the tests and other modules)
-    ACTIONS, ANSWER_FROM_PRELOAD, ANSWER_WITH_POINTS, CHANGES_ANSWER, CHANGE_ADVICE, DISCOVERY_SYSTEM, EDIT_REQUEST,
+    ACTIONS, ANSWER_FROM_PRELOAD, ANSWER_WITH_POINTS, BRIEF_ANSWER, CHANGES_ANSWER, CHANGE_ADVICE, DISCOVERY_SYSTEM, EDIT_REQUEST,
     ENTRY_POINT_GUIDANCE, FINAL_ANSWER_CHARS, FINISH_NOW, POLITE, PRELOAD_FILES, QUESTION, RELOAD_SECONDS, REVIEW,
     SCHEMA, SYSTEM, POINTS, POINT_CHARS, OVERVIEW_CHARS,
 )
@@ -560,7 +560,8 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
         if numbered and preloaded:
             messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + guide + advice}
         elif numbered:
-            messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + ANSWER_WITH_POINTS + advice}
+            brief = BRIEF_ANSWER if kind == "question" else ""
+            messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + ANSWER_WITH_POINTS + brief + advice}
     # Joined to the last message for the same reason. English tasks get nothing added, so their prompts are unchanged.
     if in_arabic:
         messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + arabic.ANSWER_IN_ARABIC}

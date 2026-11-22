@@ -2,11 +2,11 @@
 import contextlib
 import io
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from offline_agent import doctor
 from offline_agent.cli import main
+from offline_agent.gui import page_text
 
 
 class FakeServer:
@@ -98,7 +98,7 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("--start-ollama", errors.getvalue())
 
     def test_the_page_can_save_a_chat_and_flashcards(self):
-        page = Path(__file__).resolve().parents[1].joinpath("offline_agent", "gui.html").read_text(encoding="utf-8")
+        page = page_text()
         for needed in ('id="save-chat"', 'id="cards-save"', "function chatMarkdown()", '"text/tab-separated-values"'):
             self.assertIn(needed, page)
 

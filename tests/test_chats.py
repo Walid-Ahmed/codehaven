@@ -1,4 +1,5 @@
 """Saved chats: kept privately outside the repository, reopened with their memory, and off with --no-remember."""
+import os
 import stat
 import tempfile
 import unittest
@@ -49,7 +50,8 @@ class ChatsTests(unittest.TestCase):
         chats.record(first, "What is RATE?", "It is 0.1 (pricing.py:1).", ["an issue"])
         chats.record(first, "And why?", "No reason is given.")
         self.assertEqual(sorted(path.name for path in self.root.iterdir()), ["pricing.py"])
-        self.assertEqual(stat.S_IMODE(chats.path.stat().st_mode), 0o600)
+        if os.name != "nt":  # Windows keeps a user's files private through the profile folder, not file modes.
+            self.assertEqual(stat.S_IMODE(chats.path.stat().st_mode), 0o600)
         again = Chats(Workspace(self.root), self.folder)
         self.assertEqual([(row["title"], row["questions"]) for row in again.listing()], [("What is RATE?", 2)])
         self.assertEqual(again.get(first)["turns"][0]["issues"], ["an issue"])

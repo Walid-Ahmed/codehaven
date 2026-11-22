@@ -1,4 +1,5 @@
 """Search by meaning: optional, local, mixed with key-word ranking, and never able to fail an answer."""
+import os
 import json
 import stat
 import tempfile
@@ -69,7 +70,8 @@ class SemanticTests(unittest.TestCase):
         before = sorted(path.name for path in self.root.iterdir())
         self.knowledge(cache=self.cache)
         self.assertEqual(sorted(path.name for path in self.root.iterdir()), before)
-        self.assertEqual(stat.S_IMODE(self.cache.stat().st_mode), 0o600)
+        if os.name != "nt":  # Windows keeps a user's files private through the profile folder, not file modes.
+            self.assertEqual(stat.S_IMODE(self.cache.stat().st_mode), 0o600)
         self.assertNotIn(b"forfeit", self.cache.read_bytes())  # Numbers and hashes only, never code text.
         self.client.calls.clear()
         base, semantic = self.knowledge(cache=self.cache)

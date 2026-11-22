@@ -50,6 +50,9 @@ from .semantic import Semantic
 from .workspace import MAX_BYTES, MAX_FILES, Workspace
 
 PAGE = Path(__file__).with_name("gui.html")
+# The page is kept as four files and served as one: each mark in the markup or the script is replaced by a file.
+# The order matters: the script holds the mark for the Arabic sentences.
+PAGE_PARTS = (("/*__STYLE__*/", "gui.css"), ("/*__SCRIPT__*/", "gui.js"), ("/*__ARABIC__*/", "gui_arabic.js"))
 FILE_CONTEXT, FILE_LINES = 6, 400  # Lines shown around a citation, and the most one request returns.
 # Limits: folders listed by the folder browser, bytes in a JSON request, characters kept of an uploaded file's name.
 DIRECTORY_ENTRIES = 400
@@ -62,6 +65,14 @@ OWNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 REPOSITORY = re.compile(r"[A-Za-z0-9._-]{1,100}")
 SEMANTIC_WAIT = 15  # Seconds indexing waits for meaning search; the rest is prepared in the background.
 CLONE_OFF = "Cloning from GitHub is off, so CodeHaven stays offline. Restart it with --allow-clone to turn it on."
+
+
+def page_text():
+    """The whole page as one self-contained document: markup, styles, script, and Arabic sentences."""
+    text = PAGE.read_text(encoding="utf-8")
+    for mark, name in PAGE_PARTS:
+        text = text.replace(mark, PAGE.with_name(name).read_text(encoding="utf-8"))
+    return text
 
 
 class Busy(Exception):
@@ -701,7 +712,7 @@ def make_handler(app, token, port_holder):
                 if url.path == "/":
                     # A new nonce for every page load: it goes into the page's script tag and into the policy header.
                     nonce_holder["nonce"] = secrets.token_urlsafe(16)
-                    page = PAGE.read_text(encoding="utf-8").replace("__NONCE__", nonce_holder["nonce"])
+                    page = page_text().replace("__NONCE__", nonce_holder["nonce"])
                     self.send(200, page.encode(), "text/html")
                 elif url.path == "/api/status":
                     self.send(200, app.summary())

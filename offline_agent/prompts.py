@@ -89,7 +89,11 @@ POINTS, POINT_CHARS, OVERVIEW_CHARS = 10, 300, 600
 # Cap, in characters, on any other final answer.
 FINAL_ANSWER_CHARS = 3000
 # Answers about code cite by naming parts of it, so every answer gets real line ranges, not only explanations of named files.
-ANSWER_WITH_POINTS = ("For finish, answer the task directly in content. In points give one entry per code part the answer relies on: "
+# The second sentence was added after evals on real repositories: answers there ran on with unasked background
+# ("it is a crucial part of the library...") until they looped, and pasted long code blocks instead of answering.
+ANSWER_WITH_POINTS = ("For finish, answer the task directly in content, in one to three sentences that give the exact names, numbers, "
+                      "and strings from the code. Do not paste code blocks, and do not add background the task did not ask for. "
+                      "In points give one entry per code part the answer relies on: "
                       "its path, its name exactly as written in the code (such as checkout_total or Store.add) or, for a whole "
                       "file, the file name, and what it shows.")
 # CodeHaven never writes files, so a change request gets an explanation of the change instead.

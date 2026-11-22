@@ -30,6 +30,7 @@ Watch the [narrated demo video on YouTube](https://youtu.be/d18wHCz8LFs) (or the
 | "Review `inventory/store.py`" | [Likely bugs](#review-a-file), one function at a time, most serious first |
 | "Which functions have no tests?" | [A list of test gaps](#test-gaps-and-a-project-tour), instantly, with no model |
 | "Give me a project tour" | An ordered reading list of up to 8 files |
+| "Trace `checkout_total`" | [The calls below it](#trace-a-function), step by step, and who calls it |
 | "اشرح الدالة `checkout_total`" | [The answer in Arabic](#ask-in-arabic), with the same checked citations |
 
 In the browser page you can also draw a **structure map** of your files, make **flashcards** to study them, chat about a [notebook or PDF](#notebooks-and-pdfs), and turn a [screenshot of code](#read-code-from-a-picture) into a file. CodeHaven [remembers checked answers](#long-term-memory) and [your chats](#saved-chats) between sessions, on your computer only.
@@ -40,7 +41,7 @@ In the browser page you can also draw a **structure map** of your files, make **
 - [How it is built](#how-it-is-built)
 - [Chat in your browser](#chat-in-your-browser)
 - [Use it from the terminal](#use-it-from-the-terminal)
-- Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning) · [Arabic](#ask-in-arabic)
+- Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Call trace](#trace-a-function) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning) · [Arabic](#ask-in-arabic)
 - Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.10 does](#what-v010-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
 - [Development](#development)
 - [Technical report](docs/TECHNICAL_REPORT.md)
@@ -118,6 +119,7 @@ No tool writes files. `edit` and `write` do not exist, and the model is correcte
 | Git changes | Yes | Reads the diff with read-only git commands, then explains it |
 | File review | Yes | One function per model call, because a small model shown a whole file says "looks fine" |
 | Project tour | Yes | The order comes from the import graph; the model adds one sentence per file |
+| Call trace | Yes | The calls and callers come from parsed code; the model adds one sentence per function |
 | Flashcards | Yes | The model writes the cards; the lines each answer is about are looked up |
 | Test gaps | No | Lists public functions that no test file mentions |
 | Structure map | No | Draws calls and imports from parsed code |
@@ -218,6 +220,29 @@ Two answers come from parsing the whole project rather than from searching it:
 - **Project tour.** "Give me a project tour" returns an ordered reading list of up to 8 files: the README, then the entry point (the file that reaches the most of the project through its imports), then what it imports, most widely used first. The order and the reason for each step come from the import graph; the local model adds one sentence per file. Tests are left out. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust.
 
 Both have buttons on the empty chat in the browser page, and neither is saved to long-term memory, because a saved copy would not notice a new test or file.
+
+## Trace a function
+
+```sh
+codehaven --workspace ~/dev/project 'Trace checkout_total'
+codehaven --workspace ~/dev/project 'What happens when Store.add is called?'
+```
+
+CodeHaven lists the functions the named one calls, the functions those call, and where it is called from:
+
+```text
+Call path of checkout_total: 3 functions, up to 3 calls deep, found by parsing the code.
+1. inventory/pricing.py:15-18 checkout_total: Applies the discount to the subtotal and returns it with tax.
+  2. inventory/pricing.py:5-8 apply_discount (called by checkout_total): ...
+  3. inventory/pricing.py:11-12 with_tax (called by checkout_total): ...
+Called from: app/main.py:21 in checkout
+```
+
+- **The path is parsed, not guessed.** The order, the line ranges, and the callers come from the parsed code. The local model writes only the one sentence after each function, from that function alone.
+- **Limits.** Up to 3 calls deep and 8 functions; the answer says how many calls were left out, and you can trace one of them by name.
+- **What is followed.** A call to a function in the same file, in a file it imports, or to the only function of that name in the project. `self.add()` means the same class. A call on another object, such as `file.flush()`, is not followed, and neither are calls through a variable, a decorator, or inheritance. A name inside a string or a comment is not a call.
+- **Same name twice.** Name the method with its class (`Store.add`); otherwise the first match is traced and the others are listed.
+- Works for Python, JavaScript, TypeScript, Go, Java, and Rust. A question with a condition, such as "what happens when `add` is called with a negative price?", is answered by the normal workflow instead.
 
 ## Notebooks and PDFs
 

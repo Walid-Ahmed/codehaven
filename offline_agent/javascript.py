@@ -1,4 +1,5 @@
 """Static JavaScript/TypeScript syntax analysis. Never runs Node or project code."""
+import re
 import posixpath
 from collections import defaultdict
 from pathlib import PurePosixPath
@@ -98,6 +99,20 @@ class JavaScriptDependencies:
                     parent = node.parent
                     if parent and parent.type == 'export_statement' and self.text(parent).lstrip().startswith('export default '):
                         definitions['default'] = start
+                # A function assigned to a property, the CommonJS way: exports.parse = function ..., res.send = function ...,
+                # or Router.prototype.use = function .... Named parse, res.send, and Router.use.
+                if node.type == 'assignment_expression':
+                    left, right = node.child_by_field_name('left'), node.child_by_field_name('right')
+                    if (left is not None and right is not None and left.type == 'member_expression'
+                            and right.type in {'function_expression', 'arrow_function', 'generator_function'}):
+                        owner = self.text(left.child_by_field_name('object'))
+                        short = self.text(left.child_by_field_name('property'))
+                        if short and re.fullmatch(r'[\w$.]+', owner or ''):
+                            owner = owner.removesuffix('.prototype')
+                            exported = owner in {'exports', 'module.exports'}
+                            start, end = node.start_point.row + 1, node.end_point.row + 1
+                            definitions.setdefault(short, start)
+                            spans.append({'name': short if exported else f'{owner}.{short}', 'start': start, 'end': end})
             # Every definition of the file is known now, so each exported alias can point at its local definition.
             for exported, local in exported_aliases:
                 if exported and local in definitions:

@@ -8,7 +8,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from . import arabic, changes, insights
+from . import arabic, changes, insights, trace
 from .review import review
 from .test_runner import DEFAULT_IMAGE, command, run_tests
 from .evidence import NEGATED_EDIT, retain, discovery_task, check_answer, inventory
@@ -888,7 +888,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                     "final_text": str(exc), "issues": [], "kind": "question"}
         except (ValueError, OSError) as exc:
             output(f"Could not read the changes with git ({exc}); answering from the files instead.")
-    # Phase 3: shortcuts that return without running the graph: a file review, test gaps, or a project tour.
+    # Phase 3: shortcuts that return without running the graph: a file review, a call trace, test gaps, or a project tour.
     # Some requests have a purpose-built answer that does not go through the general workflow.
     found = None
     reviewed = named_files(task, files)[:1] or ([focus_file] if focus_file in files else [])
@@ -900,6 +900,8 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
             found = review(model, workspace, reviewed[0], spans=spans, output=output, in_arabic=in_arabic)
         except (ValueError, OSError, UnicodeError) as exc:
             found = {"text": f"{reviewed[0]} could not be reviewed: {exc}", "evidence": []}
+    elif report is None and knowledge is not None and (traced := trace.requested(task)):
+        found = trace.trace(model, workspace, knowledge, traced, output, in_arabic=in_arabic)
     elif wanted == "gaps" and not named_files(task, files):
         found = insights.test_gaps(workspace, knowledge, in_arabic=in_arabic)
     elif wanted == "tour":

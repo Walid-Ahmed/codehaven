@@ -105,10 +105,18 @@ class EvaluationTests(unittest.TestCase):
         model = Reloading([action("read", "inventory/store.py"), action("finish", content="KeyError [inventory/store.py:18-20]")])
         self.assertEqual(evaluate_task(TASKS["remove-missing"], model, REPO)["reloads"], 1)  # The first load is expected.
 
-    def test_wrong_answer_and_errors_fail(self):
+    def test_a_pass_that_needs_codehavens_added_lines_is_recorded(self):
+        # 0.08 is right, and the line CodeHaven cites for it names config.py, which the question also asks for.
         result = evaluate_task(TASKS["tax-rate"], ScriptedModel([action("finish", content="It is 0.08.")]), REPO)
+        self.assertTrue(result["passed"])
+        self.assertFalse(result["passed_on_model_text"])
+        self.assertIn("config.py", result["answer"])
+
+    def test_wrong_answer_and_errors_fail(self):
+        result = evaluate_task(TASKS["tax-rate"], ScriptedModel([action("finish", content="It is 0.25.")]), REPO)
         self.assertFalse(result["passed"])
-        self.assertEqual(result["failures"], ["answer lacks /config\\.py/"])
+        self.assertEqual(result["failures"], ["answer lacks /0\\.08/", "answer lacks /config\\.py/"])
+        self.assertIn("Answer check: The answer reports '0.25', which is on no line the model was shown.", result["log"])
         result = evaluate_task(TASKS["tax-rate"], ScriptedModel([{"action": "x"}, {"action": "x"}]), REPO)
         self.assertEqual(result["exit_code"], 1)
         self.assertTrue(result["failures"][0].startswith("error: Model returned an invalid action twice"))

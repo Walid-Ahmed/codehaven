@@ -628,7 +628,7 @@ class LoopTests(TempWorkspace):
         for name in ("a.py", "b.py"):
             (self.root / name).write_text("x = 1\n")
         model = ScriptedModel([action("read", "a.py"), action("read", "b.py"), action("read", "a.py"), action("finish", content="Done.")])
-        with patch.object(self.ws, "read", wraps=self.ws.read) as read:
+        with patch.object(self.ws, "page", wraps=self.ws.page) as read:  # page is the read tool's way in.
             run(model, self.ws, "Summarize things", output=lambda _: None)
         self.assertEqual(read.call_count, 2)
         self.assertEqual(len(model.calls), 4)
@@ -638,7 +638,7 @@ class LoopTests(TempWorkspace):
         (self.root / "other.py").write_text("y = 2\n" * 900)
         model = ScriptedModel([action("read", "big.py"), action("read", "other.py"), action("read", "big.py"), action("finish", content="Done.")])
         model.prompt_budget = 8000
-        with patch.object(self.ws, "read", wraps=self.ws.read) as read:
+        with patch.object(self.ws, "page", wraps=self.ws.page) as read:  # page is the read tool's way in.
             run(model, self.ws, "Summarize things", output=lambda _: None)
         self.assertEqual(read.call_count, 3)
 

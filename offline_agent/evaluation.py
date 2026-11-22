@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .agent import Session
+from .answers import MENTION_HEADING, VALUE_HEADING
 from .knowledge import KnowledgeBase
 from .model import MODEL, PROMPT_BUDGET, Ollama
 from .workspace import Workspace
@@ -133,6 +134,7 @@ def evaluate_task(task, model, repo):
                           max_steps=task.get("max_steps", 12), confirm_tests=lambda: False, output=log.append)
         turns = [task] + task.get("followups", [])
         answers, failures, exit_code, steps = [], [], 0, 0
+        own = []  # What the model's text alone fails: CodeHaven's added sections removed.
         for number, turn in enumerate(turns, 1):
             label = f"turn {number}: " if len(turns) > 1 else ""
             answer = ""
@@ -148,14 +150,27 @@ def evaluate_task(task, model, repo):
                 exit_code, steps = 1, max(steps, metered.calls)
                 failures.append(f"{label}error: {exc}")
             failures += [label + failure for failure in score(turn, answer)]
+            own += [label + failure for failure in score(turn, model_text(answer))]
             answers.append(answer if len(turns) == 1 else f"Q{number}: {turn['task']}\nA{number}: {answer}")
         changed = changed_files(repo, root)
         failures += [f"{name} changed, but CodeHaven must never change files" for name in changed]
     return {"id": task["id"], "passed": not failures, "exit_code": exit_code, "steps": steps, "changed": changed,
+            "passed_on_model_text": not failures and not own,
             "turns": len(turns), "reloads": metered.reloads, "log": [str(line) for line in log], "replies": metered.replies,
             "prompt_tokens": metered.prompt_tokens, "generated_tokens": metered.generated_tokens,
             "model_seconds": round(metered.model_seconds, 2), "seconds": round(time.monotonic() - started, 2),
             "failures": failures, "answer": "\n\n".join(answers)[:4000]}
+
+
+def model_text(answer):
+    """The answer without the sections CodeHaven adds after it (citations of mentioned names and of reported values).
+
+    Those sections are true and help the reader, and they can name the file a question asks for. Scoring this text as
+    well shows whether a pass came from the model's own answer.
+    """
+    for heading in (MENTION_HEADING, VALUE_HEADING):
+        answer = answer.split("\n\n" + heading)[0]
+    return answer
 
 
 def summarize(results):
@@ -163,6 +178,7 @@ def summarize(results):
     count = len(results)
     return {"tasks": count, "passed": sum(r["passed"] for r in results),
             "verified": sum(r["exit_code"] == 0 for r in results), "reloads": sum(r.get("reloads", 0) for r in results),
+            "passed_on_model_text": sum(r.get("passed_on_model_text", r["passed"]) for r in results),
             "mean_steps": round(sum(r["steps"] for r in results) / count, 2) if count else 0,
             "prompt_tokens": sum(r["prompt_tokens"] for r in results),
             "generated_tokens": sum(r["generated_tokens"] for r in results),
@@ -232,7 +248,8 @@ def main(argv=None):
         return 130
     summary = summarize(results)
     print("\n" + table(results))
-    print(f"\nPassed {summary['passed']}/{summary['tasks']}; {summary['verified']} also passed CodeHaven's own answer checks; "
+    print(f"\nPassed {summary['passed']}/{summary['tasks']} ({summary['passed_on_model_text']} on the model's text alone); "
+          f"{summary['verified']} also passed CodeHaven's own answer checks; "
           f"mean steps {summary['mean_steps']}; "
           f"tokens {summary['prompt_tokens']:,} prompt / {summary['generated_tokens']:,} generated; {summary['seconds']}s")
     report = {"model": args.model, "started": started, "tasks_file": args.tasks,

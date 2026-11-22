@@ -2,6 +2,7 @@
 import json
 import re
 
+from .evidence import CITATION
 from .prompts import ACTIONS, ANSWER_CHARS, FINAL_ANSWER_CHARS, OVERVIEW_CHARS, POINT_CHARS, POINTS, SCHEMA
 from .workspace import line_range, symbol_lines
 
@@ -188,6 +189,84 @@ def file_named(workspace, path, symbol, files):
     # Accepted only when exactly one workspace file matches the name.
     matches = [f for f in files[0] if f == name or f.endswith("/" + name)]
     return matches[0] if len(matches) == 1 else None
+
+
+# Literal values an answer states as facts: a quoted string, or a number with two or more digits or a dot in it
+# (0.08, 3.1.0, 302). Single digits and booleans are left out: they are often worked out rather than written in
+# the code (cobra's ShellCompDirectiveError is 1 << iota), so a missing one would be a false alarm.
+QUOTED_VALUE = re.compile(r"""(?<![\w])['"]([^'"\n]{2,40})['"](?![\w])""")
+NUMBER_VALUE = re.compile(r"(?<![\w.:/-])(\d+\.\d+(?:\.\d+)*|\d{2,})(?![\w.]*\w)")
+# A number right after one of these words is a line number the answer mentions, not a value from the code.
+LINE_WORD = re.compile(r"\b(?:lines?(?:\s+(?:are|is|from|between))?|at|to|through|and)\s*$|-\s*$", re.I)
+# Neither is the first number of a range such as "348-351", nor a percentage, which the code writes as a fraction.
+NOT_A_VALUE_AFTER = re.compile(r"\s*(?:-\s*\d|%|percent\b)", re.I)
+# Paths and file names are not values; citations already check those.
+PATH_LIKE = re.compile(r"[/\\]|\.[A-Za-z]{1,5}$")
+# How far around a cited range a value may sit: answers cite a definition and quote a value a line or two away.
+VALUE_REACH = 3
+VALUE_HEADING = "Where the values this answer reports are in the code (cited by CodeHaven):"
+
+
+def literal_values(answer, task=""):
+    """(kind, value) for each literal an answer reports, once each, without those the question itself states."""
+    prose = CITATION.sub(" ", answer)
+    found = []
+    for value in QUOTED_VALUE.findall(prose):
+        if not PATH_LIKE.search(value) and value.strip() == value:
+            found.append(("text", value))
+    for match in NUMBER_VALUE.finditer(prose):
+        if not (LINE_WORD.search(prose[max(0, match.start() - 16):match.start()])
+                or NOT_A_VALUE_AFTER.match(prose, match.end())):
+            found.append(("number", match.group(1)))
+    unique = []
+    for kind, value in found:
+        if (kind, value) not in unique and not contains(kind, value, task):
+            unique.append((kind, value))
+    return unique
+
+
+def contains(kind, value, text):
+    """True when value appears in text: a number not inside a longer number, a string exactly.
+
+    Only digits bound a number, so 422 is found in HTTP_422_UNPROCESSABLE_ENTITY, a constant that holds it.
+    """
+    if kind == "number":
+        return re.search(rf"(?<![\d.]){re.escape(value)}(?!\d|\.\d)", text) is not None
+    return value in text
+
+
+def check_values(answer, task, workspace, evidence):
+    """Check each literal value an answer reports against the code. Returns (citation lines to add, invented values).
+
+    A value on or near a line the answer cites is fine. A value the model was shown, but on a line the answer does
+    not cite, gets a citation of the line it is on, so the answer can be checked where the value really is; nothing
+    is flagged, because the answer is often right and only cited the wrong line. A value on no line the model was
+    shown was not read from the code: it is returned as invented, and the answer is then marked unverified.
+    The check cannot tell a value read from the wrong place, such as a default from a neighbouring class, from the
+    right one; it confirms where a value comes from, not that it answers the question.
+    """
+    files = {}
+    near = []
+    for path, start, end in CITATION.findall(answer):
+        row = {"path": path.removeprefix("repo/"), "line": max(1, int(start) - VALUE_REACH),
+               "end_line": int(end or start) + VALUE_REACH}
+        near.append(row_text(row, workspace, files))
+    near_text = "\n".join(near)
+    shown = []
+    for row in evidence:
+        text = row_text(row, workspace, files)
+        shown += [(row["path"].removeprefix("repo/"), row["line"] + offset, line)
+                  for offset, line in enumerate(text.splitlines()) if row["line"] + offset <= row.get("end_line", row["line"])]
+    added, invented = [], []
+    for kind, value in literal_values(answer, task):
+        if contains(kind, value, near_text):
+            continue
+        where = next(((path, number) for path, number, line in shown if contains(kind, value, line)), None)
+        if where is None:
+            invented.append(value)
+        elif all(where != (path, number) for path, number, _ in added):
+            added.append((where[0], where[1], value))
+    return [f"- {path}:{number} `{value}`" for path, number, value in added], invented
 
 
 def with_points(reply, workspace, evidence=()):

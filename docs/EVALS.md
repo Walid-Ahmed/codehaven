@@ -41,6 +41,7 @@ All runs: `qwen2.5-coder:7b`, default settings, an Apple M4 with 24 GB, no other
 | 2026-11-22 | v0.11.0 run again, as the baseline for v0.12 | 12/12 | 10/11 | 9/11 | 31/34 (91%) | 21/34 |
 | 2026-11-22 | + quoted settings and dotted names searched, evidence merged instead of dropped, uncited names cited, exported JavaScript members found | 12/12 | 10/11 | 10/11 | 32/34 (94%) | 31/34 |
 | 2026-11-22 | + project files up to 1 MB, and names searched within a named file (v0.12.0) | 12/12 | 10/11 | 10/11 | 32/34 (94%) | 31/34 |
+| 2026-11-22 | + values an answer reports looked for in the code (v0.13.0) | 12/12 | 10/11 | 10/11 | 32/34 (94%) | 31/34 |
 
 Notes on the baseline:
 
@@ -100,6 +101,9 @@ FastAPI 0.115.6 has 2,338 visible files, ten times as many as the other reposito
 | 2026-11-22 | v0.11.0 | 9/12 | 7/12 | 587 s |
 | 2026-11-22 | v0.12, before seeing files over 64 KB | 9/12 | 8/12 | 531 s |
 | 2026-11-22 | v0.12.0 | 9/12 | 12/12 | 594 s |
+| 2026-11-22 | v0.13.0 | 9/12 | 11/12 | 1,219 s |
+
+The v0.13.0 run took about twice as long on every suite with the same tokens generated, and 99% of it was time spent waiting for Ollama, so the machine was slower that day; the check itself adds little.
 
 - **Its central modules were invisible.** `routing.py` and `applications.py` are about 176 KB each, because of their long docstrings, and v0.11.0 ignored every file over 64 KB: it could not search, index, or read them. Every real repository here has such files: one each in requests and click, two in cobra, three in axios, and five in FastAPI. v0.12.0 sees project files of up to 1 MB. Only bounded parts of a file ever reach a prompt, so the prompt is no larger.
 - **With them visible, every correct answer was also verified**, against 5 of 9 on v0.11.0.
@@ -113,8 +117,30 @@ v0.12 makes "verified" mean nearly every correct answer, and it costs something:
 |---|---|---|
 | v0.11.0 | 26 of 40 (65%) | 4 of 6 |
 | v0.12.0 | 39 of 41 (95%) | 1 of 5 |
+| v0.13.0 | 39 of 41 (95%) | 2 of 5 |
 
-The checks confirm that an answer cites lines the model was shown. They never confirmed that it read them right, and the wrong answers they used to catch were caught mostly because a wrong answer often had no citation at all. With a third of correct answers marked unverified, the mark was ignored; now it is rare, and it means a citation does not hold. Read "verified" as "you can check this quickly at the cited lines", not as "this is right". A check that the cited line holds what the answer says, such as the value it reports, is next on the plan.
+The checks confirm that an answer cites lines the model was shown. They never confirmed that it read them right, and the wrong answers they used to catch were caught mostly because a wrong answer often had no citation at all. With a third of correct answers marked unverified, the mark was ignored; now it is rare, and it means a citation does not hold. Read "verified" as "you can check this quickly at the cited lines", not as "this is right".
+
+### Checking the values an answer reports
+
+v0.13 looks for each value an answer reports, a quoted string or a number of two or more digits, in the code the model was shown. A value on or within 3 lines of a cited line needs nothing. A value shown on another line gets a citation of that line, under a heading that says CodeHaven added it, and is not flagged. A value on no shown line was not read from the code, and the answer is marked unverified.
+
+A prototype that instead required every value to be on the cited lines was scored first, on 72 saved answers: it flagged 5 of 8 wrong answers, and 14 of 64 correct ones, because correct answers often cite the definition and quote a value from a few lines away. That is why a value found elsewhere is cited rather than flagged.
+
+All seven real repositories and the two small sets were run again on v0.13.0. The model's answers were the same as on v0.12.0, to the token, so every difference below comes from the check:
+
+| | Correct answers (97) | Wrong answers (13) |
+|---|---|---|
+| Flagged for a value on no shown line | 1 | 3 |
+| Of those, already unverified on v0.12.0 | 0 | 1 |
+| Given a citation of the line a value is on | 10 | 5 |
+
+- **Two wrong answers that passed every check are now caught.** FastAPI's default OpenAPI version, reported as `3.0.2` (it is `3.1.0`), and a Cobra flag annotation, reported by a name that is not in the code. The third, an ANSI escape code for red that the model made up, was already unverified.
+- **One correct answer is flagged.** For Flask's default port, the model quoted a code block it wrote itself, `port: int = 5000`; the real default is set in a `click.option` above the lines it was shown. The value is right, but it was not read from the code, and the flag says exactly that.
+- **One wrong answer now passes.** Asked what Cobra's `CheckErr` does, the answer gives the `Error:` prefix and exit code 1 but not that it prints to standard error. It cited no line in a checkable form, and the citation CodeHaven added for `Error:` made it checkable. The check confirms a value's source, not that an answer is complete.
+- **The first full run flagged 7 correct answers, and three causes were fixed before the release.** "Lines 348-351" was read as the value 348; 422 was not found in `HTTP_422_UNPROCESSABLE_ENTITY`; and "a 10% discount" was not found in code that writes `0.9`. Line ranges and percentages are no longer treated as values, and a number is found wherever digits bound it. The 11 answers the first run flagged were run again with the fix; the table counts those results.
+
+On the first three repositories and FastAPI the trade-off table above now reads 39 of 41 and 2 of 5. On the held-out three, correct answers that pass the checks went from 25 of 29 to 24 (the Flask port), and wrong answers marked unverified stayed at 2 of 5, one caught by a value and one, `CheckErr`, no longer caught. The small sets did not change: their values are on the cited lines.
 
 ### Other models
 
@@ -143,6 +169,7 @@ These questions were not looked at while the answer-quality changes were made, s
 | 2026-11-22 | Before the answer-quality changes | 12/14 | 12/16 | 12/14 and 13/16 |
 | 2026-11-22 | v0.11.0, with all of them | 12/14 | 14/16 | 12/14 and 15/16 |
 | 2026-11-22 | v0.12.0 | 13/14 | 14/16 | 12/14 and 16/16 |
+| 2026-11-22 | v0.13.0 | 13/14 | 14/16 | 12/14 and 16/16 |
 
 The same two sample questions fail before and after: a request to fix `Store.low_stock`, where the answer explains the fix without writing `<=`, and one about a slug. Each row is a single run, and results move by a question or so between runs, so read the bookings gain as "no worse", not as proof of two more.
 

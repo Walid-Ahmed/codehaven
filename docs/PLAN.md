@@ -39,13 +39,12 @@ Implemented a typed in-memory StateGraph with model, read, write, and limit node
 
 Since v0.9 CodeHaven is read-only and focused on understanding code. Next, in order:
 
-- **Check what a cited line says, not only that it was shown.** v0.12 made nearly every correct answer pass the checks, and with it more wrong answers: one that cites real lines and misreads them passes. A check that the value an answer reports (a number, a string, a name) appears on a line it cites would catch the misreadings seen in the evals, such as `3.0.0` read from the wrong class.
 - **Answers that name a different thing than the question means.** The cobra failures cite real lines about a near neighbour (`defaultCommandSorting` for `EnableCommandSorting`), and FastAPI's callers question names the wrong function even with the right lines shown. Both are the 7B model; the 14B model is worth measuring on these questions.
 - **Show the row a question names in a long file.** The preview of a long named file is centred on the code names a question mentions. A plain name such as "Founders Day" in a 454-line table is not one, so the row is never shown; two of the small-set questions fail this way on every version.
 - **Follow Go, Java, and Rust imports from the syntax tree.** Their functions and types are parsed with Tree-sitter, but their imports are still read with line patterns.
 - **Try the VS Code extension inside VS Code.** Its logic is tested against a stand-in for the editor's API only.
 
-See Version 0.12 at the end of this file for what was done from the earlier list.
+See Version 0.12 and Version 0.13 at the end of this file for what was done from the earlier lists.
 
 ## Version 0.2.1: approved unittest execution
 
@@ -267,3 +266,13 @@ Done from the v0.11 list, each change measured; the numbers are in [EVALS.md](EV
 - `.claude/` is ignored by Git.
 
 Result: on the three real repositories, 32 of 34 correct (31 before) and 31 of 34 verified (21 before); on the held-out three, 29 of 34 correct (30 on v0.11.0, the difference being one answer's wording) and 28 verified (20); on FastAPI, 9 of 12 correct on every version and 12 verified (7). The cost is that the checks now catch fewer wrong answers: 1 of 5 instead of 4 of 6. See "What the checks now say" in EVALS.md.
+
+## Version 0.13: the values an answer reports
+
+Done from the v0.12 list, measured on every eval set; the numbers are in [EVALS.md](EVALS.md), under "Checking the values an answer reports".
+
+- **Values are looked for in the code.** Each quoted string and number of two or more digits an answer reports is looked for on and near the lines it cites. One shown elsewhere gets a citation of its line; one on no shown line marks the answer unverified. Line numbers, ranges, percentages, paths, and values the question states are not values.
+- **Two-tier, not strict.** Requiring each value on the cited lines would have flagged 14 of 64 correct answers in a prototype; citing a value found elsewhere keeps correct answers verified.
+- **Evals record whether an answer passes on the model's own text**, without the lines CodeHaven adds, so a pass that needs an added citation can be seen.
+
+Result: correct answers unchanged on every set. On the seven real repositories, 2 more wrong answers are marked unverified (`3.0.2` for FastAPI's OpenAPI version, and an invented Cobra annotation), 1 correct answer is flagged (a Flask port quoted from code the model wrote itself), and 1 wrong answer that cited nothing checkable now passes with an added citation.

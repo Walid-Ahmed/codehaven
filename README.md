@@ -412,7 +412,9 @@ If Ollama is already running, the script checks its local API, prints a friendly
 
 After downloading a model, disconnect from the internet to use it offline. Disabling cloud features does not block model downloads or all network traffic. CodeHaven checks that the model is installed and rejects remote-backed and cloud models; a loopback URL alone cannot guarantee how a separately configured server performs inference. Installation downloads LangGraph and its dependencies; runtime does not require internet access. Reading code from a picture runs Tesseract, a separate program installed once; it works offline and makes no network connection.
 
-## What v0.12 does
+## What v0.13 does
+
+New in 0.13: looks for each value an answer reports (a quoted string or a number) in the code the model was shown. A value on the lines the answer cites needs nothing; a value shown on another line gets a citation of that line; a value on no shown line was not read from the code, and the answer is marked **Unverified**. On the seven real repositories this flags two wrong answers the citation checks passed, including an OpenAPI version of `3.0.2` (it is `3.1.0`), and one correct answer whose quoted code the model made up. No correct answer was lost. See [the eval results](docs/EVALS.md).
 
 New in 0.12: searches for quoted settings and dotted names a question mentions, so an answer that is one line somewhere in the project is found; checks citations against every line the model was shown, and cites the code names an uncited answer mentions; sees project files of up to 1 MB, where files over 64 KB, often a project's central modules, were invisible before; stops indexing and downloads from the page; and is measured on a fourth, much larger repository. On the real repositories nearly every correct answer now passes the answer checks (39 of 41, from 26 of 40). The checks confirm that an answer cites lines the model was shown, not that it read them right, so read **Unverified** as "a citation does not hold" and a checked answer as "quick to check at the cited lines". See [the eval results](docs/EVALS.md).
 

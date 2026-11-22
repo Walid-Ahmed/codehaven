@@ -391,6 +391,17 @@ The [VS Code extension](editors/vscode) adds commands to ask about the open fold
 codehaven --model qwen2.5:14b --workspace /path/to/project 'Explain this project'
 ```
 
+Measured on 34 questions about three real libraries (see [docs/EVALS.md](docs/EVALS.md)), with the same code and one run each:
+
+| Model | Size on disk | Correct | Verified | Time for 34 questions | Per question |
+|---|---|---|---|---|---|
+| `qwen2.5-coder:7b` (the default) | 4.7 GB | 31/34 (91%) | 21/34 | 1,188 s | 35 s |
+| `qwen2.5:14b` | 9.0 GB | 31/34 (91%) | 28/34 | 2,031 s | 60 s |
+| `llama3` (8B) | 4.7 GB | 25/34 (74%) | 25/34 | 909 s | 27 s |
+| `qwen2.5:0.5b` | 0.4 GB | 13/34 (38%) | 9/34 | 479 s | 14 s |
+
+"Correct" means the answer holds the facts; "verified" means every citation in it also points at lines the model was shown. The default gets as many answers right as the 14B model in a little over half the time. The 14B model is the more careful one: use it if you have about 10 GB of memory to spare and would rather wait than re-check a citation. The prompts were tuned on the default, so the others are measured on prompts written for a different model.
+
 Names of cloud models (ending in `-cloud` or `:cloud`) are refused, and so are models Ollama reports as remote-backed or embedding-only. With `--gui`, if the default model is not installed, CodeHaven starts with another installed chat model.
 
 ## Ollama and offline use

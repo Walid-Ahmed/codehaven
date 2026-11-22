@@ -1,6 +1,9 @@
 """Local evaluation harness: run fixed tasks on a sample repository and score the local model.
 
-Usage: python -m offline_agent.evaluation [--only ID] [--output PATH]
+Usage: python -m offline_agent.evaluation [--only ID] [--output PATH] [--suite NAME]
+
+--suite NAME scores the questions in evals/real/NAME_tasks.json on a real open-source repository, downloaded
+once with scripts/fetch_eval_repos.py. The download is a developer step; evaluation itself never uses the network.
 
 Each task runs on a fresh temporary copy of the sample repository, with test runs declined.
 CodeHaven is read-only, so a task that leaves any file changed fails. The model is reached only through loopback Ollama,
@@ -24,6 +27,7 @@ from .model import MODEL, PROMPT_BUDGET, Ollama
 from .workspace import Workspace
 
 EVALS = Path(__file__).resolve().parents[1] / "evals"
+REAL = EVALS / "real"  # Question sets for real repositories, and the downloaded repositories themselves.
 RETRIEVAL_BUDGET = 4000  # The CLI default, so evaluation measures what users actually run.
 # A model load this long on a later call means Ollama had unloaded the model and loaded it again.
 RELOAD_SECONDS = 5
@@ -83,6 +87,22 @@ def load_tasks(path):
             for pattern in checks["answer"]:
                 re.compile(pattern)
     return tasks
+
+
+def suites():
+    """Names of the real-repository suites: every evals/real/NAME_tasks.json."""
+    return sorted(path.name.removesuffix("_tasks.json") for path in REAL.glob("*_tasks.json"))
+
+
+def suite_paths(name):
+    """(tasks file, repository folder, report file) for a real-repository suite, or ValueError."""
+    if name not in suites():
+        raise ValueError(f"Unknown suite {name!r}. Choose from: {', '.join(suites())}")
+    repo = REAL / "repos" / name
+    if not repo.is_dir():
+        raise ValueError(f"The {name} repository is not on this computer. Download it once, while online: "
+                         f"python3 scripts/fetch_eval_repos.py {name}")
+    return REAL / f"{name}_tasks.json", repo, EVALS / "results" / f"{name}.json"
 
 
 def score(task, answer):
@@ -178,6 +198,8 @@ def main(argv=None):
     parser.add_argument("--tasks", default=str(EVALS / "tasks.json"))
     parser.add_argument("--repo", default=str(EVALS / "sample_repo"))
     parser.add_argument("--only", action="append", default=[], metavar="ID", help="Run only this task id; repeatable")
+    parser.add_argument("--suite", metavar="NAME", help="Score a real-repository suite instead (see evals/real); "
+                        "sets --tasks, --repo, and --output")
     parser.add_argument("--output", default=str(EVALS / "results" / "latest.json"))
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
     parser.add_argument("--model", default=MODEL, help="Installed local Ollama model to score (default: the tested one)")
@@ -185,6 +207,8 @@ def main(argv=None):
     parser.add_argument("--prompt-budget", type=int, default=12000)
     args = parser.parse_args(argv)
     try:
+        if args.suite:
+            args.tasks, args.repo, args.output = map(str, suite_paths(args.suite))
         tasks = load_tasks(args.tasks)
         if args.only:
             unknown = set(args.only) - {task["id"] for task in tasks}

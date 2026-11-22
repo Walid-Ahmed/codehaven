@@ -1,0 +1,140 @@
+[
+ {
+  "id": "redirect-limit",
+  "task": "How many redirects does a Session follow by default, and in which file is that number defined?",
+  "checks": {
+   "answer": [
+    "\\b30\\b",
+    "models\\.py"
+   ]
+  }
+ },
+ {
+  "id": "pool-size",
+  "task": "What is the default connection pool size of HTTPAdapter?",
+  "checks": {
+   "answer": [
+    "\\b10\\b"
+   ]
+  }
+ },
+ {
+  "id": "raise-for-status",
+  "task": "Which exception does Response.raise_for_status raise, and for which status codes?",
+  "checks": {
+   "answer": [
+    "HTTPError",
+    "\\b400\\b",
+    "\\b(500|600)\\b"
+   ]
+  }
+ },
+ {
+  "id": "post-after-301",
+  "task": "In Session.rebuild_method, what happens to the method of a POST request after a 301 response?",
+  "checks": {
+   "answer": [
+    "\\bGET\\b"
+   ]
+  }
+ },
+ {
+  "id": "user-agent",
+  "task": "What User-Agent header value does requests send by default?",
+  "checks": {
+   "answer": [
+    "python-requests"
+   ]
+  }
+ },
+ {
+  "id": "who-calls-user-agent",
+  "task": "Which function calls default_user_agent?",
+  "checks": {
+   "answer": [
+    "default_headers"
+   ]
+  }
+ },
+ {
+  "id": "connect-timeout-parents",
+  "task": "Which classes does the ConnectTimeout exception inherit from?",
+  "checks": {
+   "answer": [
+    "ConnectionError",
+    "\\bTimeout\\b"
+   ]
+  }
+ },
+ {
+  "id": "netrc-files",
+  "task": "Which file names does get_netrc_auth look for?",
+  "checks": {
+   "answer": [
+    "\\.netrc",
+    "_netrc"
+   ]
+  }
+ },
+ {
+  "id": "session-mounts",
+  "task": "Which URL prefixes does a new Session mount an adapter for, and which adapter class does it use?",
+  "checks": {
+   "answer": [
+    "https://",
+    "http://",
+    "HTTPAdapter"
+   ]
+  }
+ },
+ {
+  "id": "iter-lines-chunk",
+  "task": "What chunk size does Response.iter_lines use by default?",
+  "checks": {
+   "answer": [
+    "\\b512\\b"
+   ]
+  }
+ },
+ {
+  "id": "api-get",
+  "task": "Explain what requests.get in api.py does. Which function does it call?",
+  "checks": {
+   "answer": [
+    "request\\b"
+   ]
+  }
+ },
+ {
+  "id": "follow-is-redirect",
+  "task": "What does the Response.is_redirect property check?",
+  "checks": {
+   "answer": [
+    "location",
+    "REDIRECT_STATI|status"
+   ]
+  },
+  "followups": [
+   {
+    "task": "Which status codes does that set of redirect codes contain?",
+    "checks": {
+     "answer": [
+      "301",
+      "302",
+      "303",
+      "307",
+      "308"
+     ]
+    }
+   },
+   {
+    "task": "Going back to my first question: in which file is that property defined?",
+    "checks": {
+     "answer": [
+      "models\\.py"
+     ]
+    }
+   }
+  ]
+ }
+]

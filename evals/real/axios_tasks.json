@@ -1,0 +1,120 @@
+[
+ {
+  "id": "axios-defaults",
+  "task": "What is the default timeout in the axios defaults, and what are the default XSRF cookie and header names?",
+  "checks": {
+   "answer": [
+    "\\b0\\b",
+    "XSRF-TOKEN",
+    "X-XSRF-TOKEN"
+   ]
+  }
+ },
+ {
+  "id": "axios-validate-status",
+  "task": "Which status codes does the default validateStatus accept?",
+  "checks": {
+   "answer": [
+    "\\b200\\b",
+    "\\b300\\b|\\b299\\b|2xx"
+   ]
+  }
+ },
+ {
+  "id": "axios-combine-urls",
+  "task": "What does combineURLs return when relativeURL is empty?",
+  "checks": {
+   "answer": [
+    "baseURL|base URL"
+   ]
+  }
+ },
+ {
+  "id": "axios-settle",
+  "task": "In settle, which error codes can the rejected AxiosError carry?",
+  "checks": {
+   "answer": [
+    "ERR_BAD_REQUEST",
+    "ERR_BAD_RESPONSE"
+   ]
+  }
+ },
+ {
+  "id": "axios-interceptor-use",
+  "task": "What does InterceptorManager.use return?",
+  "checks": {
+   "answer": [
+    "\\bID\\b|\\bid\\b|index|length - 1"
+   ]
+  }
+ },
+ {
+  "id": "axios-full-path",
+  "task": "Which two helpers does buildFullPath call?",
+  "checks": {
+   "answer": [
+    "isAbsoluteURL",
+    "combineURLs"
+   ]
+  }
+ },
+ {
+  "id": "axios-adapters",
+  "task": "Which adapters are listed in knownAdapters?",
+  "checks": {
+   "answer": [
+    "\\bhttp\\b",
+    "\\bxhr\\b",
+    "\\bfetch\\b"
+   ]
+  }
+ },
+ {
+  "id": "axios-canceled",
+  "task": "What is the default message of CanceledError, and which error code does it use?",
+  "checks": {
+   "answer": [
+    "canceled",
+    "ERR_CANCELED"
+   ]
+  }
+ },
+ {
+  "id": "axios-is-cancel",
+  "task": "How does isCancel decide whether a value is a cancellation?",
+  "checks": {
+   "answer": [
+    "__CANCEL__"
+   ]
+  }
+ },
+ {
+  "id": "axios-transitional",
+  "task": "What are the default values of silentJSONParsing and clarifyTimeoutError?",
+  "checks": {
+   "answer": [
+    "\\btrue\\b",
+    "\\bfalse\\b"
+   ]
+  }
+ },
+ {
+  "id": "axios-follow-absolute",
+  "task": "What does isAbsoluteURL check?",
+  "checks": {
+   "answer": [
+    "scheme|//|protocol"
+   ]
+  },
+  "followups": [
+   {
+    "task": "Which function in lib/core uses it?",
+    "checks": {
+     "answer": [
+      "buildFullPath"
+     ]
+    }
+   }
+  ]
+ }
+]

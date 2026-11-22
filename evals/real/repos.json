@@ -1,5 +1,8 @@
 [
   {"name": "requests", "url": "https://github.com/psf/requests.git", "tag": "v2.32.3", "commit": "0e322af87745eff34caffe4df68456ebc20d9068"},
   {"name": "click", "url": "https://github.com/pallets/click.git", "tag": "8.1.8", "commit": "934813e4d421071a1b3db3973c02fe2721359a6e"},
-  {"name": "express", "url": "https://github.com/expressjs/express.git", "tag": "4.21.2", "commit": "1faf228935aa0a13111f92c28ee795be64ce3f0f"}
+  {"name": "express", "url": "https://github.com/expressjs/express.git", "tag": "4.21.2", "commit": "1faf228935aa0a13111f92c28ee795be64ce3f0f"},
+  {"name": "flask", "url": "https://github.com/pallets/flask.git", "tag": "3.1.0", "commit": "ab8149664182b662453a563161aa89013c806dc9"},
+  {"name": "cobra", "url": "https://github.com/spf13/cobra.git", "tag": "v1.8.1", "commit": "e94f6d0dd9a5e5738dca6bce03c4b1207ffbc0ec"},
+  {"name": "axios", "url": "https://github.com/axios/axios.git", "tag": "v1.7.9", "commit": "b2cb45d5a533a5465c99559b16987e4d5fc08cbc"}
 ]

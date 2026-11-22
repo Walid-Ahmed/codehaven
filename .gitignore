@@ -14,3 +14,5 @@ evals/results/
 docs/demo-video/voice/
 # Real repositories downloaded by scripts/fetch_eval_repos.py.
 evals/real/repos/
+# Local Claude Code settings and worktrees made by sessions on this machine.
+.claude/

@@ -96,6 +96,9 @@ class App:
         self.lock = threading.Lock()
         self.busy = False
         self.stoppable = False  # True while an answer or flashcards run, which are what stop() can end.
+        # While a repository is indexed or downloaded, stop() sets this event; indexing and the download check it.
+        self.cancel = threading.Event()
+        self.cancellable = False
         self.workspace = self.knowledge = self.session = None
         self.upload = self.upload_folder = None  # The uploaded file's name and its private temporary folder.
         self.picture = None  # When the upload was a picture: how reading it went, for the page to show.
@@ -113,7 +116,7 @@ class App:
     def release(self):
         """Let the next request in."""
         with self.lock:
-            self.busy = self.stoppable = False
+            self.busy = self.stoppable = self.cancellable = False
 
     def claim_model(self):
         """claim() for work the Stop button can end: an answer or flashcards. A stop meant for earlier work is cleared."""
@@ -124,16 +127,31 @@ class App:
             if hasattr(self.model, "allow"):
                 self.model.allow()
 
-    def stop(self):
-        """Stop the answer or flashcards in progress. Returns whether there was anything to stop.
+    def claim_index(self):
+        """claim() for indexing or a download, which the Stop button can end. A stop meant for earlier work is cleared."""
+        with self.lock:
+            if self.busy:
+                raise Busy("CodeHaven is still working on the previous request.")
+            self.busy = self.cancellable = True
+            self.cancel.clear()
 
-        The lock makes this and claim_model() take turns, so a late stop can never end the next question.
+    def stop(self):
+        """Stop the answer, flashcards, index, or download in progress. Returns whether there was anything to stop.
+
+        The lock makes this and the claims take turns, so a late stop can never end the next request.
         """
         with self.lock:
             stopped = self.stoppable and hasattr(self.model, "stop")
             if stopped:
                 self.model.stop()
+            elif self.cancellable:
+                self.cancel.set()
+                stopped = True
         return {"stopped": bool(stopped)}
+
+    def stopped_summary(self):
+        """What the page shows after a stopped index or download: whatever was open before, unchanged."""
+        return {**self.summary(), "stopped": True}
 
     def emit(self, event):
         """Pass a log line or a piece of streamed text to the answer being sent, if one is running."""
@@ -141,10 +159,12 @@ class App:
             self.sink.put(event)
 
     def open(self, path, excludes=()):
-        """Index a repository and start a fresh conversation about it."""
-        self.claim()
+        """Index a repository and start a fresh conversation about it. Stop ends it and keeps what was open."""
+        self.claim_index()
         try:
             return self.index(path, excludes)
+        except Stopped:
+            return self.stopped_summary()
         finally:
             self.release()
 
@@ -168,16 +188,18 @@ class App:
             raise ValueError(CLONE_OFF)
         owner, name, ssh = github_repository(address)
         target = self.clone_folder / owner / name
-        self.claim()
+        self.claim_index()
         try:
             if target.exists():
                 if origin_repository(target) != (owner.lower(), name.lower()):
                     raise ValueError(f"{target} already exists and is not a copy of github.com/{owner}/{name}.")
                 summary = self.index(str(target))
                 return {**summary, "cloned": False, "source": f"github.com/{owner}/{name}"}
-            download(owner, name, ssh, target)
+            download(owner, name, ssh, target, cancel=self.cancel)
             summary = self.index(str(target))
             return {**summary, "cloned": True, "source": f"github.com/{owner}/{name}"}
+        except Stopped:
+            return self.stopped_summary()  # A stopped download leaves nothing behind; see download().
         finally:
             self.release()
 
@@ -250,7 +272,8 @@ class App:
             keep = self.remember and upload is None
             semantic = Semantic(self.model, self.embed_model, output=lambda line: self.emit({"type": "log", "text": str(line)}),
                                 cache=Semantic.cache_path(workspace, self.embed_model, self.index_folder) if keep else None)
-        knowledge = KnowledgeBase(references, workspace=workspace, context_budget=self.retrieval_budget, semantic=semantic)
+        knowledge = KnowledgeBase(references, workspace=workspace, context_budget=self.retrieval_budget, semantic=semantic,
+                                  cancel=self.cancel if self.cancellable else None)
         if semantic is not None:
             semantic.wait(SEMANTIC_WAIT)
         self.semantic = semantic
@@ -544,12 +567,13 @@ def folder_bytes(folder):
     return total
 
 
-def download(owner, name, ssh, target):
+def download(owner, name, ssh, target, cancel=None):
     """Clone the latest snapshot of one GitHub repository into target: the only network use in CodeHaven.
 
     git gets no password from CodeHaven and may not prompt for one, so only public repositories and the sign-in
     git already has (a credential helper or an SSH key) work. Submodules, Git LFS files, tags, history, hooks,
-    and symlinks are left out, and the download stops after CLONE_SECONDS or CLONE_BYTES.
+    and symlinks are left out, and the download stops after CLONE_SECONDS or CLONE_BYTES, or with Stopped once
+    cancel, an optional threading.Event, is set. A stopped or failed download leaves nothing behind.
     """
     git = shutil.which("git")
     if git is None:
@@ -572,6 +596,10 @@ def download(owner, name, ssh, target):
             deadline, stopped = time.monotonic() + CLONE_SECONDS, None
             # Polled rather than waited for, so that both the time limit and the size limit can stop the download.
             while process.poll() is None:
+                if cancel is not None and cancel.is_set():
+                    process.kill()
+                    process.wait()
+                    raise Stopped()
                 if time.monotonic() > deadline:
                     stopped = f"The download took longer than {CLONE_SECONDS // 60} minutes and was stopped."
                 elif folder_bytes(partial) > CLONE_BYTES:

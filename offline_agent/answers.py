@@ -96,12 +96,38 @@ def seen_span(path, span, evidence, symbol=""):
     return (named["line"], named["line"]) if named else span
 
 
-def observed_line(symbol, path, evidence):
+def row_text(row, workspace=None, files=None):
+    """The text of the lines an evidence row covers.
+
+    Retained rows keep only a short snippet, to stay small in the prompt, so the lines are read again from the
+    workspace when it is given. files caches each file's lines for one answer. Reference documents outside the
+    workspace, which cannot be read this way, give their snippet or nothing.
+    """
+    if row.get("text"):
+        return str(row["text"])
+    if workspace is None:
+        return str(row.get("snippet") or "")
+    path = row["path"].removeprefix("repo/")
+    if files is None:
+        files = {}
+    if path not in files:
+        try:
+            files[path] = workspace.read(path).splitlines()
+        except (ValueError, OSError, UnicodeError):
+            files[path] = None
+    lines = files[path]
+    if lines is None:
+        return str(row.get("snippet") or "")
+    return "\n".join(lines[row["line"] - 1:row.get("end_line", row["line"])])
+
+
+def observed_line(symbol, path, evidence, workspace=None, files=None):
     """(path, line) of a line the model was shown that contains the symbol's name, or None. The point's own file comes first.
 
     The model names the right thing but often the wrong place: the file that imports a constant instead of the one
     that sets it, or the line of an import. When the lines it was actually shown contain the name, citing one of
-    those is both true and checkable, where the looked-up line would be flagged as never read.
+    those is both true and checkable, where the looked-up line would be flagged as never read. A dotted name such
+    as req.secure is matched by its last part, which is how it appears where it is defined.
     """
     short = symbol.strip("`'\" ").removesuffix("()").rsplit(".", 1)[-1]
     if len(short) < 3:
@@ -109,10 +135,39 @@ def observed_line(symbol, path, evidence):
     named = re.compile(rf"(?<![\w$]){re.escape(short)}(?![\w$])")
     rows = sorted(evidence, key=lambda row: row["path"].removeprefix("repo/") != path)  # Stable: the point's own file first.
     for row in rows:
-        for offset, text in enumerate(str(row.get("text") or "").splitlines()):
+        for offset, text in enumerate(row_text(row, workspace, files).splitlines()):
             if named.search(text) and row["line"] + offset <= row.get("end_line", row["line"]):
                 return row["path"].removeprefix("repo/"), row["line"] + offset
     return None
+
+
+# Code-like names in an answer: anything in backticks, or a word with an underscore, a dot between words, or camelCase.
+MENTION = re.compile(r"`([^`\n]{2,60})`|(?<![\w.$/])([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+|[A-Za-z$]\w*_\w+|[a-z]+[A-Z]\w*)(?![\w$/])")
+# The most citations added for one answer, and the heading they are listed under.
+MENTIONS = 4
+MENTION_HEADING = "Lines this answer refers to (cited by CodeHaven from the code it was shown):"
+
+
+def cite_mentions(answer, workspace, evidence):
+    """Citation lines for the code names an answer mentions, taken from the lines the model was shown.
+
+    For an answer that cites nothing at all. The model often writes a correct sentence about checkout_total
+    without a citation; pointing at the shown line that names it lets the reader check the answer, which is
+    the point of the check. Names that appear on no shown line add nothing, so nothing is made up.
+    """
+    found, files = [], {}
+    for quoted, bare in MENTION.findall(answer):
+        name = (quoted or bare).strip()
+        # File names and paths are not code parts; a call such as f(x) is looked up as f.
+        name = re.sub(r"\(.*\)$", "", name)
+        if not name or "/" in name or re.search(r"\.(py|js|ts|go|java|rs|md|json|txt)$", name) or " " in name:
+            continue
+        seen = observed_line(name, "", evidence, workspace, files)
+        if seen and all(seen != (path, line) for path, line, _ in found):
+            found.append((seen[0], seen[1], name))
+        if len(found) >= MENTIONS:
+            break
+    return [f"- {path}:{line} `{name}`" for path, line, name in found]
 
 
 def file_named(workspace, path, symbol, files):
@@ -164,7 +219,7 @@ def with_points(reply, workspace, evidence=()):
                 # Looked up, but on lines the model never saw (or not found at all): cite a shown line that names it instead.
                 shown = any(row["path"].removeprefix("repo/") == path and span and row["line"] <= span[1]
                             and span[0] <= row.get("end_line", row["line"]) for row in evidence)
-                seen = None if shown else observed_line(symbol, path, evidence)
+                seen = None if shown else observed_line(symbol, path, evidence, workspace)
                 if seen:
                     path, span = seen[0], (seen[1], seen[1])
         except (ValueError, OSError, UnicodeError):

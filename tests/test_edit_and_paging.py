@@ -108,3 +108,11 @@ class SymbolLineTests(unittest.TestCase):
         self.assertEqual(symbol_lines("broken.py", "def go(:\n    pass\n", "go"), (1, 1))  # Unparsable: text match.
         rows = 'CATALOG = [\n    ("SKU-0001", 1.5),\n    ("SKU-0002", 2.5),\n]\n'
         self.assertEqual(symbol_lines("catalog.py", rows, "SKU-0002"), (3, 3))  # Not a definition: text match.
+
+    def test_javascript_members_defined_by_assignment_are_found(self):
+        utils = "'use strict';\nvar etag = require('etag');\n\nexports.wetag = createETagGenerator({weak: true});\n\n" \
+                "exports.compileETag = function(val) {\n  return val;\n};\n"
+        self.assertEqual(symbol_lines("utils.js", utils, "compileETag"), (6, 6))
+        self.assertEqual(symbol_lines("utils.js", utils, "wetag"), (4, 4))
+        self.assertEqual(symbol_lines("application.js", "app.listen = function listen() {\n};\n", "app.listen"), (1, 1))
+        self.assertIsNone(symbol_lines("utils.js", "if (a.compileETag == b) {}\n", "compileETag"))  # A comparison, not a definition.

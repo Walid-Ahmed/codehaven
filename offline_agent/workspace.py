@@ -45,9 +45,17 @@ def symbol_lines(name, text, symbol):
         if found is not None:
             return found
         # Not a definition, such as a row in a data table: fall through to the first line that mentions it.
+    lines = text.splitlines()
     pattern = re.compile(rf"(?<![\w.]){re.escape(symbol)}(?![\w])")
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(lines, 1):
         if pattern.search(line):
+            return number, number
+    # A member defined by assignment, as JavaScript modules do: exports.compileETag = function ..., app.listen = ...
+    # The dot before the name kept these from matching above, so every exported function looked "not found".
+    member = symbol.rsplit(".", 1)[-1]
+    assigned = re.compile(rf"\.{re.escape(member)}\s*=(?!=)")
+    for number, line in enumerate(lines, 1):
+        if assigned.search(line):
             return number, number
     return None
 

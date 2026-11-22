@@ -3,7 +3,7 @@ import json
 import re
 
 from . import arabic
-from .evidence import NEGATED_EDIT
+from .evidence import NEGATED_EDIT, classify
 from .prompts import EDIT_REQUEST, POLITE, PRELOAD_FILES, QUESTION
 
 
@@ -56,28 +56,65 @@ def focus_lines(task, text):
     return found
 
 
-# search_named looks up at most this many names from the task, and shows this many matches for each.
-SEARCHED_NAMES, SEARCHED_MATCHES = 2, 8
+# search_named looks up at most this many names and phrases from the task, and shows this many matches for each.
+SEARCHED_NAMES, SEARCHED_PHRASES, SEARCHED_MATCHES = 2, 3, 8
+# File extensions, so "api.py" is not read as the member py of an object named api.
+EXTENSIONS = {"py", "pyi", "js", "jsx", "ts", "tsx", "mjs", "cjs", "go", "java", "rs", "rb", "php", "json", "md", "txt", "toml",
+              "yaml", "yml", "cfg", "ini", "html", "css", "c", "h", "cpp", "hpp", "cs", "kt", "swift", "sh"}
+# Matches in source files come first: a setting's default lives in the code, not in a test or the docs.
+KIND_ORDER = {"service": 0, "source": 0, "stub": 1, "reference": 2, "test": 3}
+
+
+def phrases(task):
+    """Literal text to search for when a question names no code-like name.
+
+    The answer to "what is the default of the 'trust proxy' setting?" or "which package provides
+    express.static?" is one line somewhere in the project, and keyword retrieval brings examples and
+    documentation first. So quoted phrases are searched as written, and a dotted member such as
+    express.static is searched as an assignment (".static =") and as a quoted key ("'static'"),
+    the two ways JavaScript and Python libraries usually define one.
+    """
+    found = []
+    for quoted in re.findall(r"""(?<![\w])['"`‘“]([^'"`’”\n]{3,40})['"`’”]""", task):
+        if re.search(r"[A-Za-z]", quoted) and quoted.strip() == quoted:
+            found.append(quoted)
+    for owner, member in re.findall(r"(?<![\w.])([a-z][\w$]*)\.([A-Za-z_$][\w$]*)\b(?![.(]?\w*\.\w)", task):
+        # Code-like members are already searched by name; file names such as api.py are not members.
+        if member.lower() in EXTENSIONS or re.search(r"[\d_]|[a-z][A-Z]", member):
+            continue
+        found += [f".{member} =", f"'{member}'"]
+    unique = []
+    for phrase in found:
+        if phrase not in unique:
+            unique.append(phrase)
+    return unique
 
 
 def search_named(workspace, task):
-    """Search for the code names a task mentions, so "who calls X?" starts from where X really appears.
+    """Search for the code names and literal phrases a task mentions, before the model's first step.
 
-    Left to itself the model often answers from the definition alone, without searching. Returns the lines to
-    show and the matches to keep as evidence.
+    So "who calls X?" starts from where X really appears, and "what is the default of 'trust proxy'?" from the
+    line that sets it. Left to itself the model often answers from the definition alone, or from whatever
+    retrieval brought, without searching. Returns the lines to show and the matches to keep as evidence.
     """
     shown, evidence = [], []
-    for name in code_names(task)[:SEARCHED_NAMES]:
+    queries = [(name, False) for name in code_names(task)[:SEARCHED_NAMES]]
+    queries += [(phrase, True) for phrase in phrases(task)[:SEARCHED_PHRASES]]
+    for query, literal in queries:
         try:
-            matches = json.loads(workspace.search(name))["matches"]
+            matches = json.loads(workspace.search(query))["matches"]
         except (ValueError, OSError, UnicodeError, KeyError):
             continue
+        matches.sort(key=lambda match: KIND_ORDER.get(classify(match["path"], match.get("text", "")), 0))
+        if literal:
+            # A phrase found only in tests and docs is noise here; the question is about the code.
+            matches = [match for match in matches if KIND_ORDER.get(classify(match["path"], match.get("text", "")), 0) == 0]
         for match in matches[:SEARCHED_MATCHES]:
             where = ("defines it" if match.get("defines") else f"inside {match['in']}" if match.get("in") else "top level")
             shown.append(f"- {match['path']}:{match['line']} ({where}): {match['text'].strip()[:160]}")
             evidence.append(match)
         if len(matches) > SEARCHED_MATCHES:
-            shown.append(f"- ... {len(matches) - SEARCHED_MATCHES} more matches for {name}; use search to see them")
+            shown.append(f"- ... {len(matches) - SEARCHED_MATCHES} more matches for {query}; use search to see them")
     return shown, evidence
 
 

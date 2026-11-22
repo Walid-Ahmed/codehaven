@@ -286,6 +286,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
     <div class="section recent">
       <h2>Chats</h2>
       <button id="new-chat" disabled>+ New chat</button>
+      <button id="save-chat" disabled title="Save this chat as a Markdown file, through your browser. Nothing leaves this computer.">Save chat…</button>
       <div id="chats-section" hidden title="Saved on this computer only. Click a chat to reopen it."><div id="chats"></div></div>
       <div class="index-status" id="memory-status">Follow-up questions remember the last 8 questions.</div>
     </div>
@@ -374,7 +375,7 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
             <button id="card-flip" class="primary">Show answer</button>
             <button id="card-next">Next →</button>
           </div>
-          <div class="deck-tools"><button id="cards-shuffle">Shuffle</button><button id="cards-copy">Copy all as text</button></div>
+          <div class="deck-tools"><button id="cards-shuffle">Shuffle</button><button id="cards-copy">Copy all as text</button><button id="cards-save" title="A text file with one card per line, question then answer, separated by a tab. Anki and most flashcard apps import it.">Save for Anki…</button></div>
         </div>
       </div>
     </div>
@@ -487,6 +488,12 @@ const ARABIC = {
   "Next →": "← التالية",
   "Shuffle": "اخلط",
   "Copy all as text": "انسخ الكل كنص",
+  "Save for Anki…": "احفظ لـ Anki…",
+  "A text file with one card per line, question then answer, separated by a tab. Anki and most flashcard apps import it.": "ملف نصي فيه بطاقة في كل سطر: السؤال ثم الإجابة يفصل بينهما مفتاح الجدولة. يستورده Anki ومعظم تطبيقات البطاقات.",
+  "Save chat…": "احفظ المحادثة…",
+  "Save this chat as a Markdown file, through your browser. Nothing leaves this computer.": "احفظ هذه المحادثة كملف Markdown عبر متصفحك. لا شيء يغادر هذا الحاسوب.",
+  "Unverified": "غير مُتحقق منه",
+  "Stopped before it finished.": "أُوقفت قبل أن تكتمل.",
   "Choose a folder": "اختر مجلدًا",
   "Parent folder": "المجلد الأعلى",
   "Cancel": "إلغاء",
@@ -945,6 +952,7 @@ async function openChat(id) {
     clearChat();
     addMessage("note").textContent = t("Saved chat, last used {when}. The code may have changed since: cited lines open the files as they are now.", {when: chat.updated.replace("T", " ")});
     for (const turn of chat.turns) {
+      keepTurn(turn.question, turn.answer, turn.issues);
       addMessage("user").textContent = turn.question;
       const card = addMessage("assistant");
       const answer = document.createElement("div"); answer.className = "answer"; answer.innerHTML = render(turn.answer);
@@ -1218,7 +1226,36 @@ $("model").addEventListener("change", async () => {
 function clearChat() {
   $("messages-inner").replaceChildren($("empty"));
   $("empty").hidden = false;
+  transcript = []; $("save-chat").disabled = true;
 }
+// ---- Saving to a file: a download link that exists only for the click. Nothing is sent anywhere.
+function saveFile(name, text, type) {
+  const link = Object.assign(document.createElement("a"), {href: URL.createObjectURL(new Blob([text], {type})), download: name});
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+// The chat on the page as questions and answers, kept so it can be saved as a file.
+let transcript = [];
+function keepTurn(question, answer, issues, stopped) {
+  transcript.push({question, answer, issues: issues || [], stopped: Boolean(stopped)});
+  $("save-chat").disabled = false;
+}
+// The chat as Markdown: a heading per question, the answer under it, and any warning as a quotation.
+function chatMarkdown() {
+  const about = $("repo-label").textContent.trim();
+  const parts = [`# CodeHaven: ${about}`, `${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC · ${$("model").value}`];
+  for (const turn of transcript) {
+    parts.push(`## ${turn.question.replace(/\s+/g, " ")}`, turn.answer || "—");
+    if (turn.stopped) parts.push(`> ${t("Stopped before it finished.")}`);
+    if (turn.issues.length) parts.push(`> **${t("Unverified")}**\n` + turn.issues.map((issue) => `> - ${issue}`).join("\n"));
+  }
+  return parts.join("\n\n") + "\n";
+}
+$("save-chat").addEventListener("click", () => {
+  if (!transcript.length) return;
+  const name = ($("repo-label").textContent.trim().replace(/[^\wء-ي.-]+/g, "-") || "chat") + "-chat.md";
+  saveFile(name, chatMarkdown(), "text/markdown");
+});
 // Add an empty message box of one kind (user, assistant, or note) and return it to be filled.
 function addMessage(kind) {
   $("empty").hidden = true;
@@ -1315,6 +1352,7 @@ async function ask(question) {
       const note = document.createElement("div"); note.className = "stopped";
       note.textContent = t("Stopped. This question is not remembered in follow-ups.");
       card.append(note);
+      if (streamed) keepTurn(question, streamed, [], true);
       return;
     }
     answer.innerHTML = render(done.complete ? done.answer : (streamed || t("No final answer: the step limit was reached before CodeHaven finished.")));
@@ -1325,6 +1363,7 @@ async function ask(question) {
       for (const issue of done.issues) { const item = document.createElement("li"); item.dir = "auto"; item.textContent = issue; list.append(item); }
       checks.append(title, list); card.append(checks);
     }
+    keepTurn(question, done.complete ? done.answer : streamed, done.issues);
     setSaved({saved: done.saved}, done.kept);
     setChats(done.chats);
     $("memory-status").textContent = t("Follow-ups remember {remembered} of the last {memory} questions. Start a new chat when you change topic.", done);
@@ -1662,6 +1701,12 @@ $("cards-copy").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText(text); $("cards-copy").textContent = t("Copied"); }
   catch { $("cards-copy").textContent = t("Copying is blocked by the browser"); }
   setTimeout(() => { $("cards-copy").textContent = t("Copy all as text"); }, 2000);
+});
+// One card per line, question then answer, separated by a tab: the plain-text form Anki imports.
+$("cards-save").addEventListener("click", () => {
+  const cell = (text) => text.replace(/[\t\r\n]+/g, " ").trim();
+  const rows = cards.map((card) => `${cell(card.question)}\t${cell(card.answer)} (${card.start ? `${card.path}:${card.start}-${card.end}` : card.path})`);
+  saveFile("codehaven-flashcards.txt", rows.join("\n") + "\n", "text/tab-separated-values");
 });
 // Keys in the flashcards view: Space or Enter turns the card over, the arrow keys move between cards.
 document.addEventListener("keydown", (event) => {

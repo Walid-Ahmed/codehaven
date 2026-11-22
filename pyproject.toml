@@ -21,3 +21,13 @@ include = ["offline_agent*"]
 
 [tool.setuptools.package-data]
 offline_agent = ["references/*.md", "gui.html"]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6"]
+
+# Lint for real mistakes only (unused names, undefined names, syntax errors, mutable defaults), not for style.
+[tool.ruff]
+line-length = 200
+
+[tool.ruff.lint]
+select = ["F", "E9", "B006", "B008"]

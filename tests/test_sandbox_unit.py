@@ -74,6 +74,7 @@ class SandboxUnitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'never pulled'):
             inspect_image(['docker'], 'missing:tag', {})
 
+    @unittest.skipIf(os.name == "nt", "isolated tests need macOS or Linux")
     def test_snapshot_filters_and_copies_binary_regular_files_only(self):
         (self.root / '.gitignore').write_text('private/\n')
         (self.root / 'private').mkdir()

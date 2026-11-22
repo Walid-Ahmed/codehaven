@@ -8,7 +8,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from offline_agent.gui import App, make_server
+from offline_agent.gui import page_text, App, make_server
 from offline_agent.model import Ollama, Stopped
 
 
@@ -191,7 +191,7 @@ class GuiStopTests(unittest.TestCase):
         self.assertTrue(wait_until(lambda: not self.app.busy))
 
     def test_the_page_has_a_stop_button(self):
-        page = Path(__file__).resolve().parents[1].joinpath("offline_agent", "gui.html").read_text(encoding="utf-8")
+        page = page_text()
         self.assertIn('"/api/stop"', page)
         self.assertIn('t(stopping ? "Stopping…" : "Stop")', page)
 

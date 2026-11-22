@@ -14,7 +14,7 @@ from unittest.mock import patch
 from urllib.parse import quote
 
 from offline_agent.cli import main
-from offline_agent.gui import CLONE_OFF, PAGE, App, directories, github_repository, make_server, upload_name
+from offline_agent.gui import CLONE_OFF, PAGE, PAGE_PARTS, App, directories, github_repository, make_server, page_text, upload_name
 
 
 def action(kind, path="", content="", message="Working"):
@@ -531,6 +531,14 @@ class GuiCliTests(unittest.TestCase):
         self.assertTrue(serve.call_args.kwargs["allow_clone"])
         self.assertEqual(serve.call_args.kwargs["clone_folder"], "/tmp/codehaven-repos")
 
-    def test_page_file_is_packaged(self):
-        self.assertTrue(PAGE.is_file())
-        self.assertIn("gui.html", Path(__file__).resolve().parents[1].joinpath("pyproject.toml").read_text())
+    def test_page_files_are_packaged_and_served_as_one_page(self):
+        packaged = Path(__file__).resolve().parents[1].joinpath("pyproject.toml").read_text()
+        for name in ["gui.html"] + [name for _, name in PAGE_PARTS]:
+            self.assertTrue(PAGE.with_name(name).is_file(), name)
+            self.assertIn(f'"{name}"', packaged)
+        page = page_text()
+        for mark, _ in PAGE_PARTS:
+            self.assertNotIn(mark, page)  # Every part was put in its place.
+        self.assertIn('"use strict";', page.split("<script", 1)[1][:60])  # Still the script's first statement.
+        self.assertNotIn("<script src", page)
+        self.assertNotIn("<link", page)

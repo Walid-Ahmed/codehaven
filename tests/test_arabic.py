@@ -7,7 +7,7 @@ from pathlib import Path
 
 from offline_agent import arabic, changes, insights, study
 from offline_agent.agent import REVIEW, Session, task_kind, trim_at_limit
-from offline_agent.gui import PAGE, upload_name
+from offline_agent.gui import page_text, upload_name
 from offline_agent.knowledge import KnowledgeBase, tokens
 from offline_agent.memory import terms
 from offline_agent.workspace import Workspace
@@ -178,7 +178,7 @@ class ArabicProjectTests(unittest.TestCase):
 class ArabicPageTests(unittest.TestCase):
     """The page is one file in two languages: its English text is the key each Arabic sentence is looked up by."""
     def setUp(self):
-        self.page = PAGE.read_text(encoding="utf-8")
+        self.page = page_text()
         table = self.page.split("const ARABIC = {", 1)[1].split("};", 1)[0]
         self.arabic = dict(json.loads("[" + line.strip().rstrip(",").replace('": "', '", "', 1) + "]")
                            for line in table.splitlines() if line.strip() and not line.strip().startswith("//"))

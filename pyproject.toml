@@ -20,7 +20,7 @@ offline-agent = "offline_agent.cli:main"
 include = ["offline_agent*"]
 
 [tool.setuptools.package-data]
-offline_agent = ["references/*.md", "gui.html"]
+offline_agent = ["references/*.md", "gui.html", "gui.css", "gui.js", "gui_arabic.js"]
 
 [project.optional-dependencies]
 dev = ["ruff>=0.6"]

@@ -101,7 +101,8 @@ class PdfTests(unittest.TestCase):
         lines = found["text"].splitlines()
         self.assertEqual(lines[0], "===== Page 1 =====")
         self.assertIn("def late_fee(days):", lines)
-        self.assertIn("        return 0", lines)
+        # Readers space indentation differently; what matters is that the nested line stays the most indented.
+        self.assertTrue(any(line.strip() == "return 0" and line.startswith("        ") for line in lines), lines)
         self.assertIn("===== Page 2 =====", lines)
         self.assertIn("Read 2 pages", found["note"])
 

@@ -71,6 +71,11 @@ class RepositoryRagTests(unittest.TestCase):
         kb.refresh()
         self.assertEqual(json.loads(kb.retrieve("newrepopattern"))["results"], [])
 
+    def test_windows_line_endings_are_read_as_plain_ones_and_left_alone_on_disk(self):
+        (self.root / "crlf.py").write_bytes(b"a = 1\r\nb = 2\r\n")
+        self.assertEqual(self.workspace.read("crlf.py"), "a = 1\nb = 2\n")
+        self.assertEqual((self.root / "crlf.py").read_bytes(), b"a = 1\r\nb = 2\r\n")
+
     def test_refresh_keeps_the_index_when_no_file_changed(self):
         self.put("code.py", "steadyrepopattern")
         kb = KnowledgeBase(workspace=self.root)

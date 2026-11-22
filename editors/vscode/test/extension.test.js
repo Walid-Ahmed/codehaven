@@ -1,4 +1,4 @@
-// The extension's commands, run against a small stand-in for the VS Code API. Run with: node --test test
+// The extension's commands, run against a small stand-in for the VS Code API. Run with: npm test
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert");

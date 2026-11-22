@@ -47,5 +47,5 @@
       }
     }
   },
-  "scripts": {"test": "node --test test"}
+  "scripts": {"test": "node --test test/citations.test.js test/extension.test.js"}
 }

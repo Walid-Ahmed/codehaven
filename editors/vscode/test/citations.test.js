@@ -1,4 +1,4 @@
-// Tests for the parts of the extension that do not need VS Code. Run with: node --test test
+// Tests for the parts of the extension that do not need VS Code. Run with: npm test
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert");

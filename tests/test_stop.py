@@ -196,5 +196,67 @@ class GuiStopTests(unittest.TestCase):
         self.assertIn('t(stopping ? "Stopping…" : "Stop")', page)
 
 
+
+class IndexStopTests(unittest.TestCase):
+    """Stop also ends indexing a repository or downloading one, and keeps whatever was open before."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.first, self.second = Path(self.temp.name, "first"), Path(self.temp.name, "second")
+        for folder in (self.first, self.second):
+            folder.mkdir()
+            (folder / "app.py").write_text("def main():\n    return 1\n")
+        self.folder = Path(self.temp.name, "clones")
+        self.app = App(StoppableModel([]), allow_clone=True, clone_folder=self.folder)
+
+    def press_stop_during(self, name):
+        """Patch name in offline_agent.gui so that, when the work calls it, Stop is pressed first."""
+        import offline_agent.gui as gui
+        real = getattr(gui, name)
+
+        def pressed(*args, **kwargs):
+            self.assertEqual(self.app.stop(), {"stopped": True})
+            return real(*args, **kwargs)
+        return unittest.mock.patch(f"offline_agent.gui.{name}", side_effect=pressed)
+
+    def test_a_stopped_index_keeps_the_repository_open_before(self):
+        self.app.open(str(self.first))
+        with self.press_stop_during("KnowledgeBase"):
+            summary = self.app.open(str(self.second))
+        self.assertTrue(summary["stopped"])
+        self.assertEqual(summary["repository"], str(self.first.resolve()))
+        self.assertEqual(self.app.workspace.root, self.first.resolve())
+        self.assertFalse(self.app.busy)
+        # The next index is not stopped by the earlier press.
+        self.assertEqual(self.app.open(str(self.second))["repository"], str(self.second.resolve()))
+
+    def test_a_stopped_download_leaves_nothing_behind(self):
+        def git(command, **_options):
+            Path(command[-1], "app.py").write_text("x = 1\n")
+            self.app.stop()
+            return unittest.mock.Mock(returncode=None, poll=unittest.mock.Mock(return_value=None))
+        with unittest.mock.patch("offline_agent.gui.subprocess.Popen", side_effect=git):
+            summary = self.app.clone("https://github.com/octo/hello")
+        self.assertEqual((summary["stopped"], summary["repository"]), (True, None))
+        self.assertEqual(list((self.folder / "octo").iterdir()), [])  # Neither the clone nor its partial folder.
+        self.assertFalse(self.app.busy)
+
+    def test_the_index_stops_between_two_files(self):
+        from offline_agent.knowledge import KnowledgeBase
+        from offline_agent.workspace import Workspace
+        stop = threading.Event()
+        stop.set()
+        with self.assertRaises(Stopped):
+            KnowledgeBase(workspace=Workspace(self.first), cancel=stop)
+        self.assertEqual(KnowledgeBase(workspace=Workspace(self.first), cancel=threading.Event()).documents_by_source["repo"], 1)
+
+    def test_the_page_turns_index_and_download_into_stop_buttons(self):
+        page = page_text()
+        self.assertIn('indexing === "index" ? stopLabel', page)
+        self.assertIn('indexing === "clone" ? stopLabel', page)
+        self.assertIn("async function stopIndexing()", page)
+
+
 if __name__ == "__main__":
     unittest.main()

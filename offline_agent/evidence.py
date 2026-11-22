@@ -29,8 +29,41 @@ def classify(path, snippet=""):
     return "source"
 
 
+# The most rows of retained evidence; past this, rows of one file are merged into line ranges.
+ROWS = 50
+
+
+def merged(records):
+    """The same evidence with each file's rows merged into continuous line ranges, oldest file first.
+
+    Merging keeps every observed line covered, so citations stay checkable, while taking far less space
+    than one row per search match or passage. Snippets and enclosing names are dropped from merged rows.
+    """
+    by_path = {}
+    for row in records:
+        by_path.setdefault(row["path"], []).append(row)
+    result = []
+    for path, rows in by_path.items():
+        spans = sorted((row["line"], row.get("end_line", row["line"]), row["kind"]) for row in rows)
+        for start, end, kind in spans:
+            last = result[-1] if result and result[-1]["path"] == path else None
+            if last is not None and start <= last.get("end_line", last["line"]) + 1:
+                last["end_line"] = max(last.get("end_line", last["line"]), end)
+            else:
+                result.append({"path": path, "line": start, "end_line": end, "kind": kind, "snippet": ""})
+    for row in result:
+        if row["end_line"] == row["line"]:
+            del row["end_line"]
+    return result
+
+
 def retain(previous, matches):
-    """Preserve citations before snippets when evidence reaches its byte limit."""
+    """Keep what was observed, within ROWS rows and LIMIT bytes, without losing which lines were seen.
+
+    Over a limit, snippets are blanked first (oldest first), then each file's rows are merged into line ranges,
+    and only if that is still too much are the oldest rows dropped: the newest evidence is what an answer
+    usually cites. Returns the rows and whether anything observed was lost.
+    """
     records = [dict(item) for item in previous]
     limited = False
     for match in matches:
@@ -42,24 +75,38 @@ def retain(previous, matches):
         if match.get("in"):
             item["in"] = match["in"]
         old = next((old for old in records if (old["path"], old["line"]) == (item["path"], item["line"])), None)
-        # Already retained: keep one row per (path, line), taking the newer end line.
+        # Already retained: keep one row per (path, line), taking the wider end line.
         if old is not None:
-            if "end_line" in item:
+            if item.get("end_line", item["line"]) > old.get("end_line", old["line"]):
                 old["end_line"] = item["end_line"]
             continue
-        if len(records) >= 50:
-            limited = True
-            break
         records.append(item)
-    # Over the byte limit: blank the snippets first, oldest first, and only then drop the newest rows.
-    while len(json.dumps(records, ensure_ascii=False).encode()) > LIMIT:
-        with_snippet = next((row for row in records if row.get("snippet")), None)
-        if with_snippet is not None:
-            with_snippet["snippet"] = ""
-        else:
-            records.pop()
-            limited = True
+
+    def size():
+        """Bytes of the rows as JSON, which is how they reach the prompt."""
+        return len(json.dumps(records, ensure_ascii=False).encode())
+    while size() > LIMIT and any(row.get("snippet") for row in records):
+        next(row for row in records if row.get("snippet"))["snippet"] = ""
+    if len(records) > ROWS or size() > LIMIT:
+        records = merged(records)
+    while len(records) > ROWS or size() > LIMIT:
+        records.pop(0)
+        limited = True
     return records, limited
+
+
+def covered(evidence, path, start, end):
+    """True when every line from start to end lies in the observed rows for path, taken together."""
+    spans = sorted((row["line"], row.get("end_line", row["line"])) for row in evidence
+                   if row["path"].removeprefix("repo/") == path)
+    reach = start - 1  # The last line covered so far; spans are sorted by their first line.
+    for first, last in spans:
+        if first > reach + 1:
+            break  # A gap before the cited range is fully covered.
+        reach = max(reach, last)
+        if reach >= end:
+            return True
+    return reach >= end
 
 
 def discovery_task(task):
@@ -97,9 +144,8 @@ def check_answer(answer, evidence, *, discovery=False, require_citation=True):
     for path, start, end in citations:
         path = path.removeprefix("repo/")
         start, end = int(start), int(end or start)
-        # A citation is supported only when its whole line range lies inside one retained evidence row for that file.
-        if any(row["path"].removeprefix("repo/") == path and row["line"] <= start <= end <= row.get("end_line", row["line"])
-               for row in evidence):
+        # A citation is supported when every line of its range was observed, even across two adjacent passages.
+        if covered(evidence, path, start, end):
             valid.add(path)
         else:
             issues.append(f"Citation not supported by retained evidence: {path}:{start}-{end}.")

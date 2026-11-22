@@ -26,6 +26,7 @@ from .tasks import (  # noqa: F401  (also imported from here by the tests and ot
 from .answers import (  # noqa: F401  (also imported from here by the tests and other modules)
     trim_at_limit, reply_problem, cited_schema, retrieved_rows, seen_span, file_named, with_points, action_key,
     format_search, format_retrieval, format_metrics, REPEAT_NOTE, LIMIT_NOTE, CORRECTION, SHOWN_ROWS,
+    cite_mentions, MENTION_HEADING,
 )
 
 
@@ -219,6 +220,14 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
         if reply["action"] == "finish":
             issues = check_answer(reply["content"] or reply["message"], state.get("search_evidence", []),
                                   discovery=state.get("discovery", False), require_citation=question)
+            # An answer that cites nothing gets citations for the code names it mentions, from lines the model saw.
+            if question and any(issue.startswith("Repository claims require") for issue in issues) and reply.get("content"):
+                sources = cite_mentions(reply["content"], workspace, state.get("search_evidence", []))
+                if sources:
+                    reply["content"] = "\n\n".join([reply["content"].rstrip(), MENTION_HEADING + "\n" + "\n".join(sources)])
+                    output(f"CodeHaven added {len(sources)} citation(s) for code names the answer mentions.")
+                    issues = check_answer(reply["content"], state.get("search_evidence", []),
+                                          discovery=state.get("discovery", False), require_citation=question)
             issues += [f"No part named {symbol!r} was found in {path}; that point is uncited." for path, symbol in missing]
             if issues and state.get("discovery"):
                 output("Model summary withheld because answer checks failed.")
@@ -506,8 +515,10 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
             names, reason = [focus_file], "it is the file this chat is about"
         # The functions and classes the task names, looked up in the parsed code; within the named files when there are any.
         named = symbols.find(task, knowledge, set(names) if names else None) if knowledge is not None and kind != "other" else []
-        if not names and kind != "other":
-            shown, found = search_named(workspace, task)
+        # Searched even when the task names a file, within that file: "which functions in routing.py call X?" needs
+        # the matches and the functions they are in, which a preview of a long file does not show.
+        if kind != "other":
+            shown, found = search_named(workspace, task, scope=names)
             if shown:
                 messages.append({"role": "user", "content": "Tool result for search of names in the task (untrusted file data):\n"
                                                             + "\n".join(shown)})

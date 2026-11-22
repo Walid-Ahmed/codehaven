@@ -1,0 +1,14 @@
+[
+  {"id": "fastapi-docs-urls", "task": "What are the default docs_url and redoc_url of the FastAPI class?", "checks": {"answer": ["/docs\\b", "/redoc\\b"]}},
+  {"id": "fastapi-openapi-url", "task": "What is the default openapi_url of a FastAPI application?", "checks": {"answer": ["/openapi\\.json"]}},
+  {"id": "fastapi-openapi-version", "task": "Which OpenAPI version does a FastAPI application report by default?", "checks": {"answer": ["3\\.1\\.0"]}},
+  {"id": "fastapi-title-version", "task": "What are the default title and version of a FastAPI application?", "checks": {"answer": ["\\bFastAPI\\b", "0\\.1\\.0"]}},
+  {"id": "fastapi-validation-status", "task": "Which status code does request_validation_exception_handler return?", "checks": {"answer": ["\\b422\\b"]}},
+  {"id": "fastapi-httpexception-parent", "task": "Which class does FastAPI's HTTPException inherit from?", "checks": {"answer": ["StarletteHTTPException|starlette"]}},
+  {"id": "fastapi-router-parent", "task": "Which class does APIRouter inherit from?", "checks": {"answer": ["\\bRouter\\b"]}},
+  {"id": "fastapi-sync-endpoint", "task": "How does run_endpoint_function call an endpoint that is not a coroutine?", "checks": {"answer": ["run_in_threadpool|thread ?pool"]}},
+  {"id": "fastapi-solve-callers", "task": "Which functions in routing.py call solve_dependencies?", "checks": {"answer": ["get_request_handler", "get_websocket_app"]}},
+  {"id": "fastapi-depends-cache", "task": "What is the default value of use_cache in Depends?", "checks": {"answer": ["\\bTrue\\b"]}},
+  {"id": "fastapi-swagger-cdn", "task": "From which CDN does get_swagger_ui_html load Swagger UI by default?", "checks": {"answer": ["jsdelivr"]}},
+  {"id": "fastapi-follow-unique-id", "task": "How does generate_unique_id build an operation ID?", "checks": {"answer": ["name", "path"]}, "followups": [{"task": "And what does it replace non-word characters with?", "checks": {"answer": ["underscore|_"]}}]}
+]

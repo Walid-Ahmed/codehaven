@@ -6,6 +6,8 @@ const $ = (id) => document.getElementById(id);
 // busy: a request is running; indexed: something is open; uploaded: it is one uploaded file; browsing: the folder browser's folder.
 // stoppable: the running request is an answer or flashcards, which Stop can end; stopping: Stop was clicked.
 let busy = false, indexed = false, uploaded = false, browsing = "", stoppable = false, stopping = false;
+// indexing: "index" or "clone" while a repository is being indexed or downloaded; that button then reads Stop.
+let indexing = "";
 // The folder of the open repository, for links that open a cited file in an editor; null for an uploaded file.
 let repoRoot = null;
 const UPLOAD_BYTES = 64000;  // The same limit as every file CodeHaven reads.
@@ -272,15 +274,20 @@ function setIndexed(summary) {
 }
 // Index the folder typed or chosen in the sidebar, and start an empty chat about it.
 async function indexRepository() {
+  if (indexing === "index") return stopIndexing();
   const path = $("path").value.trim();
   if (!path || busy) return;
-  busy = true; updateComposer();
+  busy = true; indexing = "index"; updateComposer();
   const status = $("index-status");
   status.classList.remove("error");
   status.textContent = t("Indexing… this usually takes a few seconds.");
-  $("index").textContent = t("Indexing…");
   try {
     const summary = await api("/api/open", {method: "POST", body: JSON.stringify({path})});
+    if (summary.stopped) {
+      status.textContent = t(indexed ? "Stopped. Nothing new was indexed; the project open before is still open."
+        : "Stopped. Nothing was indexed.");
+      return;
+    }
     clearChat(); resetStudy();
     setIndexed(summary);
     remember(summary.repository);
@@ -288,9 +295,15 @@ async function indexRepository() {
     status.classList.add("error");
     status.textContent = error.message;
   } finally {
-    $("index").textContent = t("Index");
-    busy = false; updateComposer();
+    busy = stopping = false; indexing = ""; updateComposer();
   }
+}
+// Stop the index or download in progress; the request that started it then returns with "stopped".
+async function stopIndexing() {
+  if (!indexing || stopping) return;
+  stopping = true; updateComposer();
+  try { await api("/api/stop", {method: "POST", body: "{}"}); }
+  catch (error) { stopping = false; updateComposer(); toast(error.message); }
 }
 
 // ---- Long-term memory, unless the server was started with --no-remember: checked answers kept on this computer.
@@ -380,14 +393,19 @@ function setClone(on) {
 }
 // Download a GitHub repository by its address, then index the copy. Only offered with --allow-clone.
 async function cloneRepository() {
+  if (indexing === "clone") return stopIndexing();
   const address = $("github").value.trim();
   if (!address || busy) return;
-  busy = true; updateComposer();
+  busy = true; indexing = "clone"; updateComposer();
   const status = $("clone-status");
   status.classList.remove("error");
   status.textContent = t("Downloading from GitHub… this can take a minute for large repositories.");
   try {
     const summary = await api("/api/clone", {method: "POST", body: JSON.stringify({address})});
+    if (summary.stopped) {
+      status.textContent = t("Stopped. Nothing was downloaded or kept.");
+      return;
+    }
     clearChat(); resetStudy();
     setIndexed(summary);
     remember(summary.repository);
@@ -399,7 +417,7 @@ async function cloneRepository() {
     status.classList.add("error");
     status.textContent = error.message;
   } finally {
-    busy = false; updateComposer();
+    busy = stopping = false; indexing = ""; updateComposer();
   }
 }
 $("clone").addEventListener("click", cloneRepository);
@@ -686,9 +704,12 @@ function updateComposer() {
   $("language").disabled = busy;
   $("new-chat").disabled = !indexed || busy;
   $("model").disabled = busy;
-  $("index").disabled = busy;
+  // While a repository is indexed or downloaded, the button that started it stops it.
+  $("index").textContent = indexing === "index" ? stopLabel : t("Index");
+  $("index").disabled = indexing === "index" ? stopping : busy;
   $("upload").disabled = $("attach").disabled = busy;
-  $("clone").disabled = busy;
+  $("clone").textContent = indexing === "clone" ? stopLabel : t("Download and index");
+  $("clone").disabled = indexing === "clone" ? stopping : busy;
   $("forget").disabled = busy || uploaded || !(savedCount || chatCount);
   $("tab-map").disabled = $("tab-cards").disabled = !indexed;
   $("map-draw").disabled = !indexed;

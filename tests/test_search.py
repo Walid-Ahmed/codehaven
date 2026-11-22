@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from offline_agent.agent import run
-from offline_agent.workspace import Workspace
+from offline_agent.workspace import READ_BYTES, Workspace
 
 
 class SearchTests(unittest.TestCase):
@@ -57,7 +57,7 @@ class SearchTests(unittest.TestCase):
         self.put(".env", "needle")
         self.put("node_modules/a.js", "needle")
         self.put(".git/config", "needle")
-        self.put("large.py", "needle" + "x" * 64000)
+        self.put("large.py", "needle" + "x" * READ_BYTES)
         (self.root / "binary").write_bytes(b"needle\0")
         (self.root / "invalid").write_bytes(b"needle\xff")
         self.put("visible.py", "needle")

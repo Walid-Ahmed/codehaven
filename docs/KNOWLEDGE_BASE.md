@@ -100,7 +100,7 @@ Try asking: `codehaven 'Explain LangGraph checkpointing using the bundled refere
 To add a full manual, place text or
 Markdown copies that you already have permission to use in your local knowledge
 folder. Split long manuals into smaller files (one topic/page per file), each no
-larger than 64 KB. Include the manual version and source URL in the document text
+larger than 1 MB; smaller files give more focused passages. Include the manual version and source URL in the document text
 for provenance. URLs remain text; the agent never follows them. There is no
 website downloader or automatic documentation updater.
 
@@ -132,7 +132,7 @@ The index is rebuilt for each new task. External edits and deletions are picked
 up on the next run. No database, persistent index, account, or API key is required.
 Indexing considers at most 5,000 candidate files per root, 5,000 documents total across references and repository code,
 25 MB of document text, and 40,000 passages. Hidden/excluded paths, symlinks, binary
-files, invalid UTF-8, and files over 64 KB are excluded. Metadata flags report
+files, invalid UTF-8, and files over 1 MB are excluded. Metadata flags report
 index/result limits; a no-match result is not proof the full library has no answer.
 The skipped-document count covers read failures among eligible text candidates,
 not every excluded path.

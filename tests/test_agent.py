@@ -9,7 +9,7 @@ from pathlib import Path
 
 from offline_agent.agent import run
 from offline_agent.model import MODEL, Ollama
-from offline_agent.workspace import Workspace
+from offline_agent.workspace import READ_BYTES, Workspace
 
 
 def action(kind, path="", content="", message="Working"):
@@ -43,7 +43,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(self.ws.files(), [])
 
     def test_size_and_binary_limits(self):
-        (self.root / "big").write_bytes(b"x" * 64001)
+        (self.root / "big").write_bytes(b"x" * (READ_BYTES + 1))
         (self.root / "binary").write_bytes(b"\0")
         for name in ["big", "binary"]:
             with self.assertRaises(ValueError):

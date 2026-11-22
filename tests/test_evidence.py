@@ -142,3 +142,31 @@ class EvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'token limit'):
                 run(Model(), Workspace(root), 'Explain', output=output.append)
             self.assertIn('Ollama metrics: generation 90.0s; 1,024 generated', output)
+
+
+class EvidenceCoverageTests(unittest.TestCase):
+    """Citations are checked against every line observed, and evidence keeps its coverage when it is trimmed."""
+
+    def test_a_citation_may_span_adjacent_passages_but_not_a_gap(self):
+        from offline_agent.evidence import covered
+        rows = [{"path": "a.py", "line": 1, "end_line": 10}, {"path": "a.py", "line": 11, "end_line": 20},
+                {"path": "a.py", "line": 30}, {"path": "repo/b.py", "line": 5, "end_line": 8}]
+        for path, start, end, expected in (("a.py", 5, 15, True), ("a.py", 19, 21, False), ("a.py", 30, 30, True),
+                                           ("a.py", 25, 30, False), ("b.py", 6, 8, True), ("c.py", 1, 1, False)):
+            with self.subTest(path=path, start=start, end=end):
+                self.assertEqual(covered(rows, path, start, end), expected)
+        self.assertEqual(check_answer("It spans both. [a.py:5-15]", rows), [])
+
+    def test_many_rows_are_merged_into_ranges_instead_of_being_lost(self):
+        rows = [{"path": "big.py", "line": n, "end_line": n, "text": "x" * 60} for n in range(1, 200)]
+        kept, limited = retain([], rows)
+        self.assertEqual(kept, [{"path": "big.py", "line": 1, "end_line": 199, "kind": "source", "snippet": ""}])
+        self.assertFalse(limited)  # Every observed line is still covered.
+
+    def test_when_something_must_go_the_oldest_rows_go_first(self):
+        rows = [{"path": f"f{n}.py", "line": 1, "text": ""} for n in range(80)]
+        kept, limited = retain([], rows)
+        self.assertTrue(limited)
+        self.assertEqual(kept[-1]["path"], "f79.py")
+        self.assertNotIn("f0.py", [row["path"] for row in kept])
+

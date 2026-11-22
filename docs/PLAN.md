@@ -37,15 +37,15 @@ Implemented a typed in-memory StateGraph with model, read, write, and limit node
 
 ## Next
 
-Since v0.9 CodeHaven is read-only and focused on understanding code; editing was removed (see Version 0.9). Next, in order:
+Since v0.9 CodeHaven is read-only and focused on understanding code. Next, in order:
 
-- Find answers that are one line somewhere in the project, such as a setting's default or which package an export comes from. The questions still failing on the real repositories, three on the first set and three on cobra in the held-out set, are of this kind: the question names no function, so no definition is shown, and keyword retrieval brings examples and documentation first.
-- Evaluate on larger repositories. The real-repository evals use libraries of 100 to 220 files; the index now takes 5,000.
-- Follow Go, Java, and Rust imports from the syntax tree. Their functions and types are parsed with Tree-sitter, but their imports are still read with line patterns.
-- Try the VS Code extension inside VS Code. Its logic is tested against a stand-in for the editor's API only.
-- Stop indexing and repository downloads from the page, as answers can be stopped.
+- **Check what a cited line says, not only that it was shown.** v0.12 made nearly every correct answer pass the checks, and with it more wrong answers: one that cites real lines and misreads them passes. A check that the value an answer reports (a number, a string, a name) appears on a line it cites would catch the misreadings seen in the evals, such as `3.0.0` read from the wrong class.
+- **Answers that name a different thing than the question means.** The cobra failures cite real lines about a near neighbour (`defaultCommandSorting` for `EnableCommandSorting`), and FastAPI's callers question names the wrong function even with the right lines shown. Both are the 7B model; the 14B model is worth measuring on these questions.
+- **Show the row a question names in a long file.** The preview of a long named file is centred on the code names a question mentions. A plain name such as "Founders Day" in a 454-line table is not one, so the row is never shown; two of the small-set questions fail this way on every version.
+- **Follow Go, Java, and Rust imports from the syntax tree.** Their functions and types are parsed with Tree-sitter, but their imports are still read with line patterns.
+- **Try the VS Code extension inside VS Code.** Its logic is tested against a stand-in for the editor's API only.
 
-See Version 0.11 at the end of this file for what was done from the earlier list.
+See Version 0.12 at the end of this file for what was done from the earlier list.
 
 ## Version 0.2.1: approved unittest execution
 
@@ -254,3 +254,16 @@ Everything in the earlier "Next" list was done, and each change that touches ans
 - **Also in this version:** a Stop button; a call trace helper; file review that sees the signatures of called functions; an index of up to 5,000 files that is rebuilt only when a file changed; Tree-sitter outlines for Go, Java, and Rust; `--start-ollama` and a fuller `--doctor`; saving chats and flashcards; a VS Code extension; tests on macOS and Windows as well as Linux, which found and fixed five Windows problems; and the page and the agent module split into smaller files.
 
 Not done: the keyword index is not saved to disk between runs, because that would put the text of the code on disk outside the repository to save a few seconds; CodeHaven is not published to PyPI; and `langsmith` stays a dependency, because LangGraph installs it in any case and the one thing CodeHaven imports from it is the switch that turns tracing off.
+
+## Version 0.12: one-line answers, checkable citations, and large files
+
+Done from the v0.11 list, each change measured; the numbers are in [EVALS.md](EVALS.md).
+
+- **Correct answers no longer look unverified.** On the three real repositories, 10 of the 31 correct answers had been marked unverified. Evidence over its limits is now merged into line ranges instead of dropped, and a citation is checked against every line shown, so a range may span two passages. Members defined by assignment (`exports.compileETag = ...`) are found. A citation that names the right thing in the wrong place is moved to a shown line that names it, which never worked before: retained evidence keeps only a snippet, and the code looked for full text that was never there. An answer that cites nothing gets citations for the code names it mentions, from lines the model was shown, under a heading that says CodeHaven added them.
+- **One-line answers.** Quoted settings (`'trust proxy'`) and dotted names (`express.static`) in a question are searched before the first step, within the named file when the question names one, with source files listed before tests and docs.
+- **Large files.** Project files of up to 1 MB are listed, searched, indexed, and read in pages; the limit was 64 KB, which hid the central modules of FastAPI (176 KB each) and at least one file in every real repository measured.
+- **A larger repository:** FastAPI 0.115.6, 2,338 files, 12 questions.
+- **Stop indexing and downloads** from the page; the project open before stays open.
+- `.claude/` is ignored by Git.
+
+Result: on the three real repositories, 32 of 34 correct (31 before) and 31 of 34 verified (21 before); on the held-out three, 29 of 34 correct (30 on v0.11.0, the difference being one answer's wording) and 28 verified (20); on FastAPI, 9 of 12 correct on every version and 12 verified (7). The cost is that the checks now catch fewer wrong answers: 1 of 5 instead of 4 of 6. See "What the checks now say" in EVALS.md.

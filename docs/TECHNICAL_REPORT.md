@@ -1,6 +1,6 @@
 # CodeHaven technical report
 
-CodeHaven (version 0.11.0) is a read-only, offline assistant for understanding code. It indexes a repository on your machine, answers questions about it with a local model served by Ollama (`qwen2.5-coder:7b` by default), and cites the lines it used. It never changes your files, and at runtime it talks only to Ollama on `127.0.0.1`. The one exception is opt-in: with `--allow-clone`, the browser page can download a GitHub repository you ask for.
+CodeHaven (version 0.12.0) is a read-only, offline assistant for understanding code. It indexes a repository on your machine, answers questions about it with a local model served by Ollama (`qwen2.5-coder:7b` by default), and cites the lines it used. It never changes your files, and at runtime it talks only to Ollama on `127.0.0.1`. The one exception is opt-in: with `--allow-clone`, the browser page can download a GitHub repository you ask for.
 
 This report describes how it is built: the parts and how a question moves through them, the agent loop and its tools, how relevant code is found (RAG), how answers are checked, what is stored, and what the retrieval measurements show. For how to use it, see the [README](../README.md).
 
@@ -99,7 +99,7 @@ The model can ask for five actions. None of them writes to your project.
 
 | Action | What it does | Limits |
 |---|---|---|
-| `read` | Reads a UTF-8 file, in pages for long files | 64 KB per file; a page fits in half the prompt budget and names the next range |
+| `read` | Reads a UTF-8 file, in pages for long files | 1 MB per file; a page fits in half the prompt budget and names the next range |
 | `search` | Finds literal text and names the function each match is in | 50 matching lines, 16,000 bytes, 5,000 files |
 | `retrieve` | Fetches ranked passages from the local index | 4,000 bytes by default (`--retrieval-budget`) |
 | `run_tests` | Runs unittest or pytest in a Docker container, after you approve | Networking off, read-only snapshot, 30-second timeout |
@@ -155,7 +155,7 @@ Passages are found four ways:
 | Retrieved context per call | 4,000 bytes by default (`--retrieval-budget`, 2,000 to 16,000) |
 | Documents indexed | 5,000 |
 | Indexed text | 25 MB, at most 40,000 passages |
-| Largest file indexed | 64 KB |
+| Largest file indexed | 1 MB (64 KB before v0.12, which hid the central modules of large projects) |
 
 Hidden files, `.gitignore` and `.agentignore` matches, symlinks, binary files, and invalid UTF-8 are skipped. The keyword index is rebuilt at the start of each run and between questions, so edits you make yourself are picked up.
 
@@ -164,7 +164,8 @@ Hidden files, `.gitignore` and `.agentignore` matches, symlinks, binary files, a
 An answer is an overview plus up to 10 points, and each point names a part of the code: a function, a class, `Class.method`, a route, or a file. CodeHaven finds that part's real lines and prints `path:start-end` itself. The checks are in [evidence.py](../offline_agent/evidence.py) and `with_points` in [agent.py](../offline_agent/agent.py).
 
 - **Line numbers are looked up, not trusted.** Python files are parsed, never run; other names match the first line that mentions them.
-- **Citations must be supported.** Every `path:line` in the final answer must fall inside code that was read, searched, or retrieved during the run. Up to 50 evidence records (4,000 bytes) are kept for this.
+- **Citations must be supported.** Every line of a cited `path:start-end` must have been read, searched, or retrieved during the run; a range may span two adjacent passages. Up to 50 evidence records (4,000 bytes) are kept for this. When they would overflow, each file's records are merged into continuous line ranges, so no observed line is forgotten, and only after that are the oldest records dropped.
+- **Uncited answers are cited from what was shown.** When an answer cites nothing, CodeHaven looks for the code names it mentions on the lines the model was shown, and lists those lines under a heading that says CodeHaven added them. A name on no shown line adds nothing.
 - **Gaps are shown.** A missing or unsupported citation, or a name that cannot be found, marks the answer **Unverified**, and the run exits with code 2.
 
 These checks confirm that an answer points at real code that was read. They do not prove the explanation is right, so the cited lines are still worth reading.

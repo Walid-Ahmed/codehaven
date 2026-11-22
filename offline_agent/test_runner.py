@@ -10,7 +10,7 @@ import threading
 import uuid
 from pathlib import Path
 
-from .workspace import MAX_BYTES, MAX_FILES
+from .workspace import MAX_FILES, READ_BYTES
 
 # Defaults: seconds one test run may take, and the most output bytes kept so the result fits in a prompt.
 TIMEOUT = 30
@@ -119,9 +119,9 @@ def snapshot(workspace, destination, runner):
                     info = os.fstat(handle.fileno())
                     if not stat.S_ISREG(info.st_mode):
                         raise ValueError(f'Snapshot path is not a regular file: {name}')
-                    data = handle.read(MAX_BYTES + 1)
-                if len(data) > MAX_BYTES:
-                    raise ValueError(f'Snapshot file changed or exceeds 64 KB: {name}')
+                    data = handle.read(READ_BYTES + 1)
+                if len(data) > READ_BYTES:
+                    raise ValueError(f'Snapshot file changed or exceeds {READ_BYTES // 1_000_000} MB: {name}')
             finally:
                 os.close(parent)
             total += len(data)

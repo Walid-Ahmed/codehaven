@@ -7,6 +7,7 @@ from collections import Counter
 from pathlib import Path
 
 from . import arabic
+from .model import Stopped
 from .workspace import MAX_FILES, Workspace
 from .dependencies import PythonDependencies
 from .javascript import JS_EXTENSIONS, JavaScriptDependencies
@@ -70,8 +71,12 @@ def chunks(text):
 
 class KnowledgeBase:
     """A BM25 index over the bundled notes, an optional reference folder, and the repository, with its import graph."""
-    def __init__(self, directory=None, *, workspace=None, context_budget=16_000, excludes=(), semantic=None):
-        """Read and chunk every allowed file once. The limits below keep memory and start-up time bounded."""
+    def __init__(self, directory=None, *, workspace=None, context_budget=16_000, excludes=(), semantic=None, cancel=None):
+        """Read and chunk every allowed file once. The limits below keep memory and start-up time bounded.
+
+        cancel is an optional threading.Event: once it is set, indexing stops with Stopped between two files,
+        so the page's Stop button can end a long index and keep the repository that was open before.
+        """
         if not 2000 <= context_budget <= 16_000:
             raise ValueError("Retrieval budget must be between 2000 and 16000 bytes")
         self.context_budget = context_budget
@@ -125,6 +130,8 @@ class KnowledgeBase:
             if label != "builtin":
                 listings.append((label, workspace, names))
             for name in names:
+                if cancel is not None and cancel.is_set():
+                    raise Stopped()
                 if label == "repo" and Path(name).name == "go.mod":
                     try:
                         manifests[name] = workspace.read(name)  # Names the Go module, so its imports can be followed.

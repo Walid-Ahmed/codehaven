@@ -9,7 +9,11 @@ from .exclusions import Exclusions, IgnoreConfigurationError
 # Directory names that are never listed or read: version control, environments, build output, and credential folders.
 EXCLUDED = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build",
             ".aws", ".ssh", ".codex", ".agents"}
-MAX_BYTES = 64_000  # The largest file read, listed, or indexed.
+MAX_BYTES = 64_000  # The largest file uploaded, read from a picture or document, and one page of a read.
+# The largest project file listed, searched, indexed, or read in pages. Only bounded parts of a file ever reach a
+# prompt, so this limits memory, not prompt size. It was MAX_BYTES until large projects showed that their central
+# modules (FastAPI's routing.py and applications.py, about 176 KB each) were invisible to search and reads.
+READ_BYTES = 1_000_000
 MAX_FILES = 5000  # The most files one listing returns; callers report the listing as limited at this size.
 MAX_MATCHES, SEARCH_BYTES = 50, 15_800  # Bounds on one search result, so it always fits in a prompt.
 
@@ -45,9 +49,17 @@ def symbol_lines(name, text, symbol):
         if found is not None:
             return found
         # Not a definition, such as a row in a data table: fall through to the first line that mentions it.
+    lines = text.splitlines()
     pattern = re.compile(rf"(?<![\w.]){re.escape(symbol)}(?![\w])")
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(lines, 1):
         if pattern.search(line):
+            return number, number
+    # A member defined by assignment, as JavaScript modules do: exports.compileETag = function ..., app.listen = ...
+    # The dot before the name kept these from matching above, so every exported function looked "not found".
+    member = symbol.rsplit(".", 1)[-1]
+    assigned = re.compile(rf"\.{re.escape(member)}\s*=(?!=)")
+    for number, line in enumerate(lines, 1):
+        if assigned.search(line):
             return number, number
     return None
 
@@ -230,7 +242,7 @@ class Workspace:
                 rel = (Path(base) / name).relative_to(self.root).as_posix()
                 try:
                     path = self.path(rel)
-                    if path.is_file() and path.stat().st_size <= MAX_BYTES:
+                    if path.is_file() and path.stat().st_size <= READ_BYTES:
                         found.append(rel)
                 except IgnoreConfigurationError:
                     raise
@@ -241,15 +253,15 @@ class Workspace:
         return found
 
     def read(self, name):
-        """Return a file's text. Raises ValueError for anything but a UTF-8 text file of at most MAX_BYTES."""
+        """Return a file's text. Raises ValueError for anything but a UTF-8 text file of at most READ_BYTES."""
         target = self.path(name)
         if not target.is_file():
             raise ValueError("Only regular files can be read")
         with target.open("rb") as handle:
             # One byte past the limit is enough to know the file is too large, without reading all of it.
-            raw = handle.read(MAX_BYTES + 1)
-        if len(raw) > MAX_BYTES or b"\0" in raw:
-            raise ValueError(f"Only UTF-8 text files up to {MAX_BYTES // 1000} KB can be read")
+            raw = handle.read(READ_BYTES + 1)
+        if len(raw) > READ_BYTES or b"\0" in raw:
+            raise ValueError(f"Only UTF-8 text files up to {READ_BYTES // 1_000_000} MB can be read")
         # Windows line endings become plain ones, so a stray carriage return never reaches the model or a citation.
         # Nothing is written back: the file on disk keeps its own line endings.
         return raw.decode("utf-8").replace("\r\n", "\n")

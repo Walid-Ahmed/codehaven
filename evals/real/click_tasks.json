@@ -1,0 +1,126 @@
+[
+ {
+  "id": "usage-error-exit",
+  "task": "What exit code does UsageError use, and what exit code does ClickException use?",
+  "checks": {
+   "answer": [
+    "\\b2\\b",
+    "\\b1\\b"
+   ]
+  }
+ },
+ {
+  "id": "bad-parameter-parent",
+  "task": "Which class does BadParameter inherit from, and which class inherits from BadParameter?",
+  "checks": {
+   "answer": [
+    "UsageError",
+    "MissingParameter"
+   ]
+  }
+ },
+ {
+  "id": "abort-parent",
+  "task": "Which built-in exception does click's Abort exception inherit from?",
+  "checks": {
+   "answer": [
+    "RuntimeError"
+   ]
+  }
+ },
+ {
+  "id": "password-option",
+  "task": "Which defaults does the password_option decorator set?",
+  "checks": {
+   "answer": [
+    "prompt",
+    "confirmation_prompt",
+    "hide_input"
+   ]
+  }
+ },
+ {
+  "id": "confirmation-prompt",
+  "task": "What is the default prompt text of the confirmation_option decorator?",
+  "checks": {
+   "answer": [
+    "Do you want to continue"
+   ]
+  }
+ },
+ {
+  "id": "datetime-formats",
+  "task": "Which date formats does the DateTime parameter type accept by default?",
+  "checks": {
+   "answer": [
+    "%Y-%m-%d",
+    "%H:%M:%S"
+   ]
+  }
+ },
+ {
+  "id": "app-dir-mac",
+  "task": "Where does get_app_dir put the config folder on macOS when force_posix is false?",
+  "checks": {
+   "answer": [
+    "Library/Application Support"
+   ]
+  }
+ },
+ {
+  "id": "app-dir-windows",
+  "task": "Which environment variables does get_app_dir read on Windows?",
+  "checks": {
+   "answer": [
+    "\\bAPPDATA\\b",
+    "LOCALAPPDATA"
+   ]
+  }
+ },
+ {
+  "id": "ansi-red",
+  "task": "What ANSI color code does click use for red, and in which file is the table of colors?",
+  "checks": {
+   "answer": [
+    "\\b31\\b",
+    "termui\\.py"
+   ]
+  }
+ },
+ {
+  "id": "exit-default",
+  "task": "What is the default status code of click's Exit exception?",
+  "checks": {
+   "answer": [
+    "\\b0\\b"
+   ]
+  }
+ },
+ {
+  "id": "follow-confirm",
+  "task": "What does the abort parameter of click.confirm do?",
+  "checks": {
+   "answer": [
+    "Abort"
+   ]
+  },
+  "followups": [
+   {
+    "task": "What is that function's default prompt suffix?",
+    "checks": {
+     "answer": [
+      ":"
+     ]
+    }
+   },
+   {
+    "task": "In which file is that function defined?",
+    "checks": {
+     "answer": [
+      "termui\\.py"
+     ]
+    }
+   }
+  ]
+ }
+]

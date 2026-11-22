@@ -567,4 +567,13 @@ python3 -m offline_agent.evaluation --tasks evals/bookings_tasks.json --repo eva
 
 See [the implementation plan and roadmap](docs/PLAN.md) for architecture, acceptance criteria, and next steps. API integration follows [Ollama chat](https://docs.ollama.com/api/chat) and [structured outputs](https://docs.ollama.com/capabilities/structured-outputs).
 
-Automated tests use fake model responses and a loopback HTTP fixture, so they do not establish answer quality. The local evals measure the real model, but only on short questions over two small repositories, so they do not establish quality on larger projects either.
+**Real repositories.** Three more question sets run on real open-source libraries: requests, click, and express, each pinned to one release. They are not kept in this repository, so download them once, while online:
+
+```sh
+python3 scripts/fetch_eval_repos.py
+python3 -m offline_agent.evaluation --suite requests
+```
+
+The script is a developer tool and the only eval step that uses the internet; the installed package never runs it. Scores for every set, and what they do not measure, are recorded in [docs/EVALS.md](docs/EVALS.md).
+
+Automated tests use fake model responses and a loopback HTTP fixture, so they do not establish answer quality. The local evals measure the real model on short questions with one right answer; they do not establish quality on whole-project explanations or on large monorepos.

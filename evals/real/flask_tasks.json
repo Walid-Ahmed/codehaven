@@ -1,0 +1,126 @@
+[
+ {
+  "id": "flask-session-lifetime",
+  "task": "What is the default value of PERMANENT_SESSION_LIFETIME, and in which file is it set?",
+  "checks": {
+   "answer": [
+    "\\b31\\b",
+    "app\\.py"
+   ]
+  }
+ },
+ {
+  "id": "flask-redirect-code",
+  "task": "What status code does the redirect helper in helpers.py use by default?",
+  "checks": {
+   "answer": [
+    "\\b302\\b"
+   ]
+  }
+ },
+ {
+  "id": "flask-debug-flag",
+  "task": "Which environment variable does get_debug_flag read, and which values turn debugging off?",
+  "checks": {
+   "answer": [
+    "FLASK_DEBUG",
+    "false",
+    "\\bno\\b"
+   ]
+  }
+ },
+ {
+  "id": "flask-flash-key",
+  "task": "Under which session key does the flash function store its messages?",
+  "checks": {
+   "answer": [
+    "_flashes"
+   ]
+  }
+ },
+ {
+  "id": "flask-null-session",
+  "task": "Which class does NullSession inherit from?",
+  "checks": {
+   "answer": [
+    "SecureCookieSession"
+   ]
+  }
+ },
+ {
+  "id": "flask-cookie-salt",
+  "task": "What salt does SecureCookieSessionInterface use, and which key derivation?",
+  "checks": {
+   "answer": [
+    "cookie-session",
+    "hmac"
+   ]
+  }
+ },
+ {
+  "id": "flask-run-defaults",
+  "task": "What are the default host and port of the flask run command?",
+  "checks": {
+   "answer": [
+    "127\\.0\\.0\\.1",
+    "\\b5000\\b"
+   ]
+  }
+ },
+ {
+  "id": "flask-prefixed-env",
+  "task": "What is the default prefix of Config.from_prefixed_env, and how are nested keys written in the variable name?",
+  "checks": {
+   "answer": [
+    "FLASK",
+    "__|double underscore"
+   ]
+  }
+ },
+ {
+  "id": "flask-dotenv",
+  "task": "Which environment variable does get_load_dotenv read?",
+  "checks": {
+   "answer": [
+    "FLASK_SKIP_DOTENV"
+   ]
+  }
+ },
+ {
+  "id": "flask-form-parts",
+  "task": "What is the default value of the MAX_FORM_PARTS setting?",
+  "checks": {
+   "answer": [
+    "\\b1[_,]?000\\b"
+   ]
+  }
+ },
+ {
+  "id": "flask-blueprint-parent",
+  "task": "Which class does the Blueprint class in src/flask/blueprints.py inherit from?",
+  "checks": {
+   "answer": [
+    "SansioBlueprint|sansio"
+   ]
+  }
+ },
+ {
+  "id": "flask-follow-appgroup",
+  "task": "Which class does AppGroup in cli.py inherit from?",
+  "checks": {
+   "answer": [
+    "Group"
+   ]
+  },
+  "followups": [
+   {
+    "task": "Which class in that file inherits from AppGroup?",
+    "checks": {
+     "answer": [
+      "FlaskGroup"
+     ]
+    }
+   }
+  ]
+ }
+]

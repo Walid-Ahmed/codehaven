@@ -1,0 +1,116 @@
+[
+ {
+  "id": "cobra-execute",
+  "task": "What does Command.Execute call, and what does it return?",
+  "checks": {
+   "answer": [
+    "ExecuteC",
+    "\\berr(or)?\\b"
+   ]
+  }
+ },
+ {
+  "id": "cobra-min-args",
+  "task": "What error message does MinimumNArgs return when too few arguments are given?",
+  "checks": {
+   "answer": [
+    "requires at least"
+   ]
+  }
+ },
+ {
+  "id": "cobra-checkerr",
+  "task": "What does CheckErr do when the message is not nil?",
+  "checks": {
+   "answer": [
+    "Stderr|standard error",
+    "Exit\\(1\\)|exits?\\b|status 1|code 1"
+   ]
+  }
+ },
+ {
+  "id": "cobra-suggestions",
+  "task": "What value does SuggestionsMinimumDistance get when it is not set?",
+  "checks": {
+   "answer": [
+    "\\b2\\b"
+   ]
+  }
+ },
+ {
+  "id": "cobra-complete-command",
+  "task": "What is the name of the hidden command used to request shell completions?",
+  "checks": {
+   "answer": [
+    "__complete"
+   ]
+  }
+ },
+ {
+  "id": "cobra-sorting",
+  "task": "Is command sorting on or off by default, and which variable controls it?",
+  "checks": {
+   "answer": [
+    "EnableCommandSorting",
+    "\\btrue\\b|\\bon\\b|enabled"
+   ]
+  }
+ },
+ {
+  "id": "cobra-name",
+  "task": "How does Command.Name work out the name of a command?",
+  "checks": {
+   "answer": [
+    "\\bUse\\b",
+    "space|first word"
+   ]
+  }
+ },
+ {
+  "id": "cobra-exclusive",
+  "task": "Which annotation key marks flags as mutually exclusive?",
+  "checks": {
+   "answer": [
+    "cobra_annotation_mutually_exclusive"
+   ]
+  }
+ },
+ {
+  "id": "cobra-who-calls",
+  "task": "Which function calls ExecuteC?",
+  "checks": {
+   "answer": [
+    "\\bExecute\\b|ExecuteContextC|ExecuteContext\\b"
+   ]
+  }
+ },
+ {
+  "id": "cobra-directives",
+  "task": "What numeric value does ShellCompDirectiveDefault have, and what value does ShellCompDirectiveError have?",
+  "checks": {
+   "answer": [
+    "\\b0\\b",
+    "\\b1\\b"
+   ]
+  }
+ },
+ {
+  "id": "cobra-follow-noargs",
+  "task": "What does NoArgs check?",
+  "checks": {
+   "answer": [
+    "arg"
+   ]
+  },
+  "followups": [
+   {
+    "task": "And what does ArbitraryArgs return?",
+    "checks": {
+     "answer": [
+      "\\bnil\\b"
+     ]
+    }
+   }
+  ]
+ }
+]

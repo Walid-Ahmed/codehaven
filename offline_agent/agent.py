@@ -26,7 +26,7 @@ from .tasks import (  # noqa: F401  (also imported from here by the tests and ot
 from .answers import (  # noqa: F401  (also imported from here by the tests and other modules)
     trim_at_limit, reply_problem, cited_schema, retrieved_rows, seen_span, file_named, with_points, action_key,
     format_search, format_retrieval, format_metrics, REPEAT_NOTE, LIMIT_NOTE, CORRECTION, SHOWN_ROWS,
-    cite_mentions, MENTION_HEADING,
+    cite_mentions, MENTION_HEADING, check_values, VALUE_HEADING,
 )
 
 
@@ -218,6 +218,15 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
         # Phase: check a final answer against the evidence, and print whatever part of it was not already streamed.
         final_text, issues = None, []
         if reply["action"] == "finish":
+            invented = []
+            # Each literal value the answer reports is looked for in the code: on the cited lines, or else on a line the
+            # model was shown, which then gets a citation; a value on no shown line was not read from the code.
+            if question and reply.get("content") and not state.get("discovery"):
+                extra, invented = check_values(reply["content"], state.get("task", ""), workspace,
+                                               state.get("search_evidence", []))
+                if extra:
+                    reply["content"] = "\n\n".join([reply["content"].rstrip(), VALUE_HEADING + "\n" + "\n".join(extra)])
+                    output(f"CodeHaven cited {len(extra)} line(s) holding values the answer reports.")
             issues = check_answer(reply["content"] or reply["message"], state.get("search_evidence", []),
                                   discovery=state.get("discovery", False), require_citation=question)
             # An answer that cites nothing gets citations for the code names it mentions, from lines the model saw.
@@ -229,6 +238,7 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
                     issues = check_answer(reply["content"], state.get("search_evidence", []),
                                           discovery=state.get("discovery", False), require_citation=question)
             issues += [f"No part named {symbol!r} was found in {path}; that point is uncited." for path, symbol in missing]
+            issues += [f"The answer reports {value!r}, which is on no line the model was shown." for value in invented]
             if issues and state.get("discovery"):
                 output("Model summary withheld because answer checks failed.")
                 final_text = inventory(state.get("search_evidence", []), state.get("evidence_limited", False))

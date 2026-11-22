@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from offline_agent.agent import run
-from offline_agent.answers import MENTION_HEADING, cite_mentions, observed_line, row_text
+from offline_agent.answers import MENTION_HEADING, VALUE_HEADING, check_values, cite_mentions, literal_values, observed_line, row_text
 from offline_agent.evidence import check_answer, retain
 from offline_agent.workspace import Workspace
 
@@ -75,3 +75,45 @@ class CitationTests(unittest.TestCase):
         self.assertEqual(check_answer("It is here. [pricing.py:5-6]", rows),
                          ["Citation not supported by retained evidence: pricing.py:5-6.",
                           "Repository claims require path:line citations supported by observed evidence."])
+
+
+class ValueCheckTests(unittest.TestCase):
+    """Each literal value an answer reports is found in the code: on the cited lines, or on a line that gets cited."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "adapters.py").write_text("DEFAULT_POOLSIZE = 10\nDEFAULT_RETRIES = 0\n\n\n\n\n\n\n"
+                                               "class HTTPAdapter:\n    def __init__(self, pool_connections=DEFAULT_POOLSIZE):\n"
+                                               "        self.agent = 'python-requests'\n")
+        self.ws = Workspace(self.root)
+        self.shown, _ = retain([], [{"path": "adapters.py", "line": 1, "end_line": 11}])
+
+    def test_values_are_quoted_strings_and_numbers_but_not_line_numbers_paths_or_the_question(self):
+        answer = "It is 10, see lines 9-10 and at 42, in 'adapters.py', named 'python-requests', not 3 or 0.5.1."
+        self.assertEqual(literal_values(answer, "Is the size 10 or 20?"),
+                         [("text", "python-requests"), ("number", "0.5.1")])
+
+    def test_a_value_on_or_near_a_cited_line_needs_nothing(self):
+        self.assertEqual(check_values("The pool size is 10. [adapters.py:2]", "", self.ws, self.shown), ([], []))  # Line 1 is in reach.
+
+    def test_a_value_shown_elsewhere_gets_a_citation_of_its_line(self):
+        answer = "HTTPAdapter sends 'python-requests' with a pool of 10. [adapters.py:9]"
+        self.assertEqual(check_values(answer, "", self.ws, self.shown), (["- adapters.py:1 `10`"], []))
+
+    def test_a_value_on_no_shown_line_is_invented(self):
+        self.assertEqual(check_values("The pool size is 100. [adapters.py:1]", "", self.ws, self.shown), ([], ["100"]))
+
+    def test_the_agent_cites_a_shown_value_and_flags_an_invented_one(self):
+        model = ScriptedModel([action("read", "adapters.py"),
+                               action("finish", content="The default pool size is 10. [adapters.py:9]")])
+        output = []
+        self.assertEqual(run(model, self.ws, "What is HTTPAdapter's default pool size?", output=output.append), 0)
+        self.assertIn(VALUE_HEADING + "\n- adapters.py:1 `10`", "\n".join(output))
+        model = ScriptedModel([action("read", "adapters.py"),
+                               action("finish", content="The default pool size is 100. [adapters.py:1]")])
+        output = []
+        self.assertEqual(run(model, self.ws, "What is HTTPAdapter's default pool size?", output=output.append), 2)
+        self.assertIn("Answer check: The answer reports '100', which is on no line the model was shown.", output)
+

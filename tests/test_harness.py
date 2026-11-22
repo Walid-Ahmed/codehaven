@@ -9,7 +9,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from offline_agent.agent import ANSWER_FROM_PRELOAD, FINAL_ANSWER_CHARS, FINISH_NOW, REPEAT_NOTE, Session, run, task_kind
+from offline_agent.prompts import ANSWER_CHARS
+from offline_agent.agent import ANSWER_FROM_PRELOAD, FINAL_ANSWER_CHARS, cited_schema, FINISH_NOW, REPEAT_NOTE, Session, run, task_kind
 from offline_agent.cli import interactive, main, write_stream
 from offline_agent.model import (MODEL, FinishContent, InvalidReply, Ollama, RepeatedAnswer, RepetitionGuard,
                                  compact_messages)
@@ -259,7 +260,9 @@ class RepetitionTests(TempWorkspace):
                 schemas.append(schema)
                 return action("finish", content="Done.")
         run(Model(), self.ws, "Explain", max_steps=1, output=lambda _: None)
-        self.assertEqual(schemas[0]["properties"]["content"]["maxLength"], FINAL_ANSWER_CHARS)
+        # "Explain" is a plain question, so its answer text gets the short cap; a change request keeps the long one.
+        self.assertEqual(schemas[0]["properties"]["content"]["maxLength"], ANSWER_CHARS)
+        self.assertEqual(cited_schema()["properties"]["content"]["maxLength"], FINAL_ANSWER_CHARS)
 
 
 class PreloadTests(TempWorkspace):

@@ -2,7 +2,7 @@
 import json
 import re
 
-from .prompts import ACTIONS, FINAL_ANSWER_CHARS, OVERVIEW_CHARS, POINT_CHARS, POINTS, SCHEMA
+from .prompts import ACTIONS, ANSWER_CHARS, FINAL_ANSWER_CHARS, OVERVIEW_CHARS, POINT_CHARS, POINTS, SCHEMA
 from .workspace import line_range, symbol_lines
 
 
@@ -49,10 +49,11 @@ def reply_problem(reply):
     return None
 
 
-def cited_schema(paths=()):
+def cited_schema(paths=(), brief=False):
     """Schema for questions and change requests: an answer, and points that each name a part of the code.
 
-    Explaining named files gets a short overview and points limited to those files.
+    Explaining named files gets a short overview and points limited to those files. brief is for a plain question,
+    whose answer text is capped at ANSWER_CHARS; a change request keeps the room it needs to show new code.
     """
     # With named files, a point's path is limited to them, so the model cannot cite a file it was not shown.
     point = {"type": "object", "additionalProperties": False,
@@ -62,7 +63,7 @@ def cited_schema(paths=()):
              "required": ["path", "symbol", "text"]}
     properties = {**SCHEMA["properties"],
                   "action": {"type": "string", "enum": list(ACTIONS)},
-                  "content": {"type": "string", "maxLength": OVERVIEW_CHARS if paths else FINAL_ANSWER_CHARS},
+                  "content": {"type": "string", "maxLength": OVERVIEW_CHARS if paths else ANSWER_CHARS if brief else FINAL_ANSWER_CHARS},
                   "points": {"type": "array", "items": point, "maxItems": POINTS}}
     return {**SCHEMA, "properties": properties, "required": SCHEMA["required"] + ["points"]}
 
@@ -93,6 +94,25 @@ def seen_span(path, span, evidence, symbol=""):
     named = next((row for row in evidence if row["path"].removeprefix("repo/") == path and symbol and row.get("in")
                   and row["in"].rsplit(".", 1)[-1] == symbol.rsplit(".", 1)[-1].removesuffix("()")), None)
     return (named["line"], named["line"]) if named else span
+
+
+def observed_line(symbol, path, evidence):
+    """(path, line) of a line the model was shown that contains the symbol's name, or None. The point's own file comes first.
+
+    The model names the right thing but often the wrong place: the file that imports a constant instead of the one
+    that sets it, or the line of an import. When the lines it was actually shown contain the name, citing one of
+    those is both true and checkable, where the looked-up line would be flagged as never read.
+    """
+    short = symbol.strip("`'\" ").removesuffix("()").rsplit(".", 1)[-1]
+    if len(short) < 3:
+        return None
+    named = re.compile(rf"(?<![\w$]){re.escape(short)}(?![\w$])")
+    rows = sorted(evidence, key=lambda row: row["path"].removeprefix("repo/") != path)  # Stable: the point's own file first.
+    for row in rows:
+        for offset, text in enumerate(str(row.get("text") or "").splitlines()):
+            if named.search(text) and row["line"] + offset <= row.get("end_line", row["line"]):
+                return row["path"].removeprefix("repo/"), row["line"] + offset
+    return None
 
 
 def file_named(workspace, path, symbol, files):
@@ -141,6 +161,12 @@ def with_points(reply, workspace, evidence=()):
             else:
                 span = symbol_lines(path, workspace.read(path), symbol)
                 span = span and seen_span(path, span, evidence, symbol)
+                # Looked up, but on lines the model never saw (or not found at all): cite a shown line that names it instead.
+                shown = any(row["path"].removeprefix("repo/") == path and span and row["line"] <= span[1]
+                            and span[0] <= row.get("end_line", row["line"]) for row in evidence)
+                seen = None if shown else observed_line(symbol, path, evidence)
+                if seen:
+                    path, span = seen[0], (seen[1], seen[1])
         except (ValueError, OSError, UnicodeError):
             # Not a workspace file; it may be a retrieved reference document such as user/team.md.
             reference = next((row for row in evidence if row["path"] == point["path"]), None)

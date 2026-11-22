@@ -1,6 +1,6 @@
 # CodeHaven technical report
 
-CodeHaven (version 0.10.0) is a read-only, offline assistant for understanding code. It indexes a repository on your machine, answers questions about it with a local model served by Ollama (`qwen2.5-coder:7b` by default), and cites the lines it used. It never changes your files, and at runtime it talks only to Ollama on `127.0.0.1`. The one exception is opt-in: with `--allow-clone`, the browser page can download a GitHub repository you ask for.
+CodeHaven (version 0.11.0) is a read-only, offline assistant for understanding code. It indexes a repository on your machine, answers questions about it with a local model served by Ollama (`qwen2.5-coder:7b` by default), and cites the lines it used. It never changes your files, and at runtime it talks only to Ollama on `127.0.0.1`. The one exception is opt-in: with `--allow-clone`, the browser page can download a GitHub repository you ask for.
 
 This report describes how it is built: the parts and how a question moves through them, the agent loop and its tools, how relevant code is found (RAG), how answers are checked, what is stored, and what the retrieval measurements show. For how to use it, see the [README](../README.md).
 
@@ -140,6 +140,8 @@ Passages are found four ways:
 
 **Definition lookup.** When the index is built, CodeHaven records where each function, class, method, and module constant is defined, using Python's `ast` module and Tree-sitter for JavaScript and TypeScript. A word in the question counts as a code name only when it is written like code (underscore, camelCase, `ALL_CAPS`, a dot, backticks, or `()`), or when it sits next to "function", "method", "class", or "constant". Only names defined in one to three files are looked up, and at most three definitions are added. For a method, the passage is the method itself, not its whole class.
 
+**Named definitions, shown whole.** Retrieval returns passages within a byte budget, and a 50-line function seldom fits. So when a question names a function, method, or class, [symbols.py](../offline_agent/symbols.py) looks it up in the parsed symbols and adds its numbered lines to the prompt as a separate tool result, up to two definitions sharing 3,500 bytes. A longer definition is cut the way a long file is: its start, its end, and the lines around the question's words. Below the lines it lists where each constant they use is set, and for a class, the classes that inherit from it. A word is treated as code only when it is marked or shaped as code (backticks, a dot, an underscore, a digit, camelCase) or is a capitalised word that is exactly a class name.
+
 **Import following.** For Python, JavaScript, TypeScript, Go, Java, and Rust, CodeHaven adds the definitions that matched files import from other local files, up to two hops and four passages. Python uses `ast` ([dependencies.py](../offline_agent/dependencies.py)), JavaScript and TypeScript use Tree-sitter ([javascript.py](../offline_agent/javascript.py)), and Go, Java, and Rust use Tree-sitter for where each part is and line patterns for imports ([languages.py](../offline_agent/languages.py)). Package imports and path aliases are not resolved.
 
 **Meaning search.** [semantic.py](../offline_agent/semantic.py) embeds every passage with a second, small Ollama model (the first installed of `nomic-embed-text`, `embeddinggemma`, and others, or `--embed-model`). The 24 nearest passages above a similarity of 0.2 are mixed with the keyword ranking by reciprocal rank fusion: a passage's place in each list counts, not the two scores, which are on different scales. Exact names therefore still win. Passages are embedded in the background, so a question uses whatever is ready. If the embedding model fails, search goes back to key words for the session.
@@ -238,6 +240,9 @@ All code is in [offline_agent/](../offline_agent).
 | [model.py](../offline_agent/model.py) | The Ollama client: loopback checks, streaming, repetition guard, compaction |
 | [workspace.py](../offline_agent/workspace.py), [exclusions.py](../offline_agent/exclusions.py) | Safe, read-only file listing, reading, and search |
 | [knowledge.py](../offline_agent/knowledge.py) | The index: passages, BM25, definition lookup, retrieval budget |
+| [symbols.py](../offline_agent/symbols.py) | The definitions a question names: lookup, the lines shown, constants, and inheriting classes |
+| [trace.py](../offline_agent/trace.py) | The call path below a function, and its callers |
+| [doctor.py](../offline_agent/doctor.py) | What is missing at start-up and how to get it; starting Ollama for one run |
 | [semantic.py](../offline_agent/semantic.py) | Meaning search with a local embedding model |
 | [dependencies.py](../offline_agent/dependencies.py), [javascript.py](../offline_agent/javascript.py), [languages.py](../offline_agent/languages.py) | Import graphs and symbol spans per language |
 | [evidence.py](../offline_agent/evidence.py) | Retained evidence and the final answer checks |

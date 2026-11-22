@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from offline_agent.dependencies import PythonDependencies
 from offline_agent.knowledge import KnowledgeBase
+from offline_agent.workspace import READ_BYTES
 
 
 class ImportResolutionTests(unittest.TestCase):
@@ -108,7 +109,7 @@ class DependencyRetrievalTests(unittest.TestCase):
         self.put("app.py", "import hidden\nimport large\ndef uniqueentrypoint(): pass\n")
         self.put("outside.txt", "never executed")
         (self.root / "hidden.py").symlink_to(self.root / "outside.txt")
-        self.put("large.py", "x" * 64001)
+        self.put("large.py", "x" * (READ_BYTES + 1))
         self.assertEqual([r["source"] for r in self.retrieve()["results"]], ["repo/app.py"])
 
     def test_refresh_rebuilds_import_graph(self):

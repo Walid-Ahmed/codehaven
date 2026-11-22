@@ -515,8 +515,10 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
             names, reason = [focus_file], "it is the file this chat is about"
         # The functions and classes the task names, looked up in the parsed code; within the named files when there are any.
         named = symbols.find(task, knowledge, set(names) if names else None) if knowledge is not None and kind != "other" else []
-        if not names and kind != "other":
-            shown, found = search_named(workspace, task)
+        # Searched even when the task names a file, within that file: "which functions in routing.py call X?" needs
+        # the matches and the functions they are in, which a preview of a long file does not show.
+        if kind != "other":
+            shown, found = search_named(workspace, task, scope=names)
             if shown:
                 messages.append({"role": "user", "content": "Tool result for search of names in the task (untrusted file data):\n"
                                                             + "\n".join(shown)})

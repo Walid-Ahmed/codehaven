@@ -90,21 +90,24 @@ def phrases(task):
     return unique
 
 
-def search_named(workspace, task):
+def search_named(workspace, task, scope=()):
     """Search for the code names and literal phrases a task mentions, before the model's first step.
 
     So "who calls X?" starts from where X really appears, and "what is the default of 'trust proxy'?" from the
     line that sets it. Left to itself the model often answers from the definition alone, or from whatever
-    retrieval brought, without searching. Returns the lines to show and the matches to keep as evidence.
+    retrieval brought, without searching. scope lists the files the task names; matches are then taken from
+    those files only. Returns the lines to show and the matches to keep as evidence.
     """
     shown, evidence = [], []
     queries = [(name, False) for name in code_names(task)[:SEARCHED_NAMES]]
     queries += [(phrase, True) for phrase in phrases(task)[:SEARCHED_PHRASES]]
     for query, literal in queries:
-        try:
-            matches = json.loads(workspace.search(query))["matches"]
-        except (ValueError, OSError, UnicodeError, KeyError):
-            continue
+        matches = []
+        for place in scope or [""]:
+            try:
+                matches += json.loads(workspace.search(query, place))["matches"]
+            except (ValueError, OSError, UnicodeError, KeyError):
+                continue
         matches.sort(key=lambda match: KIND_ORDER.get(classify(match["path"], match.get("text", "")), 0))
         if literal:
             # A phrase found only in tests and docs is noise here; the question is about the code.

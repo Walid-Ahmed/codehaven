@@ -55,3 +55,11 @@ class SearchNamedTests(unittest.TestCase):
         (self.root / "fees.py").write_text("SERVICE_RATE = 0.05\n")
         shown, _ = search_named(self.ws, "What is SERVICE_RATE?")
         self.assertTrue(shown[0].startswith("- fees.py:1"), shown)
+
+    def test_a_question_naming_a_file_is_searched_within_that_file(self):
+        (self.root / "routing.py").write_text("def get_request_handler():\n    return solve_dependencies()\n\n\n"
+                                              "def get_websocket_app():\n    return solve_dependencies()\n")
+        (self.root / "other.py").write_text("solve_dependencies()\n")
+        shown, _ = search_named(self.ws, "Which functions in routing.py call solve_dependencies?", scope=["routing.py"])
+        self.assertEqual(shown, ["- routing.py:2 (inside get_request_handler): return solve_dependencies()",
+                                 "- routing.py:6 (inside get_websocket_app): return solve_dependencies()"])

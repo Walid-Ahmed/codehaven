@@ -117,6 +117,7 @@ These answer one kind of request each. Those that use the model make small, boun
 | File review | [review.py](../offline_agent/review.py) | Up to 12 functions, one model call each. The model states what the function promises and what it does before giving a verdict. |
 | Test gaps | [insights.py](../offline_agent/insights.py) | Lists public functions whose names appear in no test file. No model. |
 | Project tour | [insights.py](../offline_agent/insights.py) | Orders up to 8 files by the import graph; the model adds one sentence per file. |
+| Call trace | [trace.py](../offline_agent/trace.py) | Walks the calls below a named function through the parsed symbols, up to 3 deep and 8 functions, and lists its callers; the model adds one sentence per function. |
 | Structure map | [study.py](../offline_agent/study.py) | Draws calls inside a file, or imports between files, from parsed code. No model. |
 | Flashcards | [study.py](../offline_agent/study.py) | The model writes 3 to 6 cards per file and names the part each is about; the lines are looked up. |
 | Picture to code | [ocr.py](../offline_agent/ocr.py) | Tesseract reads the picture; indentation is rebuilt from word positions. No model. |

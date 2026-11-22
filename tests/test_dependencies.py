@@ -1,3 +1,4 @@
+"""Python import following: which file imports which, and the symbols and line spans found by parsing."""
 import json
 import tempfile
 import unittest

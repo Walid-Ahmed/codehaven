@@ -39,6 +39,7 @@ class Stopped(Exception):
     """The user stopped the answer. Not a ValueError, so no helper mistakes it for a bad reply and carries on."""
 
     def __init__(self):
+        """Carry the one message the page and the terminal show for a stopped answer."""
         super().__init__("Stopped.")
 
 
@@ -256,6 +257,7 @@ class ChatHandler(urllib.request.HTTPHandler):
     """
 
     def __init__(self, client):
+        """Remember the Ollama client whose chat sockets are to be handed over."""
         super().__init__()
         self.client = client
 

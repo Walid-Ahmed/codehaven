@@ -1,3 +1,4 @@
+"""JavaScript and TypeScript import following, complete-symbol retrieval, and how context is shared out."""
 import json
 import contextlib
 import io

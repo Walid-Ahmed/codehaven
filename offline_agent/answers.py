@@ -197,7 +197,9 @@ def file_named(workspace, path, symbol, files):
 QUOTED_VALUE = re.compile(r"""(?<![\w])['"]([^'"\n]{2,40})['"](?![\w])""")
 NUMBER_VALUE = re.compile(r"(?<![\w.:/-])(\d+\.\d+(?:\.\d+)*|\d{2,})(?![\w.]*\w)")
 # A number right after one of these words is a line number the answer mentions, not a value from the code.
-LINE_WORD = re.compile(r"\b(?:lines?|at|to|through|and)\s*$|-\s*$", re.I)
+LINE_WORD = re.compile(r"\b(?:lines?(?:\s+(?:are|is|from|between))?|at|to|through|and)\s*$|-\s*$", re.I)
+# Neither is the first number of a range such as "348-351", nor a percentage, which the code writes as a fraction.
+NOT_A_VALUE_AFTER = re.compile(r"\s*(?:-\s*\d|%|percent\b)", re.I)
 # Paths and file names are not values; citations already check those.
 PATH_LIKE = re.compile(r"[/\\]|\.[A-Za-z]{1,5}$")
 # How far around a cited range a value may sit: answers cite a definition and quote a value a line or two away.
@@ -213,7 +215,8 @@ def literal_values(answer, task=""):
         if not PATH_LIKE.search(value) and value.strip() == value:
             found.append(("text", value))
     for match in NUMBER_VALUE.finditer(prose):
-        if not LINE_WORD.search(prose[max(0, match.start() - 12):match.start()]):
+        if not (LINE_WORD.search(prose[max(0, match.start() - 16):match.start()])
+                or NOT_A_VALUE_AFTER.match(prose, match.end())):
             found.append(("number", match.group(1)))
     unique = []
     for kind, value in found:
@@ -223,9 +226,12 @@ def literal_values(answer, task=""):
 
 
 def contains(kind, value, text):
-    """True when value appears in text: a number as a whole number, a string exactly."""
+    """True when value appears in text: a number not inside a longer number, a string exactly.
+
+    Only digits bound a number, so 422 is found in HTTP_422_UNPROCESSABLE_ENTITY, a constant that holds it.
+    """
     if kind == "number":
-        return re.search(rf"(?<![\w.]){re.escape(value)}(?![\w])", text) is not None
+        return re.search(rf"(?<![\d.]){re.escape(value)}(?!\d|\.\d)", text) is not None
     return value in text
 
 

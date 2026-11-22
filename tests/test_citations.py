@@ -95,6 +95,17 @@ class ValueCheckTests(unittest.TestCase):
         self.assertEqual(literal_values(answer, "Is the size 10 or 20?"),
                          [("text", "python-requests"), ("number", "0.5.1")])
 
+    def test_line_ranges_and_percentages_are_not_values(self):
+        # Each of these flagged a correct answer in a real run.
+        answer = "The relevant lines are 348-351 in sessions.py. It takes 10% off, and the tax is 15 percent."
+        self.assertEqual(literal_values(answer), [])
+
+    def test_a_number_held_by_a_constant_name_is_found(self):
+        (self.root / "handlers.py").write_text("def handle():\n    return JSONResponse(status_code=HTTP_422_UNPROCESSABLE_ENTITY)\n")
+        shown, _ = retain([], [{"path": "handlers.py", "line": 1, "end_line": 2}])
+        self.assertEqual(check_values("It returns 422. [handlers.py:1]", "", self.ws, shown), ([], []))
+        self.assertEqual(check_values("It returns 42. [handlers.py:1]", "", self.ws, shown), ([], ["42"]))
+
     def test_a_value_on_or_near_a_cited_line_needs_nothing(self):
         self.assertEqual(check_values("The pool size is 10. [adapters.py:2]", "", self.ws, self.shown), ([], []))  # Line 1 is in reach.
 

@@ -51,4 +51,15 @@ What the later rows show:
 
 The three changes after the baseline were made after reading the baseline's failures, on the same 34 questions, so the last row is partly fitted to them. A question set the changes never saw would be a fairer test; the two small sets below are the nearest thing.
 
+### The two small sets
+
+These questions were not looked at while the answer-quality changes were made, so they are the fairer check that the changes help in general and break nothing.
+
+| Date | Code | `tasks.json` | `bookings_tasks.json` | Verified |
+|---|---|---|---|---|
+| 2026-11-22 | Before the answer-quality changes | 12/14 | 12/16 | 12/14 and 13/16 |
+| 2026-11-22 | v0.11.0, with all of them | 12/14 | 14/16 | 12/14 and 15/16 |
+
+The same two sample questions fail before and after: a request to fix `Store.low_stock`, where the answer explains the fix without writing `<=`, and one about a slug. Each row is a single run, and results move by a question or so between runs, so read the bookings gain as "no worse", not as proof of two more.
+
 These are short questions with one right answer each, on three libraries. They do not measure explanations of a whole project, large monorepos, or questions in Arabic.

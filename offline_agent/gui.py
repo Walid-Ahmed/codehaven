@@ -45,7 +45,7 @@ from .agent import Session
 from .chats import Chats, new_id
 from .knowledge import KnowledgeBase
 from .memory import Memory
-from .model import MODEL
+from .model import MODEL, Stopped
 from .semantic import Semantic
 from .workspace import MAX_BYTES, MAX_FILES, Workspace
 
@@ -84,6 +84,7 @@ class App:
         # One request at a time uses the model: busy is the flag, and the lock only guards reading and setting it.
         self.lock = threading.Lock()
         self.busy = False
+        self.stoppable = False  # True while an answer or flashcards run, which are what stop() can end.
         self.workspace = self.knowledge = self.session = None
         self.upload = self.upload_folder = None  # The uploaded file's name and its private temporary folder.
         self.picture = None  # When the upload was a picture: how reading it went, for the page to show.
@@ -101,7 +102,27 @@ class App:
     def release(self):
         """Let the next request in."""
         with self.lock:
-            self.busy = False
+            self.busy = self.stoppable = False
+
+    def claim_model(self):
+        """claim() for work the Stop button can end: an answer or flashcards. A stop meant for earlier work is cleared."""
+        with self.lock:
+            if self.busy:
+                raise Busy("CodeHaven is still working on the previous request.")
+            self.busy = self.stoppable = True
+            if hasattr(self.model, "allow"):
+                self.model.allow()
+
+    def stop(self):
+        """Stop the answer or flashcards in progress. Returns whether there was anything to stop.
+
+        The lock makes this and claim_model() take turns, so a late stop can never end the next question.
+        """
+        with self.lock:
+            stopped = self.stoppable and hasattr(self.model, "stop")
+            if stopped:
+                self.model.stop()
+        return {"stopped": bool(stopped)}
 
     def emit(self, event):
         """Pass a log line or a piece of streamed text to the answer being sent, if one is running."""
@@ -353,7 +374,7 @@ class App:
             raise ValueError("Choose a repository or upload a file first.")
         if not isinstance(question, str) or not question.strip():
             raise ValueError("Type a question first.")
-        self.claim()
+        self.claim_model()
         # The answer runs on a worker thread; its events reach this request thread, which writes them out, through a queue.
         events = queue.Queue()
         self.sink = events
@@ -373,6 +394,9 @@ class App:
                             "remembered": len(session.turns), "memory": session.TURNS,
                             "kept": session.saved, "saved": len(session.memory.notes) if session.memory else 0,
                             "chats": chats.listing() if chats is not None else []})
+            except Stopped:
+                # Nothing was recorded: a stopped question is not remembered by follow-ups, saved, or kept in a chat.
+                events.put({"type": "stopped", "remembered": len(session.turns), "memory": session.TURNS})
             except Exception as exc:  # Reported to the page; the server keeps running.
                 events.put({"type": "error", "message": str(exc) or type(exc).__name__})
             finally:
@@ -433,9 +457,11 @@ class App:
 
         in_arabic is set by the Arabic page, so its cards are written in Arabic."""
         workspace = self.opened()
-        self.claim()
+        self.claim_model()
         try:
             yield from study.flashcards(self.model, workspace, self.selection(paths), count, in_arabic=in_arabic)
+        except Stopped:
+            yield {"type": "stopped"}  # The cards already sent stay on the page.
         finally:
             self.release()
 
@@ -731,6 +757,8 @@ def make_handler(app, token, port_holder):
                 elif url.path == "/api/reset":
                     app.reset()
                     self.send(200, {"ok": True})
+                elif url.path == "/api/stop":
+                    self.send(200, app.stop())
                 elif url.path == "/api/ask":
                     self.stream(app.ask(data.get("question", "")))
                 elif url.path == "/api/map":

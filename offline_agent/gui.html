@@ -129,6 +129,8 @@ body.dropping .main::after { content: attr(data-drop); position: fixed; inset-bl
 .answer pre code { background: none; padding: 0; }
 a.cite { color: var(--accent); font-family: var(--mono); font-size: 13px; text-decoration: none; border-bottom: 1px dashed var(--accent); }
 a.cite:hover { border-bottom-style: solid; }
+.stopped { margin-top: 10px; color: var(--muted); font-size: 13px; }
+button.stop { border-color: var(--error); color: var(--error); font-weight: 600; }
 .checks { margin-top: 12px; background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 9px 12px; font-size: 13px; }
 .checks strong { display: block; margin-bottom: 4px; }
 .checks ul { margin: 0; padding-inline-start: 18px; }
@@ -403,7 +405,8 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
 const $ = (id) => document.getElementById(id);
 // busy: a request is running; indexed: something is open; uploaded: it is one uploaded file; browsing: the folder browser's folder.
-let busy = false, indexed = false, uploaded = false, browsing = "";
+// stoppable: the running request is an answer or flashcards, which Stop can end; stopping: Stop was clicked.
+let busy = false, indexed = false, uploaded = false, browsing = "", stoppable = false, stopping = false;
 const UPLOAD_BYTES = 64000;  // The same limit as every file CodeHaven reads.
 const PICTURE_BYTES = 8000000;  // A picture of code is read into text by Tesseract on this computer.
 const isDocument = (file) => /\.(ipynb|pdf)$/i.test(file.name) || file.type === "application/pdf";
@@ -465,6 +468,11 @@ const ARABIC = {
   "Open a project or upload a file first": "افتح مشروعًا أو ارفع ملفًا أولًا",
   "Question": "السؤال",
   "Ask": "اسأل",
+  "Stop": "إيقاف",
+  "Stopping…": "جارٍ الإيقاف…",
+  "Stopped. This question is not remembered in follow-ups.": "تم الإيقاف. لن تتذكر الأسئلة التالية هذا السؤال.",
+  "Stopped. ": "تم الإيقاف. ",
+  "{cards} kept.": "تم الاحتفاظ بـ {cards}.",
   "Enter to send · Shift+Enter for a new line · Name files and functions exactly for the best answers": "Enter للإرسال · Shift+Enter لسطر جديد · اكتب أسماء الملفات والدوال كما هي للحصول على أفضل الإجابات",
   "Choose files…": "اختر ملفات…",
   "← All files": "→ كل الملفات",
@@ -1225,7 +1233,11 @@ function scrollDown() { const box = $("messages"); box.scrollTop = box.scrollHei
 function updateComposer() {
   const ready = indexed && !busy;
   $("question").disabled = !ready;
-  $("send").disabled = !ready || !$("question").value.trim();
+  // While an answer or flashcards are being written, the button that started them stops them.
+  const stopLabel = t(stopping ? "Stopping…" : "Stop");
+  $("send").textContent = stoppable ? stopLabel : t("Ask");
+  $("send").classList.toggle("primary", !stoppable); $("send").classList.toggle("stop", stoppable);
+  $("send").disabled = stoppable ? stopping : !ready || !$("question").value.trim();
   $("question").placeholder = t(!indexed ? "Open a project or upload a file first" : busy ? "CodeHaven is working…"
     : uploaded ? "Ask about this file" : "Ask about this repository");
   $("language").disabled = busy;
@@ -1237,7 +1249,9 @@ function updateComposer() {
   $("forget").disabled = busy || uploaded || !(savedCount || chatCount);
   $("tab-map").disabled = $("tab-cards").disabled = !indexed;
   $("map-draw").disabled = !indexed;
-  $("cards-make").disabled = !ready;
+  $("cards-make").textContent = stoppable ? stopLabel : t("Make flashcards");
+  $("cards-make").classList.toggle("primary", !stoppable); $("cards-make").classList.toggle("stop", stoppable);
+  $("cards-make").disabled = stoppable ? stopping : !ready;
   for (const button of document.querySelectorAll("[data-choose]")) button.hidden = uploaded;
   showChosen();
   for (const button of $("suggestions").querySelectorAll("button")) button.disabled = !ready;
@@ -1250,11 +1264,18 @@ function statusText(line) {
   return line.replace(/^\s+/, "").replace(/\s*\(loading and prompt processing can take time\)\.\.\.$/, "…");
 }
 
+// Stop the answer or flashcards being written. The request that is streaming them ends with a "stopped" event.
+async function stopNow() {
+  if (!stoppable || stopping) return;
+  stopping = true; updateComposer();
+  try { await api("/api/stop", {method: "POST", body: "{}"}); }
+  catch (error) { stopping = false; updateComposer(); toast(error.message); }
+}
 // Send one question and show the answer as it streams in; then its checks, the steps taken, and a Copy button.
 async function ask(question) {
   question = question.trim();
   if (!question || busy || !indexed) return;
-  busy = true;
+  busy = stoppable = true;
   $("question").value = ""; resize(); updateComposer();
   addMessage("user").textContent = question;
   const card = addMessage("assistant");
@@ -1269,7 +1290,7 @@ async function ask(question) {
   let streamed = "", phase = t("Starting…");
   const started = Date.now();
   const timer = setInterval(() => { statusLabel.textContent = `${phase} ${t("{seconds}s", {seconds: Math.round((Date.now() - started) / 1000)})}`; }, 1000);
-  const finish = () => { clearInterval(timer); busy = false; updateComposer(); $("question").focus(); };
+  const finish = () => { clearInterval(timer); busy = stoppable = stopping = false; updateComposer(); $("question").focus(); };
   try {
     let done = null;
     for await (const event of streamEvents("/api/ask", {question})) {
@@ -1282,13 +1303,20 @@ async function ask(question) {
         answer.innerHTML = render(streamed);
         phase = t("Writing the answer…");
         scrollDown();
-      } else if (event.type === "done" || event.type === "error") {
+      } else if (event.type === "done" || event.type === "error" || event.type === "stopped") {
         done = event;
       }
     }
     status.remove();
     if (!done) throw new Error(t("The connection closed before the answer finished."));
     if (done.type === "error") throw new Error(done.message);
+    if (done.type === "stopped") {
+      // What was written so far stays on the page, marked as unfinished.
+      const note = document.createElement("div"); note.className = "stopped";
+      note.textContent = t("Stopped. This question is not remembered in follow-ups.");
+      card.append(note);
+      return;
+    }
     answer.innerHTML = render(done.complete ? done.answer : (streamed || t("No final answer: the step limit was reached before CodeHaven finished.")));
     if (done.issues.length) {
       const checks = document.createElement("div"); checks.className = "checks";
@@ -1331,7 +1359,7 @@ $("question").addEventListener("input", () => { resize(); updateComposer(); });
 $("question").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); ask($("question").value); }
 });
-$("send").addEventListener("click", () => ask($("question").value));
+$("send").addEventListener("click", () => stoppable ? stopNow() : ask($("question").value));
 $("index").addEventListener("click", indexRepository);
 $("path").addEventListener("keydown", (event) => { if (event.key === "Enter") indexRepository(); });
 $("browse").addEventListener("click", openBrowser);
@@ -1589,11 +1617,11 @@ function flipCard() { cardAnswer = !cardAnswer; showCard(); }
 async function makeCards() {
   if (busy || !indexed) return;
   if (!uploaded && !selected.length) { openPicker(); return; }
-  busy = true; updateComposer();
+  busy = stoppable = true; updateComposer();
   const status = $("cards-status"), failed = [], started = Date.now();
   status.classList.remove("error");
   cards = []; cardAt = 0; cardAnswer = false; showCard();
-  let phase = t("Starting…"), finished = false;
+  let phase = t("Starting…"), finished = false, stopped = false;
   const tick = () => { status.textContent = `${phase} ${t("{seconds}s", {seconds: Math.round((Date.now() - started) / 1000)})}`; };
   const timer = setInterval(tick, 1000);
   tick();
@@ -1603,8 +1631,10 @@ async function makeCards() {
       else if (event.type === "cards") { cards.push(...event.cards); showCard(); }
       else if (event.type === "error") failed.push(`${event.path}: ${event.message}`);
       else if (event.type === "done") finished = true;
+      else if (event.type === "stopped") stopped = true;
     }
     clearInterval(timer);
+    if (stopped) { status.textContent = t("Stopped. ") + t("{cards} kept.", {cards: count(cards.length, "card")}); return; }
     if (!finished) throw new Error(t("The connection closed before the cards were finished."));
     status.classList.toggle("error", !cards.length);
     status.textContent = (cards.length ? t("{cards} in {seconds}s. Click the card, or press Space, to turn it over; the arrow keys move between cards. ",
@@ -1615,10 +1645,10 @@ async function makeCards() {
     clearInterval(timer);
     studyError("cards-status", error.message);
   } finally {
-    busy = false; updateComposer();
+    busy = stoppable = stopping = false; updateComposer();
   }
 }
-$("cards-make").addEventListener("click", makeCards);
+$("cards-make").addEventListener("click", () => stoppable ? stopNow() : makeCards());
 $("flashcard").addEventListener("click", (event) => { if (!event.target.closest("a")) flipCard(); });
 $("card-flip").addEventListener("click", flipCard);
 $("card-prev").addEventListener("click", () => moveCard(-1));

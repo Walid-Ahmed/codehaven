@@ -118,6 +118,8 @@ def main(argv=None):
                              "off, and stop it on exit")
     parser.add_argument("-i", "--interactive", action="store_true",
                         help="Ask several tasks in one session; follow-ups see earlier answers")
+    parser.add_argument("--no-retry", action="store_true",
+                        help="Do not ask the model to correct an answer that fails its checks (one extra step, on by default)")
     parser.add_argument("--no-stream", action="store_true", help="Print the final answer only once it is complete")
     parser.add_argument("--gui", action="store_true", help="Open a local page in your browser to pick a repository and chat")
     parser.add_argument("--port", type=int, default=0, help="Port for --gui on 127.0.0.1 (default: any free port)")
@@ -253,7 +255,7 @@ def main(argv=None):
             print("Reference directory excluded by workspace rules; it was not indexed. "
                   "Use a permitted directory or an external reference library.")
         print(f"Workspace: {workspace.root}\nRead-only: CodeHaven never changes your files.")
-        options = dict(max_steps=args.max_steps, knowledge=knowledge,
+        options = dict(max_steps=args.max_steps, knowledge=knowledge, retry_unverified=not args.no_retry,
                        output=partial(print, flush=True), stream=None if args.no_stream else write_stream,
                        test_options={"runner": args.test_runner, "image": args.test_image,
                                      "docker_socket": args.test_docker_socket},

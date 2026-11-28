@@ -15,7 +15,7 @@ from .evidence import retain, discovery_task, check_answer, inventory
 from .model import PROMPT_BUDGET, InvalidReply, RepeatedAnswer, compact_messages, read_limit
 from .workspace import line_range, sections
 from .prompts import (  # noqa: F401  (also imported from here by the tests and other modules)
-    ACTIONS, CODE_ACTION, PYTHON_GUIDE, ANSWER_FROM_PRELOAD, ANSWER_WITH_POINTS, BRIEF_ANSWER, CHANGES_ANSWER, CHANGE_ADVICE, DISCOVERY_SYSTEM, EDIT_REQUEST,
+    ACTIONS, CODE_ACTION, FIX_ANSWER, PYTHON_GUIDE, ANSWER_FROM_PRELOAD, ANSWER_WITH_POINTS, BRIEF_ANSWER, CHANGES_ANSWER, CHANGE_ADVICE, DISCOVERY_SYSTEM, EDIT_REQUEST,
     ENTRY_POINT_GUIDANCE, FINAL_ANSWER_CHARS, FINISH_NOW, POLITE, PRELOAD_FILES, QUESTION, RELOAD_SECONDS, REVIEW,
     SCHEMA, SYSTEM, POINTS, POINT_CHARS, OVERVIEW_CHARS,
 )
@@ -45,6 +45,7 @@ class AgentState(TypedDict):
     cite_files        preloaded files that the points of an answer may cite
     kind              task_kind of the task: question, change, or other
     final_text        the answer as shown to the user; issues lists the answer checks it failed
+    retried           the first answer, its text, and its issues, while the model is asked once to fix that answer
     """
     messages: list[dict[str, str]]
     reply: dict[str, str]
@@ -60,13 +61,15 @@ class AgentState(TypedDict):
     kind: str
     final_text: str
     issues: list[str]
+    retried: dict
 
 
 def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge=None, test_options=None, output=print, stream=None,
-                confirm_code=None):
+                confirm_code=None, retry_unverified=False):
     """Compile a per-task graph. Read-only: no node writes files. No remote services or persistent checkpoint store.
 
     confirm_code, a function shown the code, offers the run_python action; without it the action does not exist.
+    retry_unverified asks the model once to fix an answer that fails its checks, and keeps whichever passes more.
     """
     if not 1 <= max_steps <= 30:
         raise ValueError("max_steps must be between 1 and 30")
@@ -159,7 +162,9 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
 
         # Discovery answers may be withheld after checks, so they are never shown before validation. A named-file
         # overview is short and capped, so it is printed once complete: streamed text cannot be trimmed afterward.
-        live = stream is not None and not state.get("discovery", False) and not (question and cite_files)
+        # A corrected answer is printed once it is checked, so it does not run on into the first answer on screen.
+        live = (stream is not None and not state.get("discovery", False) and not (question and cite_files)
+                and not state.get("retried"))
         reporter = threading.Thread(target=progress, daemon=True)
         reporter.start()
         # cut: the answer was stopped for repeating; missing: points that name nothing in their file;
@@ -279,12 +284,30 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
                 output("Answer check: " + issue)
             if issues:
                 output("Answer is unverified; check the cited evidence before relying on it.")
-        return {"messages": state["messages"] + [
-                    {"role": "assistant", "content": json.dumps(reply)}],
-                "reply": reply, "steps": steps, "repeated_lookup": repeated, "invalid_replies": 0,
-                # The answer as shown and its check results, for callers such as the GUI that do not read output.
-                "final_text": final_text, "issues": issues,
-                "exit_code": 2 if reply["action"] == "finish" and issues else 0}
+        result = {"messages": state["messages"] + [
+                      {"role": "assistant", "content": json.dumps(reply)}],
+                  "reply": reply, "steps": steps, "repeated_lookup": repeated, "invalid_replies": 0,
+                  # The answer as shown and its check results, for callers such as the GUI that do not read output.
+                  "final_text": final_text, "issues": issues,
+                  "exit_code": 2 if reply["action"] == "finish" and issues else 0}
+        first = state.get("retried")
+        if reply["action"] == "finish" and first:
+            # The corrected answer: kept only if it fails fewer checks than the first one.
+            if len(issues) >= len(first["issues"]):
+                output("The corrected answer passed no more checks, so the first answer is kept.")
+                result.update(reply=first["reply"], final_text=first["final_text"], issues=first["issues"], exit_code=2)
+            else:
+                output("The corrected answer passes every check." if not issues else
+                       f"The corrected answer fails {len(issues)} check(s) instead of {len(first['issues'])}, so it is kept.")
+        elif (retry_unverified and reply["action"] == "finish" and issues and question and not state.get("discovery")
+              and not cut and steps < max_steps):
+            output("Asking the model once to correct the answer so that it passes its checks.")
+            result.update(messages=result["messages"] + [{"role": "user", "content": FIX_ANSWER.format(
+                              issues="\n".join("- " + issue for issue in issues))}],
+                          reply={"action": "retry", "path": "", "content": "", "message": ""},
+                          retried={"reply": reply, "final_text": final_text, "issues": issues},
+                          repeated_lookup=True, exit_code=0)
+        return result
 
     def tool_result(state, result):
         """State update that adds a tool's result to the conversation as a user message, labelled untrusted."""
@@ -462,7 +485,7 @@ def run(model, workspace, task, *, memory=None, **options):
 
 def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowledge=None,
               test_options=None, output=print, stream=None, history="", carried_evidence=(), focus_file=None, notes="",
-              confirm_code=None):
+              confirm_code=None, retry_unverified=False):
     """Run one task and return the final graph state. history and carried_evidence come from a Session.
 
     notes are answers recalled from long-term memory, shown before the session's own history.
@@ -654,7 +677,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     with tracing_context(enabled=False):
         graph = build_graph(model, workspace, max_steps=max_steps, confirm_tests=confirm_tests,
                             knowledge=knowledge, test_options=test_options, output=output, stream=stream,
-                            confirm_code=confirm_code)
+                            confirm_code=confirm_code, retry_unverified=retry_unverified)
         return graph.invoke({"messages": messages, "reply": {}, "steps": 0, "exit_code": 0, "task": task,
                              "search_evidence": evidence, "evidence_limited": evidence_limited, "invalid_replies": 0,
                              "cite_files": preloaded if numbered else [], "kind": kind},

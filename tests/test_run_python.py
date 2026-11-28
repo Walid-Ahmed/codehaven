@@ -99,3 +99,40 @@ class RunPythonTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetryTests(unittest.TestCase):
+    """An answer that fails its checks is sent back once, and whichever answer passes more checks is kept."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "pricing.py").write_text("RATE = 0.25\n\n\ndef total(n):\n    return n * (1 + RATE)\n")
+        self.ws = Workspace(self.root)
+
+    def run_task(self, replies, retry=True):
+        model, lines = Model(replies), []
+        state = run_state(model, self.ws, "What rate does total in pricing.py use?", output=lines.append, retry_unverified=retry)
+        return model, state, lines
+
+    def test_a_corrected_answer_that_passes_replaces_the_first(self):
+        model, state, lines = self.run_task([action("finish", "It adds a tax (pricing.py:90)."),
+                                             action("finish", "It adds RATE, 25% (pricing.py:1 and pricing.py:4-5).")])
+        self.assertEqual(len(model.prompts), 2)
+        self.assertIn("did not pass CodeHaven's checks", model.prompts[1][0][-2]["content"])
+        self.assertEqual(state["issues"], [])
+        self.assertEqual(state["exit_code"], 0)
+        self.assertIn("pricing.py:4-5", state["final_text"])
+
+    def test_a_correction_that_is_no_better_keeps_the_first_answer(self):
+        model, state, lines = self.run_task([action("finish", "It adds a tax (pricing.py:90)."),
+                                             action("finish", "It adds a tax (pricing.py:91).")])
+        self.assertIn("pricing.py:90", state["final_text"])
+        self.assertEqual(state["exit_code"], 2)
+        self.assertTrue(any("first answer is kept" in line for line in lines))
+
+    def test_only_once_and_only_when_asked(self):
+        model, state, _ = self.run_task([action("finish", "It adds a tax (pricing.py:90).")], retry=False)
+        self.assertEqual(len(model.prompts), 1)
+        self.assertEqual(state["exit_code"], 2)

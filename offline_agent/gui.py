@@ -83,8 +83,12 @@ class App:
     """One repository and one conversation at a time, shared by the request threads."""
 
     def __init__(self, model, *, max_steps=12, retrieval_budget=4000, excludes=(), allow_clone=False, clone_folder=None,
-                 remember=False, memory_folder=None, embed_model=None, index_folder=None, chats_folder=None):
-        """Keep the settings. Nothing is indexed until open(), clone(), or open_file() is called."""
+                 remember=False, memory_folder=None, embed_model=None, index_folder=None, chats_folder=None,
+                 retry_unverified=False):
+        """Keep the settings. Nothing is indexed until open(), clone(), or open_file() is called.
+
+        retry_unverified asks the model once to correct an answer that fails its checks (serve() turns it on)."""
+        self.retry_unverified = bool(retry_unverified)
         self.chats_folder, self.chats, self.chat_id = chats_folder, None, new_id()
         self.embed_model, self.index_folder, self.semantic = embed_model, index_folder, None
         self.remember, self.memory_folder, self.memory = bool(remember), memory_folder, None
@@ -289,7 +293,7 @@ class App:
         if not turns:
             self.chat_id = new_id()  # A newly opened repository starts a new chat; an attached file continues one.
         self.session = Session(self.model, workspace, knowledge=knowledge, max_steps=self.max_steps, focus_file=upload,
-                               memory=self.memory,
+                               memory=self.memory, retry_unverified=self.retry_unverified,
                                output=lambda line: self.emit({"type": "log", "text": str(line)}),
                                stream=lambda text: self.emit({"type": "text", "text": text}))
         # Earlier questions and answers carry over; evidence does not, because it quotes files no longer open.
@@ -881,7 +885,7 @@ def serve(model, *, port=0, open_browser=True, repository=None, max_steps=12, re
     """Run the GUI until Ctrl+C. Returns an exit code like the CLI's."""
     app = App(model, max_steps=max_steps, retrieval_budget=retrieval_budget, excludes=excludes,
               allow_clone=allow_clone, clone_folder=clone_folder, remember=remember, memory_folder=memory_folder,
-              embed_model=embed_model, index_folder=index_folder, chats_folder=chats_folder)
+              embed_model=embed_model, index_folder=index_folder, chats_folder=chats_folder, retry_unverified=True)
     if repository:
         summary = app.open(str(Path(repository).expanduser().resolve()))
         print(f"Indexed {summary['files']} files from {summary['repository']}.")

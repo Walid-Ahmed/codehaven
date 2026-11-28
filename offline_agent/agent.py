@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
 from . import arabic, changes, insights, scans, symbols, trace
+from . import history as blame  # history is also run_state's name for the session's earlier turns.
 from .review import review
 from .test_runner import DEFAULT_IMAGE, command, run_snippet, run_tests
 from .evidence import retain, discovery_task, check_answer, inventory
@@ -538,8 +539,11 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     wanted = insights.requested(task) if report is None and not asked_changes else None
     in_arabic = arabic.written_in(task)
     scan = scans.requested(task) if report is None and not asked_changes else None
+    why = report is None and not asked_changes and blame.requested(task)
     if scan:
         found = scans.run(*scan, workspace, knowledge)
+    elif why and (explained := blame.explain(model, workspace, knowledge, task, output)) is not None:
+        found = explained
     elif report is None and (REVIEW.search(task) or arabic.REVIEW.search(arabic.normalise(task))) and reviewed:
         spans = knowledge.dependencies.spans.get(reviewed[0]) if knowledge is not None else None
         try:
@@ -748,7 +752,8 @@ class Session:
             self.knowledge.refresh()  # Pick up files changed between questions.
         # "My last commit" means something else tomorrow, so answers about changes are neither recalled nor saved.
         # Test gaps and tours are rebuilt from the whole project each time, which a saved copy would not notice changing.
-        memory = None if changes.requested(task) or insights.requested(task) or scans.requested(task) else self.memory
+        memory = (None if changes.requested(task) or insights.requested(task) or scans.requested(task) or blame.requested(task)
+                  else self.memory)
         notes = memory.recall(task, skip=[question for question, _ in self.turns]) if memory else []
         evidence = self.evidence
         if notes:

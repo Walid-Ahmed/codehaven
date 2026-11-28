@@ -40,14 +40,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import documents, ocr, study
+from . import coder, documents, edits, errors, index_cache, ocr, slash, study
 from .agent import Session
 from .chats import Chats, new_id
 from .knowledge import KnowledgeBase
 from .memory import Memory
 from .model import MODEL, Stopped
 from .semantic import Semantic
-from .workspace import MAX_BYTES, MAX_FILES, Workspace
+from .workspace import MAX_BYTES, MAX_FILES, Workspace, combined
 
 PAGE = Path(__file__).with_name("gui.html")
 # The page is kept as four files and served as one: each mark in the markup or the script is replaced by a file.
@@ -83,8 +83,14 @@ class App:
     """One repository and one conversation at a time, shared by the request threads."""
 
     def __init__(self, model, *, max_steps=12, retrieval_budget=4000, excludes=(), allow_clone=False, clone_folder=None,
-                 remember=False, memory_folder=None, embed_model=None, index_folder=None, chats_folder=None):
-        """Keep the settings. Nothing is indexed until open(), clone(), or open_file() is called."""
+                 remember=False, memory_folder=None, embed_model=None, index_folder=None, chats_folder=None,
+                 retry_unverified=False, allow_edits=False):
+        """Keep the settings. Nothing is indexed until open(), clone(), or open_file() is called.
+
+        retry_unverified asks the model once to correct an answer that fails its checks (serve() turns it on)."""
+        self.retry_unverified = bool(retry_unverified)
+        # Changing code (--allow-edits): a proposed change waits here for the user's Apply or Decline on the page.
+        self.allow_edits, self.decision = bool(allow_edits), None
         self.chats_folder, self.chats, self.chat_id = chats_folder, None, new_id()
         self.embed_model, self.index_folder, self.semantic = embed_model, index_folder, None
         self.remember, self.memory_folder, self.memory = bool(remember), memory_folder, None
@@ -140,6 +146,8 @@ class App:
 
         The lock makes this and the claims take turns, so a late stop can never end the next request.
         """
+        if self.decision is not None:  # A change waiting for an answer is declined.
+            self.decision["event"].set()
         with self.lock:
             stopped = self.stoppable and hasattr(self.model, "stop")
             if stopped:
@@ -148,6 +156,33 @@ class App:
                 self.cancel.set()
                 stopped = True
         return {"stopped": bool(stopped)}
+
+    def confirm(self, diff, summary):
+        """Show a proposed change's diff on the page and wait for Apply or Decline. Stop, or 15 minutes, declines it."""
+        decision = self.decision = {"event": threading.Event(), "apply": False}
+        self.emit({"type": "diff", "diff": diff, "summary": summary})
+        decision["event"].wait(900)
+        self.decision = None
+        return decision["apply"]
+
+    def decide(self, apply):
+        """The user's answer to the change shown on the page."""
+        decision = self.decision
+        if decision is None:
+            raise ValueError("There is no change waiting for an answer.")
+        decision["apply"] = bool(apply) is True
+        decision["event"].set()
+        return {"ok": True}
+
+    def undo(self):
+        """Undo the last change CodeHaven made in the open repository."""
+        if not self.allow_edits or self.workspace is None:
+            raise ValueError("Changing code is off. Start CodeHaven with --allow-edits to turn it on.")
+        self.claim()
+        try:
+            return {"undone": edits.undo(self.workspace, edits.journal_path(self.workspace))}
+        finally:
+            self.release()
 
     def stopped_summary(self):
         """What the page shows after a stopped index or download: whatever was open before, unchanged."""
@@ -170,10 +205,12 @@ class App:
 
     def index(self, path, excludes=()):
         """Index the folder at path and return the page's summary. The caller already holds the busy claim."""
-        root = Path(path).expanduser()
-        if not root.is_absolute():
+        # Several repositories can be opened together, their full paths separated by ";" or new lines.
+        roots = [Path(part.strip()).expanduser() for part in re.split(r"[;\n]", path) if part.strip()] or [Path(path)]
+        if not all(root.is_absolute() for root in roots):
             raise ValueError("Use the full path of the repository folder, such as /Users/you/dev/project.")
-        workspace = Workspace(root, excludes=self.excludes + tuple(excludes))
+        workspace = (combined(roots, excludes=self.excludes + tuple(excludes)) if len(roots) > 1
+                     else Workspace(roots[0], excludes=self.excludes + tuple(excludes)))
         # A knowledge folder inside the repository holds the user's own reference notes; it is indexed when present.
         references = workspace.root / "knowledge"
         self.load(workspace, references if references.exists() else None)
@@ -272,8 +309,10 @@ class App:
             keep = self.remember and upload is None
             semantic = Semantic(self.model, self.embed_model, output=lambda line: self.emit({"type": "log", "text": str(line)}),
                                 cache=Semantic.cache_path(workspace, self.embed_model, self.index_folder) if keep else None)
+        # The keyword index of a repository is kept so it reopens quickly; an uploaded file's is not.
+        cache = index_cache.path(workspace, self.index_folder) if self.remember and upload is None else None
         knowledge = KnowledgeBase(references, workspace=workspace, context_budget=self.retrieval_budget, semantic=semantic,
-                                  cancel=self.cancel if self.cancellable else None)
+                                  cancel=self.cancel if self.cancellable else None, cache=cache)
         if semantic is not None:
             semantic.wait(SEMANTIC_WAIT)
         self.semantic = semantic
@@ -287,7 +326,9 @@ class App:
         if not turns:
             self.chat_id = new_id()  # A newly opened repository starts a new chat; an attached file continues one.
         self.session = Session(self.model, workspace, knowledge=knowledge, max_steps=self.max_steps, focus_file=upload,
-                               memory=self.memory,
+                               memory=self.memory, retry_unverified=self.retry_unverified,
+                               editor=coder.Editor(confirm=self.confirm, journal=edits.journal_path(workspace))
+                               if self.allow_edits and upload is None else None,
                                output=lambda line: self.emit({"type": "log", "text": str(line)}),
                                stream=lambda text: self.emit({"type": "text", "text": text}))
         # Earlier questions and answers carry over; evidence does not, because it quotes files no longer open.
@@ -333,6 +374,7 @@ class App:
             ready, total = self.semantic.coverage()
             meaning = {"model": self.embed_model, "ready": ready, "total": total, "failed": bool(self.semantic.failed)}
         base = {"model": self.model_name(), "clone": self.allow_clone, "remember": self.remember, "meaning": meaning,
+                "edits": self.allow_edits,
                 "chats": self.chats.listing() if self.chats is not None else [],
                 "saved": len(self.memory.notes) if self.memory is not None else 0}
         workspace, knowledge = self.workspace, self.knowledge
@@ -359,6 +401,8 @@ class App:
                 self.chats.forget()
             if self.semantic is not None:
                 self.semantic.forget()  # The saved vectors go too; they are rebuilt when the repository is indexed again.
+            if self.knowledge is not None:
+                self.knowledge.forget()
             return self.summary()
         finally:
             self.release()
@@ -408,6 +452,15 @@ class App:
             raise ValueError("Choose a repository or upload a file first.")
         if not isinstance(question, str) or not question.strip():
             raise ValueError("Type a question first.")
+        expanded = slash.expand(question)  # /trace name and the like; raises ValueError for an unknown command.
+        if expanded is None:
+            yield {"type": "done", "exit_code": 0, "steps": 0, "answer": slash.help_text(
+                       ["/undo: undo the last change (with --allow-edits)", "/export: save this chat as Markdown"]),
+                   "complete": True, "issues": [], "remembered": len(session.turns), "memory": session.TURNS,
+                   "kept": False, "saved": len(session.memory.notes) if session.memory else 0,
+                   "chats": chats.listing() if chats is not None else []}
+            return
+        question = expanded
         self.claim_model()
         # The answer runs on a worker thread; its events reach this request thread, which writes them out, through a queue.
         events = queue.Queue()
@@ -431,8 +484,10 @@ class App:
             except Stopped:
                 # Nothing was recorded: a stopped question is not remembered by follow-ups, saved, or kept in a chat.
                 events.put({"type": "stopped", "remembered": len(session.turns), "memory": session.TURNS})
-            except Exception as exc:  # Reported to the page; the server keeps running.
-                events.put({"type": "error", "message": str(exc) or type(exc).__name__})
+            except Exception as exc:  # Reported to the page in plain words; the server keeps running.
+                if not isinstance(exc, (ValueError, OSError, UnicodeError)):
+                    errors.report(exc, always=True)
+                events.put({"type": "error", "message": errors.friendly(exc)})
             finally:
                 # Always sent, even after an error: None tells the loop below that the answer is over.
                 events.put(None)
@@ -666,6 +721,7 @@ def make_handler(app, token, port_holder):
 
         server_version = "CodeHaven"
         sys_version = ""
+        replying = False  # A streamed reply has begun, so a later problem cannot be sent as its own response.
 
         def log_message(self, *_args):
             """Log nothing."""
@@ -734,6 +790,7 @@ def make_handler(app, token, port_holder):
             """Serve the page itself and the routes that only read."""
             url = urlsplit(self.path)
             query = parse_qs(url.query)
+            self.replying = False
             if not self.authorized(query):
                 return
             try:
@@ -759,6 +816,14 @@ def make_handler(app, token, port_holder):
                     self.refuse(404, "Not found.")
             except (ValueError, OSError, UnicodeError) as exc:
                 self.refuse(400, str(exc))
+            except Exception as exc:  # Shown on the page in plain words; the traceback goes to this terminal.
+                self.unexpected(exc)
+
+        def unexpected(self, exc):
+            """Answer an unexpected problem with a plain message, unless a reply is already under way."""
+            errors.report(exc, always=True)
+            if not self.replying:
+                self.refuse(500, errors.friendly(exc))
 
         def upload(self):
             """The raw bytes of an uploaded file. Bodies over the picture limit are refused without being read."""
@@ -773,6 +838,7 @@ def make_handler(app, token, port_holder):
             """Handle an upload, and the JSON routes that open something, change state, or start an answer."""
             url = urlsplit(self.path)
             query = parse_qs(url.query)
+            self.replying = False
             # The empty query means a POST must carry the token in its header; one in the address is not accepted.
             if not self.authorized({}):
                 return
@@ -796,6 +862,10 @@ def make_handler(app, token, port_holder):
                 elif url.path == "/api/reset":
                     app.reset()
                     self.send(200, {"ok": True})
+                elif url.path == "/api/decide":
+                    self.send(200, app.decide(data.get("apply") is True))
+                elif url.path == "/api/undo":
+                    self.send(200, app.undo())
                 elif url.path == "/api/stop":
                     self.send(200, app.stop())
                 elif url.path == "/api/ask":
@@ -811,11 +881,14 @@ def make_handler(app, token, port_holder):
                 self.refuse(409, str(exc))
             except (ValueError, OSError, UnicodeError) as exc:
                 self.refuse(400, str(exc))
+            except Exception as exc:
+                self.unexpected(exc)
 
         def stream(self, events, drain=True):
             """Send events as lines of JSON. If the page goes away, an answer is drained so its worker thread
             can finish; work done by the generator itself, such as flashcards, is stopped instead."""
             first = next(events)  # Raises Busy or ValueError before any response is sent.
+            self.replying = True  # From here on, a problem is reported as an event, not as a second response.
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
             self.security_headers()
@@ -830,6 +903,13 @@ def make_handler(app, token, port_holder):
                 if drain:
                     for _ in events:  # The page closed; let the answer finish so the next question can start.
                         pass
+            except Exception as exc:  # Work such as flashcards failed part way: the page gets a plain error event.
+                if not isinstance(exc, (ValueError, OSError, UnicodeError)):
+                    errors.report(exc, always=True)
+                with contextlib.suppress(OSError):
+                    self.wfile.write(json.dumps({"type": "error", "fatal": True, "message": errors.friendly(exc)}).encode()
+                                     + b"\n")
+                    self.wfile.flush()
             finally:
                 events.close()  # Releases the model if the generator was left unfinished.
 
@@ -850,11 +930,12 @@ def make_server(app, port=0):
 
 def serve(model, *, port=0, open_browser=True, repository=None, max_steps=12, retrieval_budget=4000, excludes=(),
           allow_clone=False, clone_folder=None, remember=False, memory_folder=None, embed_model=None, index_folder=None,
-          chats_folder=None):
+          chats_folder=None, allow_edits=False):
     """Run the GUI until Ctrl+C. Returns an exit code like the CLI's."""
     app = App(model, max_steps=max_steps, retrieval_budget=retrieval_budget, excludes=excludes,
               allow_clone=allow_clone, clone_folder=clone_folder, remember=remember, memory_folder=memory_folder,
-              embed_model=embed_model, index_folder=index_folder, chats_folder=chats_folder)
+              embed_model=embed_model, index_folder=index_folder, chats_folder=chats_folder, retry_unverified=True,
+              allow_edits=allow_edits)
     if repository:
         summary = app.open(str(Path(repository).expanduser().resolve()))
         print(f"Indexed {summary['files']} files from {summary['repository']}.")

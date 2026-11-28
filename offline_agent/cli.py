@@ -1,10 +1,12 @@
 """The codehaven command: one task, an interactive session, or the browser GUI."""
 import argparse
+import contextlib
 import sys
+import time
 from functools import partial
 from pathlib import Path
 
-from . import doctor, ocr
+from . import coder, doctor, edits, errors, export, index_cache, ocr, slash
 from .agent import Session, run
 from .chats import Chats
 from .knowledge import KnowledgeBase
@@ -12,7 +14,7 @@ from .memory import Memory
 from .model import MODEL, Ollama
 from .semantic import Semantic, choose_model
 from .test_runner import DEFAULT_IMAGE
-from .workspace import Workspace
+from .workspace import Workspace, combined
 
 SEMANTIC_WAIT = 60  # Seconds a command waits for meaning search before answering with what is ready.
 EXIT_WORDS = {"exit", "quit", "/exit", "/quit"}
@@ -26,8 +28,12 @@ def write_stream(text):
 
 def interactive(session, first_task=None, prompt=input):
     """Read tasks until exit. One failed or interrupted task does not end the session."""
-    print("Interactive session. Type a task, /reset to forget earlier answers, or exit to quit.", flush=True)
+    with contextlib.suppress(ImportError):
+        import readline  # noqa: F401  (gives input() line editing and arrow-key history, where Python has it)
+    print("Interactive session. Type a task, /reset to forget earlier answers, /export [file] to save the answers as "
+          "Markdown, or exit to quit.", flush=True)
     task = first_task
+    answered = []  # (question, answer, issues) of this session, for /export.
     while True:
         if task is None:
             try:
@@ -40,13 +46,53 @@ def interactive(session, first_task=None, prompt=input):
         if task == "/reset":
             session.reset()
             print("Session history cleared.", flush=True)
+        elif task == "/undo":
+            editor = getattr(session, "options", {}).get("editor")
+            if editor is None:
+                print("Nothing to undo: changing code is off. Start with --allow-edits to turn it on.", flush=True)
+            else:
+                try:
+                    print(f"Undid: {edits.undo(session.workspace, editor.journal)}", flush=True)
+                except (edits.EditError, OSError) as exc:
+                    print(f"Error: {exc}", file=sys.stderr, flush=True)
+        elif task == "/export" or task.startswith("/export "):
+            if not answered:
+                print("Nothing to export yet: ask a question first.", flush=True)
+            else:
+                try:
+                    written = export.write(task[len("/export"):].strip() or ".",
+                                           export.markdown(answered, str(getattr(session.workspace, "root", "")),
+                                                           getattr(session.model, "model", "")))
+                    print(f"Saved {len(answered)} answer{'s' if len(answered) != 1 else ''} to {written}.", flush=True)
+                except FileExistsError:
+                    print("That file already exists; CodeHaven does not overwrite it. Give another name.", file=sys.stderr, flush=True)
+                except OSError as exc:
+                    print(f"Error: could not save the answers ({exc}).", file=sys.stderr, flush=True)
+        elif task.startswith("/") and task.split()[0] not in ("/reset", "/undo", "/export"):
+            try:
+                expanded = slash.expand(task)
+            except ValueError as exc:
+                print(exc, file=sys.stderr, flush=True)
+            else:
+                if expanded is None:
+                    print(slash.help_text(["/reset: forget earlier answers", "/export [file]: save the answers as Markdown",
+                                           "/undo: undo the last change (with --allow-edits)", "exit: quit"]), flush=True)
+                else:
+                    task = expanded
+                    continue  # Asked below, as if it had been typed in full.
         elif task:
             try:
                 session.ask(task)
+                state = getattr(session, "last_state", None) or {}
+                if state.get("final_text"):
+                    answered.append((task, state["final_text"], state.get("issues", [])))
             except (ValueError, OSError) as exc:
                 print(f"Error: {exc}", file=sys.stderr, flush=True)
             except KeyboardInterrupt:
                 print("\nStopped this task.", file=sys.stderr, flush=True)
+            except Exception as exc:  # An unexpected problem ends this task, not the session.
+                errors.report(exc)
+                print(f"Error: {errors.friendly(exc)}", file=sys.stderr, flush=True)
         task = None
 
 
@@ -86,6 +132,8 @@ def main(argv=None):
                                                  "It never changes your files.")
     parser.add_argument("task", nargs="?", help="Question about the code, in plain English or Arabic")
     parser.add_argument("--workspace", help="Project folder; defaults to the current folder (with --gui, none)")
+    parser.add_argument("--also", action="append", default=[], metavar="FOLDER",
+                        help="Another repository to open with --workspace, so questions are answered across both; repeatable")
     parser.add_argument("--exclude", action="append", default=[], metavar="PATTERN",
                         help="Additional Git-style exclusion; repeat for multiple patterns")
     parser.add_argument("--knowledge-base", help="Local reference directory; defaults to workspace/knowledge")
@@ -97,17 +145,32 @@ def main(argv=None):
                         help="Conversation content budget (8000..64000 UTF-8 bytes; default 12000)")
     parser.add_argument("--test-runner", choices=("unittest", "pytest"), default="unittest")
     parser.add_argument("--test-image", default=DEFAULT_IMAGE, help="Prepared local Docker image for isolated tests")
+    parser.add_argument("--allow-python", action="store_true",
+                        help="Let the agent ask to run a short Python snippet, shown to you for approval first, in the same "
+                             "Docker sandbox as the tests (no network, read-only copy of the project)")
     parser.add_argument("--test-docker-socket", help="Absolute local Unix Docker socket; remote daemons are unsupported")
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
     parser.add_argument("--model", default=MODEL, help=f"Installed local Ollama model (default {MODEL}, the tested one)")
     parser.add_argument("--max-steps", type=int, default=12, choices=range(1, 31), metavar="1..30")
     parser.add_argument("--doctor", action="store_true",
                         help="Check the local server, the model, and the optional tools, and say how to get what is missing")
+    parser.add_argument("--setup", action="store_true",
+                        help="Guided first run: check Ollama, suggest a model for this computer's memory, and download it "
+                             "with ollama pull only if you say yes (the only step that uses the internet)")
     parser.add_argument("--start-ollama", action="store_true",
                         help="If no Ollama server is running, start one for this run on 127.0.0.1 with cloud features "
                              "off, and stop it on exit")
     parser.add_argument("-i", "--interactive", action="store_true",
                         help="Ask several tasks in one session; follow-ups see earlier answers")
+    parser.add_argument("--no-retry", action="store_true",
+                        help="Do not ask the model to correct an answer that fails its checks (one extra step, on by default)")
+    parser.add_argument("--allow-edits", action="store_true",
+                        help="Let CodeHaven change code when you ask it to (fix, write tests, add docstrings, rename, write "
+                             "docs). Each change is shown as a diff and applied only if you answer y; --undo puts it back")
+    parser.add_argument("--undo", action="store_true", help="Undo the last change CodeHaven made in this workspace, then exit")
+    parser.add_argument("--export", metavar="FILE",
+                        help="Also save the question and its answer, with citations, as Markdown to FILE (a new file; "
+                             "an existing one is never replaced). In --interactive, type /export [FILE] instead")
     parser.add_argument("--no-stream", action="store_true", help="Print the final answer only once it is complete")
     parser.add_argument("--gui", action="store_true", help="Open a local page in your browser to pick a repository and chat")
     parser.add_argument("--port", type=int, default=0, help="Port for --gui on 127.0.0.1 (default: any free port)")
@@ -135,7 +198,7 @@ def main(argv=None):
                         help="Installed local embedding model for --semantic (default: the first found of "
                              "nomic-embed-text, embeddinggemma, mxbai-embed-large, ...)")
     parser.add_argument("--index-dir", metavar="FOLDER",
-                        help="Where meaning-search vectors are kept (default ~/CodeHaven/index; nothing is kept "
+                        help="Where the keyword index and meaning-search vectors are kept (default ~/CodeHaven/index; nothing is kept "
                              "with --no-remember)")
     parser.add_argument("--ocr", metavar="PICTURE",
                         help="Read the code in a PNG or JPEG picture, such as a screenshot, into a new file beside it, "
@@ -145,6 +208,14 @@ def main(argv=None):
     # --ocr and --forget do not use the model, so they are handled before Ollama is contacted.
     if args.ocr:
         return read_picture(args.ocr, args.out)
+    if args.undo:
+        try:
+            workspace = Workspace(args.workspace or ".", excludes=args.exclude)
+            print(f"Undid: {edits.undo(workspace, edits.journal_path(workspace))}")
+            return 0
+        except (ValueError, OSError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
     if args.forget:
         try:
             memory = Memory(Workspace(args.workspace or ".", excludes=args.exclude), args.memory_dir)
@@ -153,6 +224,7 @@ def main(argv=None):
             chats = Chats(memory.workspace, args.chats_dir)
             saved_chats = len(chats.chats)
             chats.forget()
+            index_cache.forget(index_cache.path(memory.workspace, args.index_dir))
         except (ValueError, OSError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
@@ -161,8 +233,17 @@ def main(argv=None):
         return 0
     if not 2000 <= args.retrieval_budget <= 16000:
         parser.error("--retrieval-budget must be between 2000 and 16000 bytes")
-    if not args.doctor and not args.interactive and not args.gui and not args.task:
-        parser.error("a task is required unless --doctor, --interactive, --gui, or --forget is used")
+    if args.setup:
+        try:
+            return doctor.setup(Ollama(model=args.model, endpoint=args.endpoint), output=partial(print, flush=True))
+        except (ValueError, OSError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+    if not args.doctor and not args.interactive and not args.gui and not args.task:  # --undo returned above.
+        # Typed at a terminal with nothing to ask yet, the likely wish is to start asking.
+        if not sys.stdin.isatty():
+            parser.error("a task is required unless --doctor, --interactive, --gui, or --forget is used")
+        args.interactive = True
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
     server = model = None
@@ -199,6 +280,9 @@ def main(argv=None):
             print(f"Meaning search: {embed_model}" if embed_model else "Meaning search: off (--no-semantic)" if not args.semantic
                   else "Meaning search: off, no embedding model is installed. To turn it on, run once while online: "
                        "ollama pull nomic-embed-text")
+            suggestion, why = doctor.suggested_model()
+            print(f"Suggested model for this computer: {suggestion} ({why})." if suggestion != model.model else
+                  f"The model in use is the one suggested for this computer ({why}).")
             for line in doctor.extras(args.test_image) + [doctor.default_model_hint(model)]:
                 if line:
                     print(line)
@@ -210,15 +294,24 @@ def main(argv=None):
                          max_steps=args.max_steps, retrieval_budget=args.retrieval_budget, excludes=args.exclude,
                          allow_clone=args.allow_clone, clone_folder=args.clone_dir,
                          remember=args.remember, memory_folder=args.memory_dir,
-                         embed_model=embed_model, index_folder=args.index_dir, chats_folder=args.chats_dir)
-        workspace = Workspace(args.workspace or ".", excludes=args.exclude)
+                         embed_model=embed_model, index_folder=args.index_dir, chats_folder=args.chats_dir,
+                         allow_edits=args.allow_edits)
+        workspace = (combined([args.workspace or ".", *args.also], excludes=args.exclude) if args.also
+                     else Workspace(args.workspace or ".", excludes=args.exclude))
+        if workspace.scopes:
+            print("Opened together: " + ", ".join(workspace.scopes) + f" (paths are shown from {workspace.root}).")
         references = Path(args.knowledge_base).expanduser() if args.knowledge_base else workspace.root / "knowledge"
         semantic = None
         if embed_model:
             semantic = Semantic(model, embed_model, output=partial(print, flush=True),
                                 cache=Semantic.cache_path(workspace, embed_model, args.index_dir) if args.remember else None)
+        print(f"Indexing {workspace.root} ...", flush=True)
+        started = time.monotonic()
         knowledge = KnowledgeBase(references if args.knowledge_base or references.exists() else None,
-                                  workspace=workspace, context_budget=args.retrieval_budget, semantic=semantic)
+                                  workspace=workspace, context_budget=args.retrieval_budget, semantic=semantic,
+                                  cache=index_cache.path(workspace, args.index_dir) if args.remember else None)
+        reused = f", {knowledge.reused} unchanged since last time" if knowledge.reused else ""
+        print(f"Indexed {knowledge.documents} files in {time.monotonic() - started:.1f}s{reused}.", flush=True)
         if semantic is not None:
             # A first run embeds every passage; later runs only the changed ones. Never hold a question up for long.
             complete = semantic.wait(SEMANTIC_WAIT, partial(print, flush=True))
@@ -234,13 +327,23 @@ def main(argv=None):
             print("Reference directory excluded by workspace rules; it was not indexed. "
                   "Use a permitted directory or an external reference library.")
         print(f"Workspace: {workspace.root}\nRead-only: CodeHaven never changes your files.")
-        options = dict(max_steps=args.max_steps, knowledge=knowledge,
+        options = dict(max_steps=args.max_steps, knowledge=knowledge, retry_unverified=not args.no_retry,
                        output=partial(print, flush=True), stream=None if args.no_stream else write_stream,
                        test_options={"runner": args.test_runner, "image": args.test_image,
                                      "docker_socket": args.test_docker_socket},
                        confirm_tests=lambda: input(
                            f"Run {args.test_runner} in Docker with network disabled and project read-only? [y/N] "
-                       ).strip().lower() == "y")
+                       ).strip().lower() == "y",
+                       confirm_code=(lambda _code: input("Run this snippet in Docker with network disabled and the project "
+                                                         "read-only? [y/N] ").strip().lower() == "y")
+                       if args.allow_python else None)
+        if args.allow_edits:
+            options["editor"] = coder.Editor(
+                confirm=lambda _diff, _summary: input("Apply this change? [y/N] ").strip().lower() == "y",
+                journal=edits.journal_path(workspace), test_options=options["test_options"],
+                confirm_tests=options["confirm_tests"])
+            print("Changing code is on: each change is shown as a diff and applied only if you answer y. "
+                  "Undo the last one with /undo or codehaven --undo.")
         memory = Memory(workspace, args.memory_dir) if args.remember else None
         if memory is not None:
             print(f"Long-term memory: {len(memory.notes)} saved answer{'s' if len(memory.notes) != 1 else ''} for this "
@@ -248,6 +351,18 @@ def main(argv=None):
                   "or --forget to delete them.")
         if args.interactive:
             return interactive(Session(model, workspace, memory=memory, **options), args.task)
+        if args.export:
+            session = Session(model, workspace, memory=memory, **options)
+            code = session.ask(args.task)
+            state = session.last_state
+            try:
+                written = export.write(args.export, export.markdown([(args.task, state.get("final_text") or "", state.get("issues", []))],
+                                                                    str(workspace.root), model.model))
+                print(f"Saved the answer to {written}.")
+            except FileExistsError:
+                print(f"Error: {args.export} already exists; CodeHaven does not overwrite it.", file=sys.stderr)
+                return 1
+            return code
         return run(model, workspace, args.task, memory=memory, **options)
     except (ValueError, OSError, EOFError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -256,5 +371,9 @@ def main(argv=None):
         print("\nStopped.", file=sys.stderr)
         # The usual exit code for a program stopped by Ctrl+C (128 + SIGINT's number, 2).
         return 130
+    except Exception as exc:  # Anything unexpected: a plain sentence, not a traceback.
+        errors.report(exc)
+        print(f"Error: {errors.friendly(exc)}", file=sys.stderr)
+        return 1
     finally:
         doctor.stop_ollama(server)

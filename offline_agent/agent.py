@@ -8,14 +8,15 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from . import arabic, changes, insights, symbols, trace
-from .review import review
-from .test_runner import DEFAULT_IMAGE, command, run_tests
+from . import arabic, changes, coder, guides, insights, messages as commit_messages, scans, symbols, trace, tracebacks
+from . import history as blame  # history is also run_state's name for the session's earlier turns.
+from .review import CHANGES as REVIEW_CHANGES, review, review_changes
+from .test_runner import DEFAULT_IMAGE, command, run_snippet, run_tests
 from .evidence import retain, discovery_task, check_answer, inventory
 from .model import PROMPT_BUDGET, InvalidReply, RepeatedAnswer, compact_messages, read_limit
 from .workspace import line_range, sections
 from .prompts import (  # noqa: F401  (also imported from here by the tests and other modules)
-    ACTIONS, ANSWER_FROM_PRELOAD, ANSWER_WITH_POINTS, BRIEF_ANSWER, CHANGES_ANSWER, CHANGE_ADVICE, DISCOVERY_SYSTEM, EDIT_REQUEST,
+    ACTIONS, CODE_ACTION, FIX_ANSWER, PYTHON_GUIDE, ANSWER_FROM_PRELOAD, ANSWER_WITH_POINTS, BRIEF_ANSWER, CHANGES_ANSWER, CHANGE_ADVICE, DISCOVERY_SYSTEM, EDIT_REQUEST,
     ENTRY_POINT_GUIDANCE, FINAL_ANSWER_CHARS, FINISH_NOW, POLITE, PRELOAD_FILES, QUESTION, RELOAD_SECONDS, REVIEW,
     SCHEMA, SYSTEM, POINTS, POINT_CHARS, OVERVIEW_CHARS,
 )
@@ -26,7 +27,7 @@ from .tasks import (  # noqa: F401  (also imported from here by the tests and ot
 from .answers import (  # noqa: F401  (also imported from here by the tests and other modules)
     trim_at_limit, reply_problem, cited_schema, retrieved_rows, seen_span, file_named, with_points, action_key,
     format_search, format_retrieval, format_metrics, REPEAT_NOTE, LIMIT_NOTE, CORRECTION, SHOWN_ROWS,
-    cite_mentions, MENTION_HEADING, check_values, VALUE_HEADING,
+    cite_mentions, MENTION_HEADING, check_values, VALUE_HEADING, missing_code, MISSING_HEADING, with_actions,
 )
 
 
@@ -45,6 +46,7 @@ class AgentState(TypedDict):
     cite_files        preloaded files that the points of an answer may cite
     kind              task_kind of the task: question, change, or other
     final_text        the answer as shown to the user; issues lists the answer checks it failed
+    retried           the first answer, its text, and its issues, while the model is asked once to fix that answer
     """
     messages: list[dict[str, str]]
     reply: dict[str, str]
@@ -60,12 +62,19 @@ class AgentState(TypedDict):
     kind: str
     final_text: str
     issues: list[str]
+    retried: dict
 
 
-def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge=None, test_options=None, output=print, stream=None):
-    """Compile a per-task graph. Read-only: no node writes files. No remote services or persistent checkpoint store."""
+def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge=None, test_options=None, output=print, stream=None,
+                confirm_code=None, retry_unverified=False):
+    """Compile a per-task graph. Read-only: no node writes files. No remote services or persistent checkpoint store.
+
+    confirm_code, a function shown the code, offers the run_python action; without it the action does not exist.
+    retry_unverified asks the model once to fix an answer that fails its checks, and keeps whichever passes more.
+    """
     if not 1 <= max_steps <= 30:
         raise ValueError("max_steps must be between 1 and 30")
+    actions = ACTIONS + ((CODE_ACTION,) if confirm_code else ())
     write_stream = stream or (lambda _text: None)
     # A one-item list so call_model can set it: the reload warning is printed once per task.
     reload_warned = [False]
@@ -102,6 +111,8 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
         # Change requests are answered like questions: CodeHaven explains the change, with citations, and never makes it.
         question = kind in ("question", "change") and not state.get("discovery")
         schema = cited_schema(cite_files, brief=kind == "question") if question else SCHEMA
+        if confirm_code:
+            schema = with_actions(schema, actions)
         messages = state["messages"]
         if finishing:
             # A forced answer is capped so even rambling ends in a complete, valid reply.
@@ -152,7 +163,9 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
 
         # Discovery answers may be withheld after checks, so they are never shown before validation. A named-file
         # overview is short and capped, so it is printed once complete: streamed text cannot be trimmed afterward.
-        live = stream is not None and not state.get("discovery", False) and not (question and cite_files)
+        # A corrected answer is printed once it is checked, so it does not run on into the first answer on screen.
+        live = (stream is not None and not state.get("discovery", False) and not (question and cite_files)
+                and not state.get("retried"))
         reporter = threading.Thread(target=progress, daemon=True)
         reporter.start()
         # cut: the answer was stopped for repeating; missing: points that name nothing in their file;
@@ -166,7 +179,7 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
                     overview = reply["content"]
                 if question:
                     reply, missing = with_points(reply, workspace, state.get("search_evidence", []))
-                problem = reply_problem(reply)
+                problem = reply_problem(reply, actions)
             except RepeatedAnswer as exc:
                 # Keep the useful text before the loop; a retry at temperature 0 tends to loop again.
                 reply, problem, cut = (dict(action="finish", path="", content=exc.answer, message="Answer stopped while repeating"),
@@ -239,6 +252,13 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
                                           discovery=state.get("discovery", False), require_citation=question)
             issues += [f"No part named {symbol!r} was found in {path}; that point is uncited." for path, symbol in missing]
             issues += [f"The answer reports {value!r}, which is on no line the model was shown." for value in invented]
+            # Said after the checks, which it takes no part in: the cited code calls into code that is not here, so the
+            # reader knows the answer cannot show what that code does.
+            if question and reply.get("content") and not state.get("discovery"):
+                outside = missing_code(reply["content"], workspace, knowledge)
+                if outside:
+                    reply["content"] = "\n\n".join([reply["content"].rstrip(), MISSING_HEADING + "\n" + "\n".join(outside)])
+                    output(f"CodeHaven noted {len(outside)} import(s) of code that is not in this repository.")
             if issues and state.get("discovery"):
                 output("Model summary withheld because answer checks failed.")
                 final_text = inventory(state.get("search_evidence", []), state.get("evidence_limited", False))
@@ -265,12 +285,30 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
                 output("Answer check: " + issue)
             if issues:
                 output("Answer is unverified; check the cited evidence before relying on it.")
-        return {"messages": state["messages"] + [
-                    {"role": "assistant", "content": json.dumps(reply)}],
-                "reply": reply, "steps": steps, "repeated_lookup": repeated, "invalid_replies": 0,
-                # The answer as shown and its check results, for callers such as the GUI that do not read output.
-                "final_text": final_text, "issues": issues,
-                "exit_code": 2 if reply["action"] == "finish" and issues else 0}
+        result = {"messages": state["messages"] + [
+                      {"role": "assistant", "content": json.dumps(reply)}],
+                  "reply": reply, "steps": steps, "repeated_lookup": repeated, "invalid_replies": 0,
+                  # The answer as shown and its check results, for callers such as the GUI that do not read output.
+                  "final_text": final_text, "issues": issues,
+                  "exit_code": 2 if reply["action"] == "finish" and issues else 0}
+        first = state.get("retried")
+        if reply["action"] == "finish" and first:
+            # The corrected answer: kept only if it fails fewer checks than the first one.
+            if len(issues) >= len(first["issues"]):
+                output("The corrected answer passed no more checks, so the first answer is kept.")
+                result.update(reply=first["reply"], final_text=first["final_text"], issues=first["issues"], exit_code=2)
+            else:
+                output("The corrected answer passes every check." if not issues else
+                       f"The corrected answer fails {len(issues)} check(s) instead of {len(first['issues'])}, so it is kept.")
+        elif (retry_unverified and reply["action"] == "finish" and issues and question and not state.get("discovery")
+              and not cut and steps < max_steps):
+            output("Asking the model once to correct the answer so that it passes its checks.")
+            result.update(messages=result["messages"] + [{"role": "user", "content": FIX_ANSWER.format(
+                              issues="\n".join("- " + issue for issue in issues))}],
+                          reply={"action": "retry", "path": "", "content": "", "message": ""},
+                          retried={"reply": reply, "final_text": final_text, "issues": issues},
+                          repeated_lookup=True, exit_code=0)
+        return result
 
     def tool_result(state, result):
         """State update that adds a tool's result to the conversation as a user message, labelled untrusted."""
@@ -356,6 +394,23 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
         output(result)
         return tool_result(state, result)
 
+    def execute_code(state: AgentState):
+        """Code node: run the model's Python snippet in the test sandbox, only after the user approves the code shown."""
+        reply = state["reply"]
+        if reply["path"]:
+            return tool_result(state, "Tool error: run_python takes the code in content and an empty path")
+        code = reply["content"]
+        output("Requested Python snippet (runs in Docker with network disabled and a read-only copy of the project):\n"
+               + code.rstrip())
+        if not confirm_code(code):
+            return tool_result(state, "The snippet was NOT run: the user did not approve it. Answer from the code instead.")
+        try:
+            result = run_snippet(workspace, code, **dict(test_options or {}))
+        except (ValueError, OSError) as exc:
+            result = f"Snippet error: {exc}"
+        output(result)
+        return tool_result(state, result)
+
     def route_action(state: AgentState):
         """Edge after the model node: choose the next node from the reply."""
         # An invalid reply was just sent back for correction: call the model again, unless the steps ran out.
@@ -400,6 +455,7 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
     graph.add_node("search", search_files)
     graph.add_node("retrieve", retrieve_references)
     graph.add_node("run_tests", execute_tests)
+    graph.add_node(CODE_ACTION, execute_code)
     graph.add_node("limit", limit)
     graph.add_node("repeat", repeated_lookup)
     graph.add_node("discover", discover)
@@ -409,10 +465,10 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
     # After the model: run the chosen tool, end on finish, or return to the model after a corrected reply.
     graph.add_conditional_edges("model", route_action,
                                 {"read": "read", "search": "search", "retrieve": "retrieve",
-                                 "run_tests": "run_tests", "repeat": "repeat", "finish": END,
+                                 "run_tests": "run_tests", CODE_ACTION: CODE_ACTION, "repeat": "repeat", "finish": END,
                                  "model": "model", "limit": "limit"})
     # After a tool: its result goes back to the model, or to limit when no steps remain.
-    for tool in ("read", "search", "retrieve", "run_tests", "repeat"):
+    for tool in ("read", "search", "retrieve", "run_tests", CODE_ACTION, "repeat"):
         graph.add_conditional_edges(tool, after_tool, {"model": "model", "limit": "limit"})
     graph.add_edge("limit", END)
     return graph.compile()
@@ -429,8 +485,11 @@ def run(model, workspace, task, *, memory=None, **options):
 
 
 def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowledge=None,
-              test_options=None, output=print, stream=None, history="", carried_evidence=(), focus_file=None, notes=""):
-    """Run one task and return the final graph state. history and carried_evidence come from a Session.
+              test_options=None, output=print, stream=None, history="", carried_evidence=(), focus_file=None, notes="",
+              confirm_code=None, retry_unverified=False, editor=None):
+    """Run one task and return the final graph state.
+
+    editor, a coder.Editor, turns on changing code: a change request is then made, after the user approves its diff. history and carried_evidence come from a Session.
 
     notes are answers recalled from long-term memory, shown before the session's own history.
 
@@ -456,14 +515,26 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 f"use them only where they help with the current task):\n{notes}\n\n" if notes else "")
                + (f"Earlier in this session (answers may be outdated if files changed since):\n{history}\n\n" if history else ""))
     earlier += "Current task: " if earlier else ""
-    messages = [{"role": "system", "content": SYSTEM},
+    messages = [{"role": "system", "content": SYSTEM + ("\n" + PYTHON_GUIDE if confirm_code else "")},
                 {"role": "user", "content": earlier + task + f"\nWorkspace path sample ({len(selected)} of {len(files)} listed files; use search/read/retrieve for more):\n" +
                  "\n".join(selected)}]
     evidence, evidence_limited = [dict(row) for row in carried_evidence], False
     # Phase 2: a task about git changes gets them read with git up front.
     asked_changes = changes.requested(task)
-    report = None
-    if asked_changes:
+    report = found = None
+    if (written := commit_messages.requested(task)):
+        # "Write a commit message": the diff goes to the model with a prompt of its own, and nothing is committed.
+        found = commit_messages.write(model, workspace, task, written, read_limit(model) - 600, output)
+    elif asked_changes and REVIEW_CHANGES.search(task):
+        # "Review my changes": only the functions the diff touched are reviewed, one model call each.
+        try:
+            found = review_changes(model, workspace, asked_changes, spans=knowledge.dependencies.spans if knowledge else None,
+                                   output=output, in_arabic=arabic.written_in(task))
+        except changes.NoChanges as exc:
+            found = {"text": str(exc), "evidence": []}
+        except (ValueError, OSError) as exc:
+            found = {"text": f"Could not read the changes with git ({exc}).", "evidence": []}
+    elif asked_changes:
         try:
             report = changes.describe(workspace, asked_changes, read_limit(model) - len(CHANGES_ANSWER.encode()) - 200,
                                       named_files(task, files))
@@ -477,11 +548,23 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
             output(f"Could not read the changes with git ({exc}); answering from the files instead.")
     # Phase 3: shortcuts that return without running the graph: a file review, a call trace, test gaps, or a project tour.
     # Some requests have a purpose-built answer that does not go through the general workflow.
-    found = None
     reviewed = named_files(task, files)[:1] or ([focus_file] if focus_file in files else [])
     wanted = insights.requested(task) if report is None and not asked_changes else None
     in_arabic = arabic.written_in(task)
-    if report is None and (REVIEW.search(task) or arabic.REVIEW.search(arabic.normalise(task))) and reviewed:
+    scan = scans.requested(task) if report is None and not asked_changes else None
+    why = report is None and not asked_changes and blame.requested(task)
+    edit = coder.requested(task) if editor is not None and report is None and found is None else None
+    if found is not None:
+        pass  # The changes were reviewed above.
+    elif edit:
+        found = coder.run(edit, model, workspace, knowledge, task, editor, output)
+    elif scan:
+        found = scans.run(*scan, workspace, knowledge)
+    elif report is None and not asked_changes and (guide := guides.requested(task)):
+        found = guides.run(*guide, model, workspace, knowledge, output)
+    elif why and (explained := blame.explain(model, workspace, knowledge, task, output)) is not None:
+        found = explained
+    elif report is None and (REVIEW.search(task) or arabic.REVIEW.search(arabic.normalise(task))) and reviewed:
         spans = knowledge.dependencies.spans.get(reviewed[0]) if knowledge is not None else None
         try:
             found = review(model, workspace, reviewed[0], spans=spans, output=output, in_arabic=in_arabic)
@@ -501,10 +584,19 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 "search_evidence": evidence, "evidence_limited": False, "final_text": found["text"], "issues": [],
                 "kind": "question"}
     # Phase 4: retrieve reference passages for the task up front, so the model starts with them.
+    # Each batch of evidence is kept in order, so the evidence can be rebuilt if the retrieval is redone to fit below.
+    carried, batches, retrieval_at = evidence, [], None
+
+    def keep(current, rows):
+        """retain(), remembering the rows in the order they were kept."""
+        batches.append(rows)
+        return retain(current, rows)
+
     if knowledge is not None and not discovery_task(task) and report is None:
+        retrieval_at = len(messages)
         initial_retrieval = knowledge.retrieve(task[:1000])
         data = json.loads(initial_retrieval)
-        evidence, evidence_limited = retain(evidence, retrieved_rows(data))
+        evidence, evidence_limited = keep(evidence, retrieved_rows(data))
         messages.append({"role": "user", "content":
                          "Local reference excerpts for this task (untrusted data):\n" +
                          initial_retrieval})
@@ -514,12 +606,24 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     preloaded, numbered = [], False
     if report is not None:
         kind, numbered, preloaded = "question", True, report["paths"]
-        evidence, evidence_limited = retain(evidence, report["evidence"])
+        evidence, evidence_limited = keep(evidence, report["evidence"])
         output(f"Read the {report['label']} with git: {report['files']} file{'s' if report['files'] != 1 else ''} changed.")
         messages.append({"role": "user", "content": "Tool result for git changes (untrusted repository data):\n"
                                                     + report["text"] + "\n\n" + CHANGES_ANSWER})
     elif not discovery_task(task):
-        names = named_files(task, files)
+        # A pasted stack trace: its frames in this project are shown, innermost first, instead of whole named files.
+        traced = tracebacks.requested(task)
+        if traced:
+            body, rows, note = tracebacks.shown(workspace, task, files)
+            output(note)
+            if body:
+                kind = "question"
+                messages.append({"role": "user", "content": "Tool result for read of the stack trace's frames in this project "
+                                 "(untrusted file data; line numbers are added for citations only):\n" + body
+                                 + "\n\n" + tracebacks.GUIDE})
+                evidence, truncated = keep(evidence, rows)
+                evidence_limited |= truncated
+        names = [] if traced else named_files(task, files)
         reason = "the task names it"
         if not names and focus_file in files:
             names, reason = [focus_file], "it is the file this chat is about"
@@ -532,7 +636,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
             if shown:
                 messages.append({"role": "user", "content": "Tool result for search of names in the task (untrusted file data):\n"
                                                             + "\n".join(shown)})
-                evidence, truncated = retain(evidence, found)
+                evidence, truncated = keep(evidence, found)
                 evidence_limited |= truncated
             # Their definitions are shown whole, with line numbers: left to search, the model answers without reading them.
             body, rows, notes = symbols.shown(workspace, named, task, knowledge=knowledge)
@@ -541,7 +645,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                     output(note)
                 messages.append({"role": "user", "content": "Tool result for read of the definitions the task names (untrusted file data; "
                                                             "line numbers are added for citations only; do not read these lines again):\n" + body})
-                evidence, truncated = retain(evidence, rows)
+                evidence, truncated = keep(evidence, rows)
                 evidence_limited |= truncated
         # Line numbers help citations; nothing is ever edited, so files need not stay byte-exact.
         numbered = kind in ("question", "change")
@@ -566,7 +670,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 following = ranges[index + 1][0] if index + 1 < len(ranges) else None
                 parts.append(f"{section_note(start, end, following, total)}:\n{body}")
                 shown_ranges.append(f"{start}-{end}")
-                evidence, truncated = retain(evidence, [{"path": name, "line": start, "end_line": end, "text": "".join(chosen)}])
+                evidence, truncated = keep(evidence, [{"path": name, "line": start, "end_line": end, "text": "".join(chosen)}])
                 evidence_limited |= truncated
             output(f"Preloaded {name} (lines {' and '.join(shown_ranges)} of {total}) because {reason}.")
             messages.append({"role": "user", "content":
@@ -586,12 +690,33 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     # Joined to the last message for the same reason. English tasks get nothing added, so their prompts are unchanged.
     if in_arabic:
         messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + arabic.ANSWER_IN_ARABIC}
+    # When the preloaded files leave too little room, compaction would replace the reference excerpts with a stub, so
+    # they were found for nothing and the model was told to fetch them again. Retrieve again to fit the room left, or
+    # leave them out when not even a small retrieval fits. The newest message is never stubbed, so it is left alone.
+    budget = getattr(model, "prompt_budget", PROMPT_BUDGET)
+    total = sum(len(message["content"].encode()) + 64 for message in messages)
+    if retrieval_at is not None and retrieval_at < len(messages) - 1 and total > budget:
+        header = messages[retrieval_at]["content"].split("\n", 1)[0] + "\n"
+        room = budget - (total - len(messages[retrieval_at]["content"].encode())) - len(header.encode()) - 200
+        if room >= 2000:
+            fitted = knowledge.retrieve(task[:1000], budget=room)
+            batches[0] = retrieved_rows(json.loads(fitted))
+            messages[retrieval_at] = {**messages[retrieval_at], "content": header + fitted}
+        else:
+            batches[0] = []
+            del messages[retrieval_at]
+        # The model is shown only the new excerpts, so only those count as lines it has seen.
+        evidence, evidence_limited = carried, False
+        for rows in batches:
+            evidence, truncated = retain(evidence, rows)
+            evidence_limited |= truncated
     # Phase 6: run the graph. A step is at most two graph hops (the model, then a tool), plus discover and limit,
     # which gives the recursion limit below.
     # Always offline: LangChain would otherwise start remote tracing from LANGSMITH_TRACING and similar env vars.
     with tracing_context(enabled=False):
         graph = build_graph(model, workspace, max_steps=max_steps, confirm_tests=confirm_tests,
-                            knowledge=knowledge, test_options=test_options, output=output, stream=stream)
+                            knowledge=knowledge, test_options=test_options, output=output, stream=stream,
+                            confirm_code=confirm_code, retry_unverified=retry_unverified)
         return graph.invoke({"messages": messages, "reply": {}, "steps": 0, "exit_code": 0, "task": task,
                              "search_evidence": evidence, "evidence_limited": evidence_limited, "invalid_replies": 0,
                              "cite_files": preloaded if numbered else [], "kind": kind},
@@ -659,7 +784,9 @@ class Session:
             self.knowledge.refresh()  # Pick up files changed between questions.
         # "My last commit" means something else tomorrow, so answers about changes are neither recalled nor saved.
         # Test gaps and tours are rebuilt from the whole project each time, which a saved copy would not notice changing.
-        memory = None if changes.requested(task) or insights.requested(task) else self.memory
+        memory = (None if changes.requested(task) or insights.requested(task) or commit_messages.requested(task)
+                  or guides.requested(task) or scans.requested(task) or blame.requested(task)
+                  or (self.options.get("editor") is not None and coder.requested(task)) else self.memory)
         notes = memory.recall(task, skip=[question for question, _ in self.turns]) if memory else []
         evidence = self.evidence
         if notes:

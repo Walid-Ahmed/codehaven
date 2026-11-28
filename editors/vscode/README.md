@@ -6,6 +6,8 @@ Ask [CodeHaven](https://github.com/Walid-Ahmed/codehaven) about the project you 
 
 | Command | What it does |
 |---|---|
+| **CodeHaven: Open the Chat Panel** | A chat beside your code: answers stream in, a citation opens the cited lines, and with `--allow-edits` in `codehaven.extraArguments` a proposed change shows its diff with Apply and Decline |
+| **CodeHaven: Explain the Selection in the Chat Panel** | Asks about the selected lines in the chat panel (also in the editor's right-click menu) |
 | **CodeHaven: Ask a Question** | Runs your question on the open folder in a terminal named CodeHaven |
 | **CodeHaven: Explain This File** | Asks CodeHaven to explain the file you are looking at |
 | **CodeHaven: Explain the Selected Code** | Asks about the selected lines (also in the editor's right-click menu) |
@@ -22,7 +24,7 @@ You need CodeHaven itself first; see the main README. Then, from this folder:
 
 ```sh
 npx @vscode/vsce package
-code --install-extension codehaven-0.1.0.vsix
+code --install-extension codehaven-0.2.0.vsix
 ```
 
 `npx` downloads the packaging tool once. Without it, copy this folder to `~/.vscode/extensions/codehaven` and restart VS Code.
@@ -39,4 +41,10 @@ code --install-extension codehaven-0.1.0.vsix
 node --test test/citations.test.js test/extension.test.js
 ```
 
-The tests run without VS Code, against a small stand-in for its API. The extension has not yet been tried inside a running VS Code.
+These run without VS Code, against a small stand-in for its API. To try the extension inside the VS Code installed on this computer, run:
+
+```sh
+test/integration/run.sh /path/to/.venv/bin/codehaven
+```
+
+It opens a VS Code window for a few seconds with a throwaway profile (your settings and extensions are not used or changed), and checks that the extension activates, registers its commands, opens a typed citation with the lines selected, sends a question to the CodeHaven terminal, starts the chat page from the real `codehaven` command on its 127.0.0.1 link, and answers in the chat panel. Nothing is downloaded. It also asks `/help` in the chat panel, which the local server answers without a model. Passed, 6 of 6, on VS Code 1.145.2 on macOS on 2026-11-28.

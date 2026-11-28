@@ -30,6 +30,15 @@ Watch the [narrated demo video on YouTube](https://youtu.be/d18wHCz8LFs) (or the
 | "Review `inventory/store.py`" | [Likely bugs](#review-a-file), one function at a time, most serious first |
 | "Which functions have no tests?" | [A list of test gaps](#test-gaps-and-a-project-tour), instantly, with no model |
 | "Give me a project tour" | An ordered reading list of up to 8 files |
+| "Write a project report" | One Markdown report: reading order, a Mermaid diagram of the imports, libraries, untested functions, and a security scan |
+| "Which libraries does this project use?" | What the manifests declare and what the code imports, with what no manifest declares |
+| "Scan for secrets" | Hard-coded keys and passwords (masked), eval, shell and SQL built from strings, each cited |
+| "What breaks if I change `apply_discount`?" | Its callers, the files that import it, and the tests that mention it |
+| "Why is `pricing.py:2` here?" | The commits that last changed the lines, from git blame, and what their messages say |
+| "Review my changes" | Only the functions your diff touched, reviewed one at a time |
+| A pasted stack trace | Its frames matched to your files, innermost first, and the likely cause |
+| "Write a commit message for my changes" | A message (or a PR description) to copy; nothing is committed |
+| "I'm new to this project" | An onboarding guide: how to run and test it, what it uses, and what to read first |
 | "Trace `checkout_total`" | [The calls below it](#trace-a-function), step by step, and who calls it |
 | "اشرح الدالة `checkout_total`" | [The answer in Arabic](#ask-in-arabic), with the same checked citations |
 
@@ -42,7 +51,7 @@ In the browser page you can also draw a **structure map** of your files, make **
 - [Chat in your browser](#chat-in-your-browser)
 - [Use it from the terminal](#use-it-from-the-terminal)
 - Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Call trace](#trace-a-function) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning) · [Arabic](#ask-in-arabic) · [VS Code](#use-it-from-vs-code)
-- Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.11 does](#what-v011-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
+- Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.14 does](#what-v014-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
 - [Development](#development)
 - [Technical report](docs/TECHNICAL_REPORT.md)
 
@@ -73,6 +82,8 @@ python -m pip install pypdf      # or: brew install poppler
 ```
 
 Step 4 is needed only for [pictures of code](#read-code-from-a-picture). Ollama runs the chat model; Tesseract is a second, separate local program that reads the text in a picture. It is not an Ollama model, so `ollama pull` does not install it. On Windows, use an installer from the [Tesseract installation page](https://tesseract-ocr.github.io/tessdoc/Installation.html) and make sure `tesseract --version` works in a new terminal.
+
+**Or let CodeHaven do steps 1, 2, and 5 for you.** After installing Ollama and CodeHaven, run `codehaven --setup`. It starts Ollama if needed, suggests a model for this computer's memory (`qwen2.5-coder:3b` under 12 GB, the tested `qwen2.5-coder:7b` up to 32 GB, `qwen2.5:14b` above), and downloads it with `ollama pull` only if you answer `y`. That download is the only time CodeHaven uses the internet. `codehaven --doctor` also names the suggested model.
 
 After that, everything works offline. Each time, activate the environment and open the browser page:
 
@@ -116,6 +127,7 @@ There is one agent, not several. It is a [LangGraph](https://docs.langchain.com/
 | `search` | Finds exact text and names the function each match is in |
 | `retrieve` | Fetches ranked passages from the local index |
 | `run_tests` | Runs unittest or pytest in a Docker container with networking off, after you approve |
+| `run_python` | Off unless you start with `--allow-python`. Runs a short Python snippet the model writes, after you approve the code it shows you, in the same Docker sandbox as `run_tests` |
 | `finish` | Returns the answer and the code parts it relies on |
 
 No tool writes files. `edit` and `write` do not exist, and the model is corrected if it asks for them.
@@ -135,7 +147,7 @@ No tool writes files. `edit` and `write` do not exist, and the model is correcte
 
 ### Local knowledge
 
-Passages reach the model four ways: keyword ranking (BM25), definition lookup for names in the question, import following across Python, JavaScript, TypeScript, Go, Java, and Rust, and optional [search by meaning](#search-by-meaning) with a local embedding model.
+Passages reach the model four ways: keyword ranking (BM25), definition lookup for names in the question, import following across Python, JavaScript, TypeScript, Go, Java, Rust, C, C++, C#, Ruby, PHP, Kotlin, and Swift, and optional [search by meaning](#search-by-meaning) with a local embedding model.
 
 ### The agent loop in detail
 
@@ -176,7 +188,7 @@ Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/
 4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat. **Open in VS Code** above the code opens the same file at that line in VS Code, if it is installed; it is a link to a program on this computer, and nothing is sent anywhere.
 5. **See how it got there.** Each answer can show the steps CodeHaven took. If a citation could not be checked against what was actually read, a yellow **Unverified** box says so.
 6. **Study one file or a group of files.** The tabs above the chat add two study aids. Click **Choose files…** to tick the files they are about; with an uploaded file, that file is used.
-   - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust; up to 40 files per map. Functions, methods, and types in Go, Java, and Rust are found with the same kind of parser as JavaScript; their imports are still read with line patterns, so unusual import layouts and macros can be missed.
+   - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, TypeScript, Go, Java, Rust, C, C++, C#, Ruby, PHP, Kotlin, and Swift; up to 40 files per map. Functions, methods, and types in Go, Java, Rust, C, C++, C#, Ruby, PHP, Kotlin, and Swift are found with the same kind of parser as JavaScript; their imports are read with line patterns (Swift files of one module need no imports, so none are drawn), so unusual import layouts and macros can be missed.
    - **Flashcards** asks the local model for question-and-answer cards, 3 to 6 per file for up to 8 files, one file at a time. Click a card or press Space to turn it over, use the arrow keys to move, and **Shuffle** or **Copy all as text** when you want. **Save for Anki…** saves the cards as a text file with one card per line, which Anki and most flashcard apps import. Each answer links to the lines it is about; those line numbers are looked up in the file from the name the model gave, so they are never invented. A card whose named part cannot be found says so.
 
 7. **Come back to a chat.** Chats about a repository are saved on this computer and listed under **Saved chats** in the sidebar. Click one to reopen it: the page shows it again and follow-up questions remember it. See [Saved chats](#saved-chats).
@@ -226,7 +238,7 @@ Shown a whole file, a small model tends to answer "looks fine". Shown one functi
 Two answers come from parsing the whole project rather than from searching it:
 
 - **Test gaps.** "Which functions have no tests?" lists every public function and method whose name appears in no test file, grouped so the files with the most gaps come first. No model is used, so it is instant. It is a name check, not coverage measurement: a function reached only through another function is still listed.
-- **Project tour.** "Give me a project tour" returns an ordered reading list of up to 8 files: the README, then the entry point (the file that reaches the most of the project through its imports), then what it imports, most widely used first. The order and the reason for each step come from the import graph; the local model adds one sentence per file. Tests are left out. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust.
+- **Project tour.** "Give me a project tour" returns an ordered reading list of up to 8 files: the README, then the entry point (the file that reaches the most of the project through its imports), then what it imports, most widely used first. The order and the reason for each step come from the import graph; the local model adds one sentence per file. Tests are left out. Imports are followed for Python, JavaScript, TypeScript, Go, Java, Rust, C, C++, C#, Ruby, PHP, Kotlin, and Swift.
 
 Both have buttons on the empty chat in the browser page, and neither is saved to long-term memory, because a saved copy would not notice a new test or file.
 
@@ -251,7 +263,7 @@ Called from: app/main.py:21 in checkout
 - **Limits.** Up to 3 calls deep and 8 functions; the answer says how many calls were left out, and you can trace one of them by name.
 - **What is followed.** A call to a function in the same file, in a file it imports, or to the only function of that name in the project. `self.add()` means the same class. A call on another object, such as `file.flush()`, is not followed, and neither are calls through a variable, a decorator, or inheritance. A name inside a string or a comment is not a call.
 - **Same name twice.** Name the method with its class (`Store.add`); otherwise the first match is traced and the others are listed.
-- Works for Python, JavaScript, TypeScript, Go, Java, and Rust. A question with a condition, such as "what happens when `add` is called with a negative price?", is answered by the normal workflow instead.
+- Works for Python, JavaScript, TypeScript, Go, Java, Rust, C, C++, C#, Ruby, PHP, Kotlin, and Swift. A question with a condition, such as "what happens when `add` is called with a negative price?", is answered by the normal workflow instead.
 
 ## Notebooks and PDFs
 
@@ -329,6 +341,7 @@ codehaven --doctor               # prints "Meaning search: nomic-embed-text:late
 - **Automatic.** It is on when an embedding model is installed and off otherwise. `--no-semantic` turns it off, and `--embed-model NAME` picks one; without it, the first installed of `nomic-embed-text`, `embeddinggemma`, `mxbai-embed-large`, `bge-m3`, `snowflake-arctic-embed`, and `all-minilm` is used.
 - **First run.** Every passage is embedded once, at roughly 20 passages a second on a laptop, so a mid-sized project takes under a minute. The command waits up to 60 seconds and the page up to 15; the rest is prepared in the background while you ask questions, which use what is ready.
 - **Saved vectors.** Vectors are kept in `~/CodeHaven/index` (change it with `--index-dir`), one file per repository, readable by your user only, so later runs embed only changed passages. The file holds numbers and hashes, never code text. With `--no-remember` nothing is written and vectors live in memory only.
+- **Saved keyword index.** The keyword index is kept beside the vectors, one `.keywords` file per repository, readable by your user only. It holds each file's size, modification time, and text hash, the word counts of its passages, and its parsed outline (names, line numbers, imports), never a passage's text. Each file is read again and its hash compared, so a changed file is always indexed afresh. `--no-remember` writes nothing, and `--forget` or **Forget this project** deletes it.
 - **Failure is harmless.** If the embedding model stops answering, a one-line note says so and search goes back to key words for the session.
 - **Memory.** A small embedding model (about 300 MB) normally fits beside the chat model. On a machine short of memory Ollama may swap the two, which slows every step; use `--no-semantic` there. See [Local inference speed](#local-inference-speed).
 
@@ -377,6 +390,16 @@ For several questions in a row, start an interactive session. Follow-ups remembe
 codehaven --workspace /absolute/path/to/project --interactive
 ```
 
+Typed at a terminal with no question, plain `codehaven` starts the same session in the current folder.
+
+To ask across several repositories at once, such as a backend and its frontend, add each extra one with `--also`: `codehaven --workspace ~/dev/api --also ~/dev/web -i`. They are indexed together and paths are shown from their common parent (`api/server.py`, `web/src/client.js`); nothing else under that parent is read. On the page, put the full paths in the folder box separated by `;`.
+
+In a session, and in the page's question box, slash commands are short forms of the requests below: `/trace name`, `/review file`, `/why path:line`, `/impact name`, `/explain name`, `/tour`, `/onboard`, `/diagram [name]`, `/deps`, `/scan`, `/gaps`, `/changes`, `/review-changes`, `/commit`, `/pr`, `/export`, and `/undo`. `/help` lists them. The up and down arrows bring back earlier questions.
+
+To let the model check something by running it, such as what a function returns for a sample input, add `--allow-python`. The model can then ask to run a short Python snippet (up to 8,000 bytes). CodeHaven prints the code and runs it only if you answer `y`, in the same Docker container as [isolated tests](#run-isolated-project-tests): no network, a read-only copy of the project as its working directory, 30 seconds, and only the packages in the test image. It cannot change your files. Without the flag the action does not exist and the prompts are exactly as before. The browser page does not offer it yet, because it has no way to ask you to approve the code.
+
+If something goes wrong that CodeHaven did not expect, it says so in one sentence and the session carries on. Set `CODEHAVEN_DEBUG=1` to also print the full traceback, for a bug report.
+
 Answers stream to the terminal as the model writes them; add `--no-stream` to print each answer only once it is complete. `codehaven`, `offline-agent`, and `python -m offline_agent` are the same command (on Windows, use `python -m offline_agent`). Reinstall the package after updating to register the commands.
 
 ## Use it from VS Code
@@ -412,7 +435,11 @@ If Ollama is already running, the script checks its local API, prints a friendly
 
 After downloading a model, disconnect from the internet to use it offline. Disabling cloud features does not block model downloads or all network traffic. CodeHaven checks that the model is installed and rejects remote-backed and cloud models; a loopback URL alone cannot guarantee how a separately configured server performs inference. Installation downloads LangGraph and its dependencies; runtime does not require internet access. Reading code from a picture runs Tesseract, a separate program installed once; it works offline and makes no network connection.
 
-## What v0.13 does
+## What v0.14 does
+
+Also new in 0.14: CodeHaven can change code when you start it with `--allow-edits`, always after you approve the diff, with undo (see [Change code](#change-code-opt-in)). New answers made by plain code: libraries, a security and secrets scan, what a change would break, why a line is there (git blame), an onboarding guide, Mermaid diagrams, and a one-file project report. It explains a pasted stack trace, reviews only the functions your changes touched, writes commit messages and PR descriptions, saves answers as Markdown, asks across several repositories (`--also`), takes slash commands (`/help`), and parses C, C++, C#, Ruby, PHP, Kotlin, and Swift. An answer that fails its checks is sent back to the model once. `codehaven --setup` gets a new computer ready, and the VS Code extension has a chat panel.
+
+New in 0.14: faster on large projects and clearer when something goes wrong. The keyword index is saved between runs, so a large repository reopens in about a quarter of the time (FastAPI, 2,400 files: 8.5 s on 0.13, 2.0 s), and after you edit a file only that file is indexed again (8.5 s to 2.8 s). Listing, searching, and checking for changed files are two to three times faster. An answer whose cited lines use code that is not in the repository, such as a library or a file that was never checked in, says so under its own heading. When preloaded files leave too little room in the prompt, the reference excerpts are retrieved again to fit, instead of being gathered and then compacted away. Plain `codehaven` at a terminal starts an interactive session with arrow-key history. An unexpected problem is explained in a sentence in the terminal and on the page, never as a traceback or a bare "Failed to fetch".
 
 New in 0.13: looks for each value an answer reports (a quoted string or a number) in the code the model was shown. A value on the lines the answer cites needs nothing; a value shown on another line gets a citation of that line; a value on no shown line was not read from the code, and the answer is marked **Unverified**. On the seven real repositories this flags two wrong answers the citation checks passed, including an OpenAPI version of `3.0.2` (it is `3.1.0`), and one correct answer whose quoted code the model made up. No correct answer was lost. See [the eval results](docs/EVALS.md).
 
@@ -456,6 +483,26 @@ codehaven --workspace /path/to/repo \
 
 Hidden/built-in paths stay blocked. User exclusions add restrictions; they cannot undo Git ignores. Rules apply to tracked files too. [Exclusion details](docs/EXCLUSIONS.md) cover precedence, negation, root scope, and reference libraries.
 
+## Change code (opt-in)
+
+CodeHaven answers a change request by explaining the change, unless you start it with `--allow-edits` (in the terminal, or with `--gui`). Then it can make the change, always after showing you the diff: in the terminal you answer `y` or `n`, and on the page you click **Apply** or **Decline** under the diff. **Undo last change** in the page's sidebar does the same as `/undo`.
+
+| You ask | What happens |
+|---|---|
+| "Fix `low_stock` in store.py so items at the threshold count" | The model proposes exact replacements; you see the diff and answer `y` or `n` |
+| "Fix the code until the tests pass" | The tests run in the Docker sandbox; a failure goes back to the model, up to 3 rounds, each diff approved by you |
+| "Write tests for `low_stock`" | New tests in a new or existing test file, in the style of your other tests |
+| "Add docstrings to store.py" | Docstrings for the functions and classes that have none, and no other change |
+| "Rename `low_stock` to `below_threshold`" | Done by plain code, not the model: whole-word replacement in every code file that uses the name |
+| "Write a README" / "Write architecture notes" | Written from the project tour and the libraries list |
+| "Apply the review findings in store.py" | The file is reviewed function by function, and the model fixes what the review found |
+
+An edit must copy the text it replaces exactly, and that text must occur once, in a file CodeHaven may read: hidden, excluded, linked, and outside files are never changed. A file that changed while you were reading the diff is not overwritten. Every applied change is recorded outside the repository, in `~/CodeHaven/undo`, so `/undo` in a session, or `codehaven --undo`, puts the files back, unless you changed them again since. Everything stays offline.
+
+## Code that is not in the repository
+
+When the lines an answer cites use code the repository does not hold, the answer says so under the heading "Code these lines use that is not in this repository". It lists each import: a library, such as `requests` or `jsonwebtoken`, or a relative import of a file that is not there, with the line that imports it. Only imports whose name appears on the cited lines are listed, and Python's standard library and Node's built-in modules are left out, because the model already knows them. Imports are found by parsing Python, JavaScript, and TypeScript; nothing is run. The note is not a citation, so it never makes an answer unverified; it tells you where the answer stops being able to show you the code.
+
 ## Local reference knowledge base (RAG)
 
 The repository selected by `--workspace` is automatically indexed for RAG. CodeHaven retrieves relevant source code, README/documentation, and common configuration/build files before answering, with citations such as `repo/src/orders.py:1-25`. No separate indexing command is needed. For Python and JavaScript/TypeScript, retrieval also follows local imports up to two hops and adds relevant dependency passages, even when they do not match the question keywords.
@@ -496,7 +543,7 @@ codehaven --workspace /path/to/repo --retrieval-budget 8000 \
 
 Model requests wait up to 10 minutes for a response, so a slow reload does not fail the task.
 
-CodeHaven sends a task-ranked sample of at most 40 paths / 2,000 bytes instead of the entire file list. Ollama requests keep the model loaded for 30 minutes and preserve the conversation prefix until compaction is necessary, allowing server prompt-cache reuse when available. There is no persistent application cache, and only sessions (`--interactive` or the browser page) carry recent answers between questions. Another client or model unloading can prevent reuse.
+CodeHaven sends a task-ranked sample of at most 40 paths / 2,000 bytes instead of the entire file list. Ollama requests keep the model loaded for 30 minutes and preserve the conversation prefix until compaction is necessary, allowing server prompt-cache reuse when available. The keyword index is kept on disk, so a repository reopens quickly (see [Search by meaning](#search-by-meaning) for what it holds), and only sessions (`--interactive` or the browser page) carry recent answers between questions. Another client or model unloading can prevent reuse.
 
 `--prompt-budget` bounds message content plus a small per-message allowance (default 12,000 UTF-8 bytes). Older evidence is omitted when necessary; oversized recent evidence is marked incomplete. System rules and the original task stay. This is a byte budget, not an exact token count. Full graph history stays in RAM. Requests reserve a context window of at least 8,192 tokens, increasing with the configured budgets; larger settings consume more memory and may run slower.
 
@@ -567,7 +614,7 @@ python3 -m unittest discover -s tests -v
 python3 -m compileall -q offline_agent tests
 ```
 
-Tests include a simulated agent workflow, a real loopback HTTP fixture, and the browser page's server, without downloading a model.
+Tests include a simulated agent workflow, a real loopback HTTP fixture, and the browser page's server, without downloading a model. With the dev extras installed (`python -m pip install -e '.[dev]'`), `tests/test_browser.py` also drives the page in your installed Google Chrome with Playwright: it opens a repository, asks a question, follows a citation, and checks that the page shows no script errors. It downloads no browser and is skipped when Playwright or Chrome is missing.
 
 ### Evaluate the local model
 

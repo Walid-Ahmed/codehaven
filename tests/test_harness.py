@@ -15,6 +15,7 @@ from offline_agent.cli import interactive, main, write_stream
 from offline_agent.model import (MODEL, FinishContent, InvalidReply, Ollama, RepeatedAnswer, RepetitionGuard,
                                  compact_messages)
 from offline_agent.workspace import Workspace
+from index_isolation import setUpModule, tearDownModule  # noqa: F401  (keeps the keyword index out of ~/CodeHaven)
 
 
 def action(kind, path="", content="", message="Working"):
@@ -467,8 +468,39 @@ class SessionTests(TempWorkspace):
         session, first_task = repl.call_args.args
         self.assertIsInstance(session, Session)
         self.assertIsNone(first_task)
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+        # With no task, a terminal starts an interactive session; piped input still needs a task.
+        with patch("offline_agent.cli.sys.stdin") as stdin, contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit):
+            stdin.isatty.return_value = False
             main(["--workspace", str(self.root)])
+        with patch("offline_agent.cli.Ollama"), patch("offline_agent.cli.interactive", return_value=0) as repl, \
+                patch("offline_agent.cli.sys.stdin") as stdin, contextlib.redirect_stdout(io.StringIO()):
+            stdin.isatty.return_value = True
+            self.assertEqual(main(["--workspace", str(self.root)]), 0)
+        self.assertIsInstance(repl.call_args.args[0], Session)
+
+    def test_unexpected_problems_are_explained_without_a_traceback(self):
+        with patch("offline_agent.cli.Ollama", side_effect=RuntimeError("socket gone")), \
+                contextlib.redirect_stderr(io.StringIO()) as errors, patch.dict("os.environ", {"CODEHAVEN_DEBUG": ""}):
+            self.assertEqual(main(["--workspace", str(self.root), "Explain"]), 1)
+        self.assertIn("did not expect (RuntimeError: socket gone)", errors.getvalue())
+        self.assertNotIn("Traceback", errors.getvalue())
+        with patch("offline_agent.cli.Ollama", side_effect=RuntimeError("socket gone")), \
+                contextlib.redirect_stderr(io.StringIO()) as errors, patch.dict("os.environ", {"CODEHAVEN_DEBUG": "1"}):
+            main(["--workspace", str(self.root), "Explain"])
+        self.assertIn("Traceback", errors.getvalue())
+
+        class Broken:
+            asked = 0
+
+            def ask(self, task):
+                Broken.asked += 1
+                raise KeyError(task)
+        inputs = iter(["second", "quit"])
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as errors:
+            self.assertEqual(interactive(Broken(), "first", prompt=lambda _: next(inputs)), 0)
+        self.assertEqual(Broken.asked, 2)  # The session carries on after an unexpected problem.
+        self.assertIn("did not expect (KeyError", errors.getvalue())
 
     def test_history_is_bounded(self):
         session = Session(ScriptedModel([]), self.ws)

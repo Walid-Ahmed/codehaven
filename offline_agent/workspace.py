@@ -1,9 +1,11 @@
 """Bounded, read-only UTF-8 workspace access: listing, reading, paging, and literal search. Nothing here writes files."""
 import ast
+import errno
 import json
 import os
 import re
-from pathlib import Path
+import stat
+from pathlib import Path, PurePath
 from .exclusions import Exclusions, IgnoreConfigurationError
 
 # Directory names that are never listed or read: version control, environments, build output, and credential folders.
@@ -15,7 +17,9 @@ MAX_BYTES = 64_000  # The largest file uploaded, read from a picture or document
 # modules (FastAPI's routing.py and applications.py, about 176 KB each) were invisible to search and reads.
 READ_BYTES = 1_000_000
 MAX_FILES = 5000  # The most files one listing returns; callers report the listing as limited at this size.
-MAX_MATCHES, SEARCH_BYTES = 50, 15_800  # Bounds on one search result, so it always fits in a prompt.
+MAX_MATCHES, SEARCH_BYTES = 50, 15_800
+# Opening a file one directory at a time, refusing symlinks at each step, needs these; Windows lacks them.
+SAFE_OPEN = all(hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK")) and os.open in os.supports_dir_fd  # Bounds on one search result, so it always fits in a prompt.
 
 
 def line_range(spec):
@@ -177,16 +181,39 @@ def enclosing_parts(name, text):
     return lookup
 
 
+def combined(roots, *, excludes=()):
+    """One workspace for several repository folders: their common parent, limited to them.
+
+    A single folder, or a folder that holds all the others, is opened as it is."""
+    paths = [Path(root).expanduser().resolve(strict=True) for root in roots]
+    common = Path(os.path.commonpath([str(path) for path in paths]))
+    if len(paths) == 1 or common in paths:
+        return Workspace(common, excludes=excludes)
+    return Workspace(common, excludes=excludes, scopes=[path.relative_to(common).as_posix() for path in paths])
+
+
 class Workspace:
     """Read-only view of one directory tree. Every name is checked by path() before it is listed, read, or searched."""
 
-    def __init__(self, root, *, excludes=()):
-        """Resolve the root once, so later checks compare against the real directory, and load the ignore rules."""
+    def __init__(self, root, *, excludes=(), scopes=()):
+        """Resolve the root once, so later checks compare against the real directory, and load the ignore rules.
+
+        scopes, folders under root such as ("api", "web"), limits the workspace to them: several repositories
+        are opened together as the folders of their common parent, and nothing else under that parent is seen.
+        """
         self.root = Path(root).resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Workspace must be a directory")
+        # The root as a string, and its case-folded form with a trailing separator: path() works on strings, because
+        # pathlib's own symlink, resolve, and relative_to checks cost seconds per listing on a large project.
+        self.root_text = str(self.root)
+        self.root_key = os.path.normcase(self.root_text)
         self.excludes = tuple(excludes)
+        self.scopes = tuple(sorted({PurePath(scope).as_posix().strip("/") for scope in scopes if str(scope).strip("/.")}))
         self.exclusions = Exclusions(self.root, self.excludes)
+        for scope in self.scopes:
+            if not self.path(scope).is_dir():
+                raise ValueError(f"{scope} is not a folder under {self.root}")
 
     def path(self, name):
         """Return the real path for a workspace-relative name.
@@ -194,39 +221,57 @@ class Workspace:
         Raises ValueError when the name would leave the root, or is hidden, excluded, reached through a symlink,
         or ignored by the ignore rules. This is the one gate every file access goes through.
         """
-        rel = Path(name)
+        rel = PurePath(name) if name else None
         # Path traversal: no absolute paths and no .. components.
-        if not name or rel.is_absolute() or ".." in rel.parts:
+        if not name or rel.is_absolute() or rel.anchor or ".." in rel.parts:
             raise ValueError("Use a relative path inside the workspace")
         if any(p in EXCLUDED or p.startswith(".") for p in rel.parts):
             raise ValueError("Hidden and excluded paths are unavailable")
-        target = self.root / rel
+        if self.scopes:
+            posix = "/".join(rel.parts)
+            # Inside an opened repository, or a folder on the way to one; nothing else under the common parent.
+            if not any(posix == scope or posix.startswith(scope + "/") or scope.startswith(posix + "/") for scope in self.scopes):
+                raise ValueError(f"{name} is not in one of the opened repositories")
         # A symlink at any level could point outside the workspace, so each component is checked, not only the last.
-        current = self.root
+        current = self.root_text
         for part in rel.parts:
-            current = current / part
-            if current.is_symlink():
+            current = os.path.join(current, part)
+            if os.path.islink(current):
                 raise ValueError("Symlink paths are unavailable")
-        # Final guard: the fully resolved path must still be inside the root (relative_to raises ValueError if not).
-        target.resolve().relative_to(self.root)
-        if self.exclusions.ignored(rel, directory=target.is_dir()):
+        # Final guard: the fully resolved path must still be inside the root.
+        real = os.path.normcase(os.path.realpath(current))
+        if real != self.root_key and not real.startswith(self.root_key.rstrip(os.sep) + os.sep):
+            raise ValueError("Use a relative path inside the workspace")
+        if self.exclusions.ignored(rel, directory=os.path.isdir(current)):
             raise ValueError(f"Path is excluded by ignore rules: {name}")
-        return target
+        return self.root / rel
 
     def files(self, scope=""):
         """Relative paths of the readable files under scope, in sorted walk order, at most MAX_FILES of them.
 
         Hidden, excluded, ignored, symlinked, and oversized files are left out.
         """
+        if self.scopes and (not scope or any(other.startswith(scope.strip("/") + "/") for other in self.scopes)):
+            # Several repositories: each one's files, in the order the repositories were given, within the one bound.
+            found = []
+            for other in self.scopes:
+                if not scope or other.startswith(scope.strip("/") + "/"):
+                    found += self.files(other)[:MAX_FILES - len(found)]
+            return found
         start = self.path(scope) if scope else self.root
         if not start.is_dir():
             raise ValueError("File listing scope must be a directory")
         found = []
 
-        def visible_directory(path):
+        def relative(base, name):
+            """The workspace-relative POSIX name of name inside the walked directory base."""
+            inside = base[len(self.root_text):].strip(os.sep)
+            return (inside.replace(os.sep, "/") + "/" + name) if inside else name
+
+        def visible_directory(base, name):
             """Whether a directory passes path(). A broken ignore file is an error to report, not a reason to hide it."""
             try:
-                self.path(path.relative_to(self.root).as_posix())
+                self.path(relative(base, name))
                 return True
             except IgnoreConfigurationError:
                 raise
@@ -235,14 +280,14 @@ class Workspace:
 
         for base, dirs, files in os.walk(start, followlinks=False):
             # Assigning in place prunes the walk, so an excluded directory is never entered.
-            dirs[:] = sorted(d for d in dirs if visible_directory(Path(base) / d))
+            dirs[:] = sorted(d for d in dirs if visible_directory(base, d))
             for name in sorted(files):
                 if name.startswith("."):
                     continue
-                rel = (Path(base) / name).relative_to(self.root).as_posix()
+                rel = relative(base, name)
                 try:
-                    path = self.path(rel)
-                    if path.is_file() and path.stat().st_size <= READ_BYTES:
+                    status = os.stat(self.path(rel))
+                    if stat.S_ISREG(status.st_mode) and status.st_size <= READ_BYTES:
                         found.append(rel)
                 except IgnoreConfigurationError:
                     raise
@@ -252,14 +297,46 @@ class Workspace:
                     return found
         return found
 
+    def read_bytes(self, name, limit=READ_BYTES):
+        """Return (the first limit + 1 bytes of a file, its mode), opened so that no symlink is ever followed.
+
+        path() checks the name first. The checks and the open are separate steps, so a directory swapped for a
+        symlink in between could otherwise lead the open out of the workspace. On macOS and Linux the file is
+        therefore opened one component at a time from the root with O_NOFOLLOW, which refuses a symlink at any
+        level at the moment of opening. Windows has no such open, and uses the checks alone.
+        """
+        self.path(name)
+        parts = PurePath(name).parts
+        if SAFE_OPEN:
+            parent = os.open(self.root_text, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                for part in parts[:-1]:
+                    child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                    os.close(parent)
+                    parent = child
+                # O_NONBLOCK stops a named pipe from hanging the open; fstat below rejects anything but a regular file.
+                descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                    raise ValueError("Symlink paths are unavailable") from None
+                raise
+            finally:
+                os.close(parent)
+        else:
+            target = self.root / name
+            if not target.is_file():
+                raise ValueError("Only regular files can be read")
+            descriptor = os.open(target, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        with os.fdopen(descriptor, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("Only regular files can be read")
+            # One byte past the limit is enough to know the file is too large, without reading all of it.
+            return handle.read(limit + 1), info.st_mode
+
     def read(self, name):
         """Return a file's text. Raises ValueError for anything but a UTF-8 text file of at most READ_BYTES."""
-        target = self.path(name)
-        if not target.is_file():
-            raise ValueError("Only regular files can be read")
-        with target.open("rb") as handle:
-            # One byte past the limit is enough to know the file is too large, without reading all of it.
-            raw = handle.read(READ_BYTES + 1)
+        raw, _ = self.read_bytes(name)
         if len(raw) > READ_BYTES or b"\0" in raw:
             raise ValueError(f"Only UTF-8 text files up to {READ_BYTES // 1_000_000} MB can be read")
         # Windows line endings become plain ones, so a stray carriage return never reaches the model or a citation.

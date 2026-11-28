@@ -2,7 +2,7 @@
   "name": "codehaven",
   "displayName": "CodeHaven",
   "description": "Ask CodeHaven about the open project from VS Code, and jump from a cited path:line to the code. Everything stays on your computer.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "walid-ahmed",
   "repository": {"type": "git", "url": "https://github.com/Walid-Ahmed/codehaven.git"},
   "engines": {"vscode": "^1.80.0"},
@@ -11,6 +11,8 @@
   "activationEvents": ["onStartupFinished"],
   "contributes": {
     "commands": [
+      {"command": "codehaven.chat", "title": "CodeHaven: Open the Chat Panel"},
+      {"command": "codehaven.chatAboutSelection", "title": "CodeHaven: Explain the Selection in the Chat Panel"},
       {"command": "codehaven.open", "title": "CodeHaven: Open the Chat Page for This Project"},
       {"command": "codehaven.ask", "title": "CodeHaven: Ask a Question"},
       {"command": "codehaven.askAboutFile", "title": "CodeHaven: Explain This File"},
@@ -21,6 +23,7 @@
     ],
     "menus": {
       "editor/context": [
+        {"command": "codehaven.chatAboutSelection", "when": "editorHasSelection", "group": "codehaven"},
         {"command": "codehaven.askAboutSelection", "when": "editorHasSelection", "group": "codehaven"},
         {"command": "codehaven.trace", "group": "codehaven"}
       ]

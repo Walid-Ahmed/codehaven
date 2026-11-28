@@ -14,6 +14,7 @@ import offline_agent
 from offline_agent.agent import run
 from offline_agent.cli import main
 from offline_agent.workspace import Workspace
+from index_isolation import setUpModule, tearDownModule  # noqa: F401  (keeps the keyword index out of ~/CodeHaven)
 
 TRACING_ENV = {"LANGSMITH_TRACING": "true", "LANGCHAIN_TRACING_V2": "true",
                "LANGSMITH_API_KEY": "test-key", "LANGCHAIN_API_KEY": "test-key"}
@@ -57,7 +58,9 @@ class OfflineTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             # 2 only means the stub answer cites no evidence; 1 would be an error.
             self.assertNotEqual(main(["--workspace", root, "Explain"]), 1)
-        self.assertEqual(model.observed, [(False, False)])
+        # Every model call, the correction of the unverified stub answer included, ran with tracing off.
+        self.assertTrue(model.observed)
+        self.assertEqual(set(model.observed), {(False, False)})
         client.assert_not_called()
 
     def test_package_source_has_no_tracing_client_or_tracer(self):

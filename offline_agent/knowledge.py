@@ -1,27 +1,30 @@
 """Offline, in-memory BM25 retrieval over local reference documents."""
+import functools
 import hashlib
 import json
 import math
+import os
 import re
 from collections import Counter
 from pathlib import Path
 
-from . import arabic
+from . import arabic, index_cache
 from .model import Stopped
 from .workspace import MAX_FILES, Workspace
 from .dependencies import PythonDependencies
 from .javascript import JS_EXTENSIONS, JavaScriptDependencies
 from .languages import OtherDependencies
+from .more_languages import MoreDependencies
 from .exclusions import IgnoreConfigurationError
 
 EXTENSIONS = {".md", ".txt", ".rst"}
 CODE_EXTENSIONS = EXTENSIONS | JS_EXTENSIONS | {
     ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs",
-    ".c", ".h", ".cpp", ".hpp", ".cs", ".rb", ".php", ".swift", ".kt",
+    ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hh", ".hxx", ".cs", ".rb", ".php", ".swift", ".kt",
     ".kts", ".scala", ".sh", ".bash", ".zsh", ".ps1", ".sql", ".html",
     ".css", ".scss", ".vue", ".svelte", ".json", ".yaml", ".yml", ".toml",
     ".ini", ".cfg", ".xml", ".graphql", ".gql", ".proto", ".r", ".lua",
-    ".ex", ".exs", ".erl", ".hs", ".clj", ".dart",
+    ".ex", ".exs", ".erl", ".hs", ".clj", ".dart", ".ipynb",
 }
 MAX_DOCUMENTS = MAX_FILES  # The same bound as Workspace.files, so a mid-sized repository is indexed in full.
 # The most passages and bytes of text one index holds. Building the index for a project at these limits takes
@@ -32,6 +35,7 @@ BUNDLED_TOPICS = {"stategraph", "checkpoint", "checkpoints", "checkpointer", "in
 CODE_NAMES = {"Dockerfile", "Makefile", "CMakeLists.txt", "Justfile", "Gemfile"}
 
 
+@functools.lru_cache(maxsize=200_000)
 def stem(word):
     """Reduce simple English endings, so "restocking" finds restock and "pricing" finds price."""
     if len(word) > 4 and word.isascii():
@@ -46,6 +50,26 @@ def tokens(text):
     """Lowercase word stems, split at underscores and camelCase, so applyDiscount and apply_discount match "apply discount"."""
     text = arabic.normalise(text)  # Arabic short vowels are not word characters, so they would split a word in two.
     return [stem(word) for word in re.findall(r"[^\W_]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text).lower(), flags=re.UNICODE)]
+
+
+def notebook_text(text):
+    """A Jupyter notebook's JSON with its cell outputs blanked, line for line, so its code and Markdown are indexed and
+    every citation still points at the same line of the real file. Outputs hold results and pictures, not code.
+
+    Relies on the layout Jupyter writes, with "outputs": [ on a line of its own; anything else is left as it is.
+    """
+    lines, kept, closing = text.split("\n"), [], None
+    for line in lines:
+        if closing is not None:
+            kept.append("")
+            if line.rstrip().rstrip(",") == closing:
+                closing = None
+            continue
+        opened = re.match(r'^(\s*)"outputs":\s*\[\s*$', line)
+        kept.append(line)
+        if opened:
+            closing = opened[1] + "]"
+    return "\n".join(kept)
 
 
 def chunks(text):
@@ -71,23 +95,34 @@ def chunks(text):
 
 class KnowledgeBase:
     """A BM25 index over the bundled notes, an optional reference folder, and the repository, with its import graph."""
-    def __init__(self, directory=None, *, workspace=None, context_budget=16_000, excludes=(), semantic=None, cancel=None):
+    def __init__(self, directory=None, *, workspace=None, context_budget=16_000, excludes=(), semantic=None, cancel=None,
+                 cache=None, previous=None):
         """Read and chunk every allowed file once. The limits below keep memory and start-up time bounded.
 
         cancel is an optional threading.Event: once it is set, indexing stops with Stopped between two files,
         so the page's Stop button can end a long index and keep the repository that was open before.
+
+        cache is a file outside the repository where the keyword index is kept between runs (None keeps nothing on
+        disk), and previous is the index of an earlier build in this run. From either, a file whose size, modification
+        time, and text are unchanged keeps its passages and parsed outline, so only changed files are worked on again.
         """
         if not 2000 <= context_budget <= 16_000:
             raise ValueError("Retrieval budget must be between 2000 and 16000 bytes")
+        self.cache = Path(cache) if cache is not None else None
+        known = previous if previous is not None else index_cache.load(self.cache)
+        self.records = {}  # "label/name" -> size, mtime, sha, text, and passages of each indexed file, for the next build.
+        self.reused = 0  # Files whose passages came from an earlier build.
         self.context_budget = context_budget
         self.semantic = semantic  # Optional search by meaning; see semantic.py. None means key words only.
         self.source_texts = {}
         self.directory = directory
         self.workspace_root = workspace.root if isinstance(workspace, Workspace) else workspace
         self.excludes = workspace.excludes if isinstance(workspace, Workspace) else tuple(excludes)
+        self.scopes = workspace.scopes if isinstance(workspace, Workspace) else ()
         # Reuse a supplied workspace so its cached exclusion decisions are shared.
         repository = (workspace if isinstance(workspace, Workspace) else
-                      Workspace(self.workspace_root, excludes=self.excludes) if self.workspace_root is not None else None)
+                      Workspace(self.workspace_root, excludes=self.excludes, scopes=self.scopes)
+                      if self.workspace_root is not None else None)
         if repository is not None:
             self.workspace_root = repository.root
         self.excluded_reference_roots = 0
@@ -155,11 +190,22 @@ class KnowledgeBase:
                 if self.documents >= MAX_DOCUMENTS or len(self.entries) >= MAX_PASSAGES:
                     self.limited = True
                     break
+                key = f"{label}/{name}"
+                old = known["files"].get(key)
                 try:
-                    text = workspace.read(name)
+                    status = os.stat(identity)
+                    # An unchanged file from this run's earlier build is not even read again: listing it already
+                    # checked it, and its size and modification time are what the refresh stamp trusts too.
+                    if old and "text" in old and (old["size"], old["mtime"]) == (status.st_size, status.st_mtime_ns):
+                        text = old["text"]
+                    else:
+                        text = workspace.read(name)
                 except (ValueError, OSError, UnicodeError):
                     self.skipped += 1
                     continue
+                digest = old["sha"] if old and old.get("text") is text else hashlib.sha256(text.encode()).hexdigest()
+                if old and old["sha"] != digest:
+                    old = None
                 size = len(text.encode())
                 if total_bytes + size > MAX_INDEX_BYTES:
                     self.limited = True
@@ -171,33 +217,49 @@ class KnowledgeBase:
                 if label == "repo":
                     self.source_texts["repo/" + name] = text
                     code_files[name] = text
-                for start, end, passage in chunks(text):
-                    # BM25 needs each passage's term counts and length, and for each term how many passages hold it (frequencies).
-                    counts = Counter(tokens(passage))
-                    if not counts:
-                        continue
+                self.reused += old is not None
+                passages = self._passages(key, notebook_text(text) if name.endswith(".ipynb") else text, old)
+                self.records[key] = {"size": status.st_size, "mtime": status.st_mtime_ns, "sha": digest, "text": text,
+                                     "passages": passages}
+                for entry in passages:
                     if len(self.entries) >= MAX_PASSAGES:
                         self.limited = True
                         break
-                    self.entries.append({"source": f"{label}/{name}", "start_line": start,
-                                         "end_line": end, "text": passage,
-                                         "counts": counts, "length": sum(counts.values())})
-                    self.frequencies.update(counts.keys())
+                    self.entries.append(entry)
+                    self.frequencies.update(entry["counts"].keys())
         self.stamp = self.stamp_of(listings)
         self.average_length = (sum(e["length"] for e in self.entries) / len(self.entries)
                                if self.entries else 1)
+        # A file's outline and imports depend on its own text and on which files exist, so with the same list of
+        # files an unchanged file keeps what the last build found for it.
+        names = hashlib.sha256("\0".join(sorted(code_files)).encode()).hexdigest()
+        same = known.get("names") == names
+        shas = {name: self.records["repo/" + name]["sha"] for name in code_files}
+        reuse = {kind: {name: tuple(row[1:]) for name, row in known.get(kind, {}).items()
+                        if same and name in shas and len(row) == 5 and row[0] == shas[name]} for kind in ("python", "js")}
         self.dependencies = PythonDependencies({name: text for name, text in code_files.items()
-                                                if Path(name).suffix in {".py", ".pyi"}})
+                                                if Path(name).suffix in {".py", ".pyi"}}, reuse["python"])
         # One import graph for all languages: the other analysers' results are merged into the Python one.
-        js = JavaScriptDependencies(code_files)
+        js = JavaScriptDependencies(code_files, reuse["js"])
+        self.analysed = {"names": names}
+        for kind, found in (("python", self.dependencies), ("js", js)):
+            self.analysed[kind] = {name: [shas[name], found.definitions[name], found.spans[name], found.edges[name],
+                                          found.missing[name]] for name in found.edges}
         self.dependencies.edges.update(js.edges)
         self.dependencies.definitions.update(js.definitions)
         self.dependencies.spans.update(js.spans)
+        self.dependencies.missing.update(js.missing)
         self.dependencies.parse_failures += js.parse_failures
         other = OtherDependencies(code_files, manifests)  # Go, Java, and Rust.
         self.dependencies.edges.update(other.edges)
         self.dependencies.definitions.update(other.definitions)
         self.dependencies.spans.update(other.spans)
+        more = MoreDependencies(code_files)  # C, C++, C#, Ruby, PHP, Swift, and Kotlin.
+        self.dependencies.edges.update(more.edges)
+        self.dependencies.definitions.update(more.definitions)
+        self.dependencies.spans.update(more.spans)
+        self.dependencies.missing.update(more.missing)
+        self.dependencies.parse_failures += more.parse_failures
         self.passages_by_source = {}
         for entry in self.entries:
             self.passages_by_source.setdefault(entry["source"], []).append(entry)
@@ -212,6 +274,29 @@ class KnowledgeBase:
                     found.append((name, line))
         if self.semantic is not None:
             self.semantic.start(self.entries)  # Embeds new or changed passages in the background.
+        # Written only when something was worked on afresh, so an unchanged repository costs no disk write.
+        if self.cache is not None and (self.reused < self.documents or known.get("names") != names):
+            index_cache.save(self.cache, self.records, self.analysed)
+
+    @staticmethod
+    def _passages(source, text, old):
+        """The index entries of one file's passages: reused from old, an earlier build of the same text, or made afresh."""
+        if old and "passages" in old:
+            return old["passages"]
+        pieces = list(chunks(text))
+        made = []
+        # Saved on disk: the number and term counts of each passage, whose text is cut from the file again.
+        rows = old["chunks"] if old and "chunks" in old else (
+            (index, Counter(tokens(piece[2]))) for index, piece in enumerate(pieces))
+        for index, counts in rows:
+            # BM25 needs each passage's term counts and length, and for each term how many passages hold it (frequencies).
+            if not counts or not 0 <= index < len(pieces):
+                continue
+            start, end, passage = pieces[index]
+            made.append({"source": source, "start_line": start, "end_line": end, "text": passage, "chunk": index,
+                         "counts": counts if isinstance(counts, Counter) else Counter(counts),
+                         "length": sum(counts.values())})
+        return made
 
     @staticmethod
     def stamp_of(listings):
@@ -233,7 +318,7 @@ class KnowledgeBase:
         directory = Path(self.directory).expanduser() if self.directory is not None else None
         for label, root in (("user", directory), ("repo", self.workspace_root)):
             if root is not None and Path(root).exists():
-                workspace = Workspace(root, excludes=self.excludes)
+                workspace = Workspace(root, excludes=self.excludes, scopes=self.scopes if label == "repo" else ())
                 listings.append((label, workspace, workspace.files()))
         return self.stamp_of(listings)
 
@@ -248,9 +333,15 @@ class KnowledgeBase:
                 return False
         except (ValueError, OSError):
             pass  # Whatever is wrong is reported by the rebuild below.
-        self.__init__(self.directory, workspace=self.workspace_root, context_budget=self.context_budget,
-                      excludes=self.excludes, semantic=self.semantic)
+        previous = {"files": self.records, **self.analysed}
+        self.__init__(self.directory, workspace=Workspace(self.workspace_root, excludes=self.excludes, scopes=self.scopes),
+                      context_budget=self.context_budget,
+                      excludes=self.excludes, semantic=self.semantic, cache=self.cache, previous=previous)
         return True
+
+    def forget(self):
+        """Delete the keyword index kept on disk, if there is one."""
+        index_cache.forget(self.cache)
 
     def _expanded(self, entry, terms, definition_line=None):
         """Prefer complete syntactic symbols over arbitrary line chunks."""
@@ -322,14 +413,18 @@ class KnowledgeBase:
                 found += [(name, path, line) for path, line in places]
         return found[:3]
 
-    def retrieve(self, query):
+    def retrieve(self, query, budget=None):
         """The passages to show the model for a query, as a JSON string that fits the context budget.
+
+        budget, when given, is a smaller limit for this call only (at least 2000 bytes), such as the room left in a
+        prompt that preloaded files already fill.
 
         In order: definitions of names the question mentions, the best-ranked matches (at most 4), passages of the
         files those matches import (2 levels deep), then further matches if space is left. Ranking is BM25 over
         key words, mixed with the meaning-search ranking when one is available."""
         if not isinstance(query, str) or not query.strip() or len(query) > 1000:
             raise ValueError("Retrieval query must contain 1 to 1000 characters")
+        budget = self.context_budget if budget is None else max(2000, min(budget, self.context_budget))
         terms = set(tokens(query))
         scored = []
         count = len(self.entries)
@@ -379,7 +474,7 @@ class KnowledgeBase:
                   "meaning_search": bool(near),
                   "results_limited": False, "dependency_limit_reached": False,
                   "dependency_parse_failures": self.dependencies.parse_failures,
-                  "context_budget_bytes": self.context_budget, "context_bytes": 0,
+                  "context_budget_bytes": budget, "context_bytes": 0,
                   "budget_limited": False}
         identities, selected = set(), []
 
@@ -411,7 +506,7 @@ class KnowledgeBase:
         # When the top matches import other files, 40% of the budget is held back for those dependencies.
         has_dependencies = any(self.dependencies.edges.get(e["source"].removeprefix("repo/"))
                                for _, e in candidates[:4] if e["source"].startswith("repo/"))
-        primary_budget = int(self.context_budget * 0.6) if has_dependencies else self.context_budget
+        primary_budget = int(budget * 0.6) if has_dependencies else budget
         # A name the question mentions comes first, ahead of keyword matches, so its definition is never crowded out.
         for name, path, line in self.named_definitions(query):
             passage = next((p for p in self.passages_by_source.get("repo/" + path, [])
@@ -452,7 +547,7 @@ class KnowledgeBase:
                         break
                     status = accept(passage, {"score": 0.0, "kind": "dependency",
                                               "via": "repo/" + name, "depth": depth + 1},
-                                    self.context_budget, line)
+                                    budget, line)
                     if status == "added":
                         added += 1
                     elif status == "budget":
@@ -467,7 +562,7 @@ class KnowledgeBase:
             name = entry["source"].removeprefix("repo/")
             if self.dependencies.edges.get(name) and name not in visited:
                 continue
-            accept(entry, {"score": round(score, 4), "kind": "match"}, self.context_budget)
+            accept(entry, {"score": round(score, 4), "kind": "match"}, budget)
         result["results_limited"] = len(scored) > len(selected) or result["budget_limited"]
         for _ in range(3):  # The count is part of the JSON it measures, so repeat until its own digits settle.
             result["context_bytes"] = len(json.dumps(result, ensure_ascii=False).encode())

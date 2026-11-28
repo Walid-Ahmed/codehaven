@@ -3,7 +3,6 @@ import json
 import os
 import re
 import shutil
-import stat
 import subprocess
 import tempfile
 import threading
@@ -17,6 +16,7 @@ TIMEOUT = 30
 OUTPUT_LIMIT = 16_000
 # Must already exist locally; the agent never pulls an image.
 DEFAULT_IMAGE = 'offline-agent-tests:0.7.0'
+SNIPPET_BYTES = 8000  # The most code one run_python action may run.
 
 
 def command(runner='unittest'):
@@ -81,9 +81,11 @@ def inspect_image(base, image, env):
 
 
 def snapshot(workspace, destination, runner):
-    """Copy the workspace's permitted files into destination and return how many. The container sees only this copy."""
-    tests = workspace.path('tests')
-    if not tests.is_dir():
+    """Copy the workspace's permitted files into destination and return how many. The container sees only this copy.
+
+    runner None makes the copy for a code snippet, which needs no tests/ directory.
+    """
+    if runner is not None and not workspace.path('tests').is_dir():
         raise ValueError('A permitted tests/ directory is required')
     names = workspace.files()
     if len(names) >= MAX_FILES:
@@ -94,58 +96,39 @@ def snapshot(workspace, destination, runner):
         return (name.startswith('tests/') and file.suffix == '.py' and
                 (file.name.startswith('test') if runner == 'unittest' else
                  file.name.startswith('test_') or file.name.endswith('_test.py')))
-    if not any(is_test(name) for name in names):
+    if runner is not None and not any(is_test(name) for name in names):
         raise ValueError('No permitted test files found for the selected runner')
     total = 0
     if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
         # The copy is made with open calls that refuse symlinks at every step, which Windows does not offer.
         raise ValueError("Isolated tests need macOS or Linux; on Windows, run CodeHaven inside WSL to use them.")
-    with_fd = os.open(workspace.root, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        for name in names:
-            workspace.path(name)  # Enforce the same ignore policy again before copying.
-            # Walk down from the root one component at a time with O_NOFOLLOW, so a symlink swapped in after
-            # the listing is refused rather than followed out of the workspace.
-            parent = os.dup(with_fd)
-            try:
-                parts = Path(name).parts
-                for part in parts[:-1]:
-                    child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
-                    os.close(parent)
-                    parent = child
-                # O_NONBLOCK stops a named pipe from hanging the open; fstat then rejects anything but a regular file.
-                file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
-                with os.fdopen(file_fd, 'rb') as handle:
-                    info = os.fstat(handle.fileno())
-                    if not stat.S_ISREG(info.st_mode):
-                        raise ValueError(f'Snapshot path is not a regular file: {name}')
-                    data = handle.read(READ_BYTES + 1)
-                if len(data) > READ_BYTES:
-                    raise ValueError(f'Snapshot file changed or exceeds {READ_BYTES // 1_000_000} MB: {name}')
-            finally:
-                os.close(parent)
-            total += len(data)
-            if total > 16_000_000:
-                raise ValueError('Snapshot exceeds 16 MB; add exclusions or narrow the workspace')
-            target = destination / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            # The container runs as another user, so the copy must be world-readable. Only the executable bit is kept.
-            for directory in target.parents:
-                if directory == destination.parent:
-                    break
-                directory.chmod(0o755)
-            target.write_bytes(data)
-            target.chmod(0o755 if info.st_mode & 0o111 else 0o644)
-    finally:
-        os.close(with_fd)
+    for name in names:
+        # The same ignore policy and the same symlink-refusing open as every other read, so a symlink swapped in
+        # after the listing is refused rather than followed out of the workspace.
+        data, mode = workspace.read_bytes(name)
+        if len(data) > READ_BYTES:
+            raise ValueError(f'Snapshot file changed or exceeds {READ_BYTES // 1_000_000} MB: {name}')
+        total += len(data)
+        if total > 16_000_000:
+            raise ValueError('Snapshot exceeds 16 MB; add exclusions or narrow the workspace')
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # The container runs as another user, so the copy must be world-readable. Only the executable bit is kept.
+        for directory in target.parents:
+            if directory == destination.parent:
+                break
+            directory.chmod(0o755)
+        target.write_bytes(data)
+        target.chmod(0o755 if mode & 0o111 else 0o644)
     destination.chmod(0o755)
     return len(names)
 
 
-def container_command(base, image_id, name, source, runner):
-    """The docker create command for one locked-down test container."""
+def container_command(base, image_id, name, source, runner, snippet=None):
+    """The docker create command for one locked-down test container, or with snippet (a folder holding main.py) for
+    one that runs that snippet instead of the tests, under exactly the same limits."""
     # Docker's --mount value is comma-separated, so a comma in the path could add mount options.
-    if ',' in str(source):
+    if ',' in str(source) or ',' in str(snippet or ''):
         raise ValueError('Snapshot path cannot contain commas in Docker mount syntax')
     # What the flags below do, in order:
     #   --pull never, --network none: nothing is downloaded and the tests cannot reach any network.
@@ -163,16 +146,34 @@ def container_command(base, image_id, name, source, runner):
         '--ulimit', 'nofile=256:256', '--ulimit', 'core=0:0', '--log-driver', 'none',
         '--shm-size', '16m', '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777',
         '--mount', f'type=bind,source={source},target=/workspace,readonly',
+    ] + (['--mount', f'type=bind,source={snippet},target=/snippet,readonly'] if snippet else []) + [
         '--workdir', '/workspace', '--env', 'HOME=/tmp', '--env', 'TMPDIR=/tmp',
         '--env', 'PYTHONDONTWRITEBYTECODE=1', '--env', 'PYTHONPATH=/workspace',
         '--env', 'PYTEST_DISABLE_PLUGIN_AUTOLOAD=1', '--env', 'PYTEST_ADDOPTS=',
         '--env', 'PIP_NO_INDEX=1', '--entrypoint', 'python', image_id,
-    ] + command(runner)[1:]
+    ] + (['/snippet/main.py'] if snippet else command(runner)[1:])
+
+
+def run_snippet(workspace, code, *, image=DEFAULT_IMAGE, docker_socket=None, timeout=TIMEOUT, output_limit=OUTPUT_LIMIT,
+                runner=None):
+    """Run a short Python snippet in the same locked-down container as the tests, and return a text report.
+
+    The snippet sees a read-only copy of the project at /workspace (its working directory, on sys.path), has no
+    network, and can write only to a small in-memory /tmp. Nothing runs on the host. runner is accepted, and
+    ignored, so the test options can be passed as they are.
+    """
+    if not isinstance(code, str) or not code.strip():
+        raise ValueError('run_python needs the Python code to run in content')
+    if len(code.encode()) > SNIPPET_BYTES or '\0' in code:
+        raise ValueError(f'run_python accepts at most {SNIPPET_BYTES} bytes of code')
+    return run_tests(workspace, image=image, docker_socket=docker_socket, timeout=timeout, output_limit=output_limit,
+                     code=code)
 
 
 def run_tests(workspace, *, runner='unittest', image=DEFAULT_IMAGE, docker_socket=None,
-              timeout=TIMEOUT, output_limit=OUTPUT_LIMIT):
-    """Run the workspace's tests in a throwaway Docker container and return a text report.
+              timeout=TIMEOUT, output_limit=OUTPUT_LIMIT, code=None):
+    """Run the workspace's tests in a throwaway Docker container and return a text report. With code, run that
+    snippet instead (see run_snippet).
 
     Fails closed: when Docker, the socket, or the image is unavailable it raises ValueError and nothing runs on the host.
     """
@@ -195,7 +196,14 @@ def run_tests(workspace, *, runner='unittest', image=DEFAULT_IMAGE, docker_socke
         identity = inspect_image(base, image, env)
         source = root / 'project'
         source.mkdir()
-        count = snapshot(workspace, source, runner)
+        count = snapshot(workspace, source, None if code is not None else runner)
+        snippet = None
+        if code is not None:
+            snippet = root / 'snippet'
+            snippet.mkdir()
+            (snippet / 'main.py').write_text(code, encoding='utf-8')
+            snippet.chmod(0o755)
+            (snippet / 'main.py').chmod(0o644)
         # Docker Desktop may need to traverse the parent directory to share the snapshot.
         root.chmod(0o755)
         name = 'offline-agent-tests-' + uuid.uuid4().hex
@@ -206,7 +214,7 @@ def run_tests(workspace, *, runner='unittest', image=DEFAULT_IMAGE, docker_socke
         reader = None
         try:
             try:
-                created = subprocess.run(container_command(base, identity, name, source, runner),
+                created = subprocess.run(container_command(base, identity, name, source, runner, snippet),
                                          env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
             except subprocess.TimeoutExpired as exc:
                 raise ValueError('Container creation timed out; no test process was started') from exc
@@ -252,4 +260,5 @@ def run_tests(workspace, *, runner='unittest', image=DEFAULT_IMAGE, docker_socke
         status = f'Timed out after {timeout} seconds' if timed_out else f'Exit code: {process.returncode}'
         if truncated.is_set():
             text += f'\n[Output truncated to {output_limit} bytes]'
-        return f'Isolation: Docker; runner: {runner}; snapshot files: {count}\n' + status + '\n' + text
+        what = 'Python snippet' if code is not None else f'runner: {runner}'
+        return f'Isolation: Docker; {what}; snapshot files: {count}\n' + status + '\n' + text

@@ -90,6 +90,9 @@ def load_tasks(path):
     return tasks
 
 
+MULTI_REPO = {"overview"}  # Suites whose tasks each name one of the pinned repositories.
+
+
 def suites():
     """Names of the real-repository suites: every evals/real/NAME_tasks.json."""
     return sorted(path.name.removesuffix("_tasks.json") for path in REAL.glob("*_tasks.json"))
@@ -100,6 +103,9 @@ def suite_paths(name):
     if name not in suites():
         raise ValueError(f"Unknown suite {name!r}. Choose from: {', '.join(suites())}")
     repo = REAL / "repos" / name
+    # A suite whose tasks each name their repository, such as overview, runs over several of them.
+    if not repo.is_dir() and name in MULTI_REPO:
+        return REAL / f"{name}_tasks.json", REAL / "repos", EVALS / "results" / f"{name}.json"
     if not repo.is_dir():
         raise ValueError(f"The {name} repository is not on this computer. Download it once, while online: "
                          f"python3 scripts/fetch_eval_repos.py {name}")
@@ -121,8 +127,14 @@ def changed_files(before, after):
     return sorted(name for name in old.keys() | new.keys() if old.get(name) != new.get(name))
 
 
-def evaluate_task(task, model, repo):
-    """Run one task, and its follow-up questions in the same session, on a fresh copy of the repository."""
+def evaluate_task(task, model, repo, retry=False):
+    """Run one task, and its follow-up questions in the same session, on a fresh copy of the repository.
+
+    retry turns on the one correction of an answer that fails its checks, as the terminal and the page do; it is
+    off by default so that results stay comparable with runs made before it existed."""
+    repo = Path(repo) / task["repo"] if task.get("repo") else repo
+    if not Path(repo).is_dir():
+        raise ValueError(f"The {task.get('repo')} repository is not on this computer: python3 scripts/fetch_eval_repos.py {task.get('repo')}")
     with tempfile.TemporaryDirectory(prefix="codehaven-eval-") as temporary:
         root = Path(temporary) / "repo"
         shutil.copytree(repo, root)
@@ -131,7 +143,8 @@ def evaluate_task(task, model, repo):
         started = time.monotonic()
         # confirm_tests always answers no, so a task can never start a Docker test run.
         session = Session(metered, workspace, knowledge=KnowledgeBase(None, workspace=workspace, context_budget=RETRIEVAL_BUDGET),
-                          max_steps=task.get("max_steps", 12), confirm_tests=lambda: False, output=log.append)
+                          max_steps=task.get("max_steps", 12), confirm_tests=lambda: False, output=log.append,
+                          retry_unverified=retry)
         turns = [task] + task.get("followups", [])
         answers, failures, exit_code, steps = [], [], 0, 0
         own = []  # What the model's text alone fails: CodeHaven's added sections removed.
@@ -196,12 +209,12 @@ def table(results):
     return "\n".join(lines)
 
 
-def evaluate(tasks, model, repo, output=print):
+def evaluate(tasks, model, repo, output=print, retry=False):
     """Run every task in turn, reporting progress through output, and return the list of results."""
     results = []
     for number, task in enumerate(tasks, 1):
         output(f"[{number}/{len(tasks)}] {task['id']}: {task['task']}")
-        results.append(evaluate_task(task, model, repo))
+        results.append(evaluate_task(task, model, repo, retry))
         result = results[-1]
         output(f"    {'PASS' if result['passed'] else 'FAIL'} in {result['steps']} steps, {result['seconds']:.1f}s"
                + (f" ({'; '.join(result['failures'])})" if result["failures"] else ""))
@@ -221,6 +234,8 @@ def main(argv=None):
     parser.add_argument("--model", default=MODEL, help="Installed local Ollama model to score (default: the tested one)")
     parser.add_argument("--max-output-tokens", type=int, default=1024)
     parser.add_argument("--prompt-budget", type=int, default=12000)
+    parser.add_argument("--retry", action="store_true",
+                        help="Ask the model once to correct an answer that fails its checks, as normal use does")
     args = parser.parse_args(argv)
     try:
         if args.suite:
@@ -239,7 +254,7 @@ def main(argv=None):
         if others:
             print("Warning: Ollama also has " + ", ".join(others) + " loaded, so timings may not be representative.")
         started = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        results = evaluate(tasks, model, args.repo, output=lambda line: print(line, flush=True))
+        results = evaluate(tasks, model, args.repo, output=lambda line: print(line, flush=True), retry=args.retry)
     except (ValueError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

@@ -14,6 +14,7 @@ from offline_agent.cli import main
 from offline_agent.exclusions import IgnoreConfigurationError
 from offline_agent.knowledge import KnowledgeBase
 from offline_agent.workspace import Workspace
+from index_isolation import setUpModule, tearDownModule  # noqa: F401  (keeps the keyword index out of ~/CodeHaven)
 
 
 class ExclusionTests(unittest.TestCase):

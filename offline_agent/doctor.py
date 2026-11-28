@@ -103,3 +103,88 @@ def extras(docker_image=None):
 def default_model_hint(model):
     """A line for --doctor when the model in use is not the tested default."""
     return (f"Note: {model.model} is not the tested default ({MODEL}); answers may differ." if model.model != MODEL else "")
+
+
+# The model to suggest for a computer's memory, smallest first: (at least this many GB, model, why).
+# Measured in docs/EVALS.md: the 7B coder model is the tested default; the 14B one is as often right and cites more
+# carefully; the 0.5B model was right about a third of the time, so it is never suggested.
+SUGGESTIONS = [
+    (0, "qwen2.5-coder:3b", "smaller than the tested default; expect more wrong or unverified answers"),
+    (12, MODEL, "the tested default"),
+    (32, "qwen2.5:14b", "as often right as the default and more careful with citations, about half as fast"),
+]
+
+
+def memory_gb():
+    """This computer's memory in GB, or None when it cannot be told. Read from the system, never from the network."""
+    try:
+        if hasattr(os, "sysconf") and "SC_PHYS_PAGES" in os.sysconf_names:
+            return round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024 ** 3)
+    except (OSError, ValueError):
+        pass
+    if os.name == "nt":
+        import ctypes
+
+        class Status(ctypes.Structure):
+            """The fields of MEMORYSTATUSEX that Windows fills in."""
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total", ctypes.c_ulonglong),
+                        ("available", ctypes.c_ulonglong), ("page_total", ctypes.c_ulonglong),
+                        ("page_available", ctypes.c_ulonglong), ("virtual_total", ctypes.c_ulonglong),
+                        ("virtual_available", ctypes.c_ulonglong), ("extended", ctypes.c_ulonglong)]
+        status = Status()
+        status.length = ctypes.sizeof(Status)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return round(status.total / 1024 ** 3)
+    return None
+
+
+def suggested_model(gigabytes=None):
+    """(model, why) to suggest for a computer with this much memory (this one's when not given)."""
+    gigabytes = memory_gb() if gigabytes is None else gigabytes
+    if gigabytes is None:
+        return MODEL, "the tested default (this computer's memory could not be read)"
+    choice = [row for row in SUGGESTIONS if gigabytes >= row[0]][-1]
+    return choice[1], f"{choice[2]}; this computer has {gigabytes} GB of memory"
+
+
+def setup(model, ask=input, output=print, run=subprocess.run):
+    """Guided first run: check Ollama, start it if needed, and download a model only if the user says yes.
+
+    This is the one place CodeHaven uses the internet, and only through `ollama pull`, after asking. Returns 0 when
+    CodeHaven is ready to use, 1 otherwise.
+    """
+    program = shutil.which("ollama")
+    if program is None:
+        output("Ollama is not installed. Install it from https://ollama.com/ (once, while online), then run codehaven --setup again.")
+        return 1
+    output("Ollama: installed.")
+    server = None
+    if not running(model):
+        server = start_ollama(model, output)
+    try:
+        installed = {found["name"] for found in model.local_models()}
+        suggestion, why = suggested_model()
+        output(f"Suggested model for this computer: {suggestion} ({why}).")
+        wanted = model.model if model.model in installed else suggestion
+        if wanted not in installed:
+            answer = ask(f"Download {wanted} now with ollama pull? It is a few GB and needs the internet once. [y/N] ")
+            if answer.strip().lower() != "y":
+                output(f"Nothing was downloaded. When you are ready: ollama pull {wanted}")
+                return 1
+            done = run([program, "pull", wanted], env={**os.environ, "OLLAMA_NO_CLOUD": "1"})
+            if done.returncode:
+                output(f"ollama pull {wanted} did not finish (exit code {done.returncode}). Check the connection and try again.")
+                return 1
+        output(f"Chat model: {wanted} is installed.")
+        embedders = [name for name in installed if "embed" in name]
+        if not embedders:
+            answer = ask("Also download nomic-embed-text (about 270 MB) so search works by meaning too? [y/N] ")
+            if answer.strip().lower() == "y":
+                run([program, "pull", "nomic-embed-text"], env={**os.environ, "OLLAMA_NO_CLOUD": "1"})
+        for line in extras():
+            output(line)
+        command = "codehaven --gui --start-ollama" + (f" --model {wanted}" if wanted != MODEL else "")
+        output(f"Ready. From now on everything works offline. Start with: {command}")
+        return 0
+    finally:
+        stop_ollama(server)

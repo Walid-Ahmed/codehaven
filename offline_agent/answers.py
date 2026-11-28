@@ -32,8 +32,8 @@ CORRECTION = ("Your previous reply was invalid: {}. No tool ran. Reply again wit
               "action, path, content, and message as strings, where action is one of " + ", ".join(ACTIONS) + ".")
 
 
-def reply_problem(reply):
-    """Describe why a model reply is not a usable action, or return None."""
+def reply_problem(reply, actions=ACTIONS):
+    """Describe why a model reply is not a usable action, or return None. actions are the ones on offer."""
     if not isinstance(reply, dict):
         return "the reply is not a JSON object"
     missing = [key for key in SCHEMA["required"] if key not in reply]
@@ -45,9 +45,14 @@ def reply_problem(reply):
     wrong = [key for key in SCHEMA["required"] if not isinstance(reply[key], str)]
     if wrong:
         return "fields must be strings: " + ", ".join(wrong)
-    if reply["action"] not in ACTIONS:
+    if reply["action"] not in actions:
         return f"unknown action {reply['action'][:40]!r}"
     return None
+
+
+def with_actions(schema, actions):
+    """A schema whose action field allows exactly actions; schema itself is left as it is."""
+    return {**schema, "properties": {**schema["properties"], "action": {"type": "string", "enum": list(actions)}}}
 
 
 def cited_schema(paths=(), brief=False):
@@ -390,3 +395,44 @@ def format_metrics(metrics):
         rate = metrics.get("tokens_per_second")
         parts.append(f"{metrics['generated_tokens']:,} generated" + (f" at {rate:.1f} tok/s" if rate else ""))
     return "Ollama metrics: " + ("; ".join(parts) or "no timings or token counts reported")
+
+
+# The most imports of missing code one answer lists; more than this says the answer leans on a whole library.
+MISSING_SHOWN = 6
+MISSING_HEADING = ("Code these lines use that is not in this repository, so what it does is not shown here "
+                   "(found by CodeHaven from the imports):")
+
+
+def missing_code(answer, workspace, knowledge):
+    """Notes on the code an answer's cited lines use but the repository does not hold: a library that is not
+    installed in it, or a relative import of a file that is not there.
+
+    Only imports whose name appears on a cited line count, so a file's unrelated imports are left out. The notes
+    name the import's line in words, not as a path:line citation, so they are never mistaken for evidence the
+    answer relies on.
+    """
+    missing = getattr(getattr(knowledge, "dependencies", None), "missing", None)
+    if not missing or not answer:
+        return []
+    cited = {}
+    for path, start, end in CITATION.findall(answer):
+        if path in missing:
+            cited.setdefault(path, []).append((int(start), int(end or start)))
+    notes, seen = [], set()
+    for path, ranges in cited.items():
+        try:
+            lines = workspace.read(path).splitlines()
+        except (ValueError, OSError, UnicodeError):
+            continue
+        shown = "\n".join(line for start, end in ranges for line in lines[max(0, start - 1):end])
+        for row in missing[path]:
+            used = re.search(rf"(?<![\w.$]){re.escape(row['name'])}(?![\w$])", shown)
+            on_import = any(start <= row["line"] <= end for start, end in ranges)
+            if not (used or on_import) or (path, row["module"]) in seen:
+                continue
+            seen.add((path, row["module"]))
+            what = "a file this repository does not have" if row["local"] else "not part of this repository"
+            notes.append(f"- `{row['module']}` ({what}), imported as `{row['name']}` on line {row['line']} of {path}")
+            if len(notes) >= MISSING_SHOWN:
+                return notes
+    return notes

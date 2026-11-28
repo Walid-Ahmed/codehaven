@@ -20,7 +20,11 @@ spec.loader.exec_module(fetcher)
 class SuiteTests(unittest.TestCase):
     def test_every_pinned_repository_has_questions_and_a_full_commit(self):
         entries = json.loads((evaluation.REAL / "repos.json").read_text(encoding="utf-8"))
-        self.assertEqual(sorted(entry["name"] for entry in entries), evaluation.suites())
+        self.assertEqual(sorted(entry["name"] for entry in entries),
+                         [name for name in evaluation.suites() if name not in evaluation.MULTI_REPO])
+        names = {entry["name"] for entry in entries}
+        for suite in evaluation.MULTI_REPO:  # Each task of a multi-repository suite names a pinned repository.
+            self.assertTrue(all(task["repo"] in names for task in evaluation.load_tasks(evaluation.REAL / f"{suite}_tasks.json")))
         for entry in entries:
             self.assertRegex(entry["commit"], r"^[0-9a-f]{40}$")
             self.assertTrue(entry["url"].startswith("https://github.com/"))

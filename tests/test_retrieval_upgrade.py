@@ -10,6 +10,7 @@ from unittest.mock import patch
 from offline_agent.javascript import JavaScriptDependencies
 from offline_agent.cli import main
 from offline_agent.knowledge import KnowledgeBase
+from index_isolation import setUpModule, tearDownModule  # noqa: F401  (keeps the keyword index out of ~/CodeHaven)
 
 
 class JavaScriptTests(unittest.TestCase):

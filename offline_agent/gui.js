@@ -120,9 +120,17 @@ function setSuggestions(items) {
 }
 
 // ---- Talking to the server.
+// fetch, with a plain message when the local server cannot be reached instead of the browser's "Failed to fetch".
+async function reach(path, options) {
+  try { return await fetch(path, options); }
+  catch (error) {
+    if (error.name === "AbortError") throw error;
+    throw new Error(t("CodeHaven's local server is not answering. Check that the terminal running codehaven --gui is still open, then reload this page."));
+  }
+}
 // One JSON request. A refused one throws the server's own error message.
 async function api(path, options = {}) {
-  const response = await fetch(path, {...options, headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN}});
+  const response = await reach(path, {...options, headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN}});
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || response.statusText);
   return data;
@@ -131,7 +139,7 @@ async function api(path, options = {}) {
 // ---- Streaming answers from the server.
 // Events of a streamed reply: the server sends one JSON object per line.
 async function* streamEvents(path, body) {
-  const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN},
+  const response = await reach(path, {method: "POST", headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN},
                                       body: JSON.stringify(body)});
   if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || response.statusText); }
   const reader = response.body.getReader();
@@ -236,6 +244,7 @@ function setIndexed(summary) {
   uploaded = Boolean(summary.upload);
   $("model-name").textContent = summary.model || t("a local model");
   setClone(Boolean(summary.clone));
+  $("undo-change").hidden = !summary.edits;
   setSaved(summary);
   setChats(summary.chats);
   if (!indexed) return;
@@ -494,7 +503,7 @@ async function uploadFile(file, fromChat = false) {
   busy = true; updateComposer();
   report(t(isDocument(file) ? "Reading {name} into text…" : picture ? "Reading the code in {name}… this takes a few seconds." : "Reading {name}…", {name: file.name}));
   try {
-    const response = await fetch("/api/upload?name=" + encodeURIComponent(file.name),
+    const response = await reach("/api/upload?name=" + encodeURIComponent(file.name),
                                  {method: "POST", headers: {"Content-Type": "application/octet-stream", "X-CodeHaven-Token": TOKEN}, body: file});
     const summary = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(summary.error || response.statusText);
@@ -644,6 +653,31 @@ $("model").addEventListener("change", async () => {
   }
 });
 
+// ---- Changing code (--allow-edits): a proposed change is shown as a diff, and applied only on Apply.
+function showDiff(card, event) {
+  const box = document.createElement("div"); box.className = "diff-box";
+  const title = document.createElement("strong"); title.dir = "auto"; title.textContent = t("Proposed change: ") + event.summary;
+  const pre = document.createElement("pre"); pre.className = "diff";
+  for (const line of event.diff.split("\n")) {
+    const row = document.createElement("span");
+    row.className = line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : "";
+    row.textContent = line + "\n"; pre.append(row);
+  }
+  const apply = document.createElement("button"); apply.textContent = t("Apply");
+  const decline = document.createElement("button"); decline.textContent = t("Decline");
+  const answer = async (yes) => {
+    apply.disabled = decline.disabled = true;
+    try { await api("/api/decide", {method: "POST", body: JSON.stringify({apply: yes})}); } catch (error) { toast(error.message); }
+  };
+  apply.addEventListener("click", () => answer(true)); decline.addEventListener("click", () => answer(false));
+  const row = document.createElement("div"); row.className = "diff-actions"; row.append(apply, decline);
+  box.append(title, pre, row); card.append(box); scrollDown();
+}
+$("undo-change").addEventListener("click", async () => {
+  if (busy) return;
+  try { toast(t("Undid: ") + (await api("/api/undo", {method: "POST", body: "{}"})).undone); } catch (error) { toast(error.message); }
+});
+
 // ---- Chat.
 function clearChat() {
   $("messages-inner").replaceChildren($("empty"));
@@ -664,10 +698,12 @@ function keepTurn(question, answer, issues, stopped) {
   $("save-chat").disabled = false;
 }
 // The chat as Markdown: a heading per question, the answer under it, and any warning as a quotation.
-function chatMarkdown() {
+function chatMarkdown() { return turnsMarkdown(transcript); }
+// Some questions and answers as Markdown; citations stay as path:line, so they can be checked in the repository.
+function turnsMarkdown(turns) {
   const about = $("repo-label").textContent.trim();
   const parts = [`# CodeHaven: ${about}`, `${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC · ${$("model").value}`];
-  for (const turn of transcript) {
+  for (const turn of turns) {
     parts.push(`## ${turn.question.replace(/\s+/g, " ")}`, turn.answer || "—");
     if (turn.stopped) parts.push(`> ${t("Stopped before it finished.")}`);
     if (turn.issues.length) parts.push(`> **${t("Unverified")}**\n` + turn.issues.map((issue) => `> - ${issue}`).join("\n"));
@@ -739,6 +775,12 @@ async function stopNow() {
 async function ask(question) {
   question = question.trim();
   if (!question || busy || !indexed) return;
+  // Two slash commands act on the page itself; the others are written out in full by the server (/help lists them).
+  if (question === "/undo" || question === "/export") {
+    $("question").value = ""; resize();
+    $(question === "/undo" ? "undo-change" : "save-chat").click();
+    return;
+  }
   busy = stoppable = true;
   $("question").value = ""; resize(); updateComposer();
   addMessage("user").textContent = question;
@@ -767,6 +809,8 @@ async function ask(question) {
         answer.innerHTML = render(streamed);
         phase = t("Writing the answer…");
         scrollDown();
+      } else if (event.type === "diff") {
+        showDiff(card, event);
       } else if (event.type === "done" || event.type === "error" || event.type === "stopped") {
         done = event;
       }
@@ -807,8 +851,15 @@ async function ask(question) {
       try { await navigator.clipboard.writeText(done.answer || streamed); copy.textContent = t("Copied"); setTimeout(() => { copy.textContent = t("Copy"); }, 1500); }
       catch { toast(t("This browser did not allow copying. Select the text and copy it instead.")); }
     });
+    const save = document.createElement("button"); save.className = "copy"; save.textContent = t("Save .md");
+    save.title = t("Save this answer as a Markdown file, through your browser. Nothing leaves this computer.");
+    save.addEventListener("click", () => {
+      const turn = {question, answer: done.complete ? done.answer : streamed, issues: done.issues, stopped: false};
+      const name = (question.replace(/[^\wء-ي]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "answer") + ".md";
+      saveFile(name, turnsMarkdown([turn]), "text/markdown");
+    });
     const foot = document.createElement("div"); foot.className = "msg-foot";
-    foot.append(details, copy); card.append(foot);
+    foot.append(details, copy, save); card.append(foot);
   } catch (error) {
     status.remove();
     const box = document.createElement("div"); box.className = "error-box"; box.dir = "auto"; box.textContent = error.message;
@@ -1100,6 +1151,7 @@ async function makeCards() {
     for await (const event of streamEvents("/api/flashcards", {paths: selected, count: Number($("cards-count").value), language: LANG})) {
       if (event.type === "file") { phase = t("Writing cards for {path} (file {index} of {of})…", event); tick(); }
       else if (event.type === "cards") { cards.push(...event.cards); showCard(); }
+      else if (event.type === "error" && event.fatal) throw new Error(event.message);
       else if (event.type === "error") failed.push(`${event.path}: ${event.message}`);
       else if (event.type === "done") finished = true;
       else if (event.type === "stopped") stopped = true;

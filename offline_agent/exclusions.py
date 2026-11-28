@@ -1,5 +1,4 @@
 """Root-scoped Git-style exclusion rules, with no Git subprocess or network."""
-from pathlib import Path
 
 from pathspec import GitIgnoreSpec
 
@@ -26,7 +25,7 @@ class Exclusions:
                 raise IgnoreConfigurationError("--exclude is deny-only; use .agentignore for ordered negation rules")
         self.extra = self.compile(self.patterns, '--exclude')
         for filename in ('.gitignore', '.agentignore'):
-            self.spec(Path(), filename)
+            self.spec('', filename)
 
     @staticmethod
     def compile(lines, source):
@@ -37,10 +36,11 @@ class Exclusions:
             raise IgnoreConfigurationError(f"Invalid exclusion rules in {source}: {exc}") from exc
 
     def spec(self, directory, filename):
-        """The compiled rules of one rule file in one directory, or None when there is none. Read once, then cached."""
+        """The compiled rules of one rule file in a directory (a root-relative POSIX string, "" for the root), or None
+        when there is none. Read once, then cached. Strings, not Paths, because this runs for every directory listed."""
         key = (directory, filename)
         if key not in self.cache:
-            path = self.root / directory / filename
+            path = self.root / directory / filename if directory else self.root / filename
             if path.is_symlink():
                 self.cache[key] = None  # Git does not follow symlinked .gitignore files.
             else:
@@ -59,14 +59,14 @@ class Exclusions:
                     raise IgnoreConfigurationError(f"Cannot read exclusion rules in {path}: {exc}") from exc
         return self.cache[key]
 
-    def layer(self, relative, directory, filename):
-        """Whether one kind of rule file ignores the path, applying each ancestor directory's file from the root down."""
+    def layer(self, parts, directory, filename):
+        """Whether one kind of rule file ignores the path (given as its parts), applying each ancestor directory's file
+        from the root down."""
         ignored = False
-        for depth in range(len(relative.parts)):
-            ancestor = Path(*relative.parts[:depth])
-            spec = self.spec(ancestor, filename)
+        for depth in range(len(parts)):
+            spec = self.spec('/'.join(parts[:depth]), filename)
             if spec is not None:
-                local = Path(*relative.parts[depth:]).as_posix() + ('/' if directory else '')
+                local = '/'.join(parts[depth:]) + ('/' if directory else '')
                 # True: a rule ignores the path. False: a ! rule re-includes it. None: this file has no matching rule.
                 # A deeper file's verdict replaces a shallower one, as in Git.
                 decision = spec.check_file(local).include
@@ -84,12 +84,12 @@ class Exclusions:
             key = (parts[:depth], is_dir)
             decision = self.decisions.get(key)
             if decision is None:
-                prefix = Path(*parts[:depth])
+                prefix = parts[:depth]
                 # Each source can only add exclusions: a ! rule in .agentignore cannot re-include what .gitignore ignores.
                 decision = self.decisions[key] = bool(
                     self.layer(prefix, is_dir, '.gitignore')
                     or self.layer(prefix, is_dir, '.agentignore')
-                    or self.extra.match_file(prefix.as_posix() + ('/' if is_dir else '')))
+                    or self.extra.match_file('/'.join(prefix) + ('/' if is_dir else '')))
             if decision:
                 return True
         return False

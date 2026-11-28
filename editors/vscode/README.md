@@ -39,4 +39,10 @@ code --install-extension codehaven-0.1.0.vsix
 node --test test/citations.test.js test/extension.test.js
 ```
 
-The tests run without VS Code, against a small stand-in for its API. The extension has not yet been tried inside a running VS Code.
+These run without VS Code, against a small stand-in for its API. To try the extension inside the VS Code installed on this computer, run:
+
+```sh
+test/integration/run.sh /path/to/.venv/bin/codehaven
+```
+
+It opens a VS Code window for a few seconds with a throwaway profile (your settings and extensions are not used or changed), and checks that the extension activates, registers its commands, opens a typed citation with the lines selected, sends a question to the CodeHaven terminal, and starts the chat page from the real `codehaven` command on its 127.0.0.1 link. Nothing is downloaded. Passed on VS Code 1.145.2 on macOS on 2026-11-28.

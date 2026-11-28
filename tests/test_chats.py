@@ -8,6 +8,7 @@ from pathlib import Path
 from offline_agent.chats import CHATS, Chats, new_id
 from offline_agent.gui import App
 from offline_agent.workspace import Workspace
+from index_isolation import setUpModule, tearDownModule  # noqa: F401  (keeps the keyword index out of ~/CodeHaven)
 
 
 def finish(content):

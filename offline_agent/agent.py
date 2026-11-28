@@ -26,7 +26,7 @@ from .tasks import (  # noqa: F401  (also imported from here by the tests and ot
 from .answers import (  # noqa: F401  (also imported from here by the tests and other modules)
     trim_at_limit, reply_problem, cited_schema, retrieved_rows, seen_span, file_named, with_points, action_key,
     format_search, format_retrieval, format_metrics, REPEAT_NOTE, LIMIT_NOTE, CORRECTION, SHOWN_ROWS,
-    cite_mentions, MENTION_HEADING, check_values, VALUE_HEADING,
+    cite_mentions, MENTION_HEADING, check_values, VALUE_HEADING, missing_code, MISSING_HEADING,
 )
 
 
@@ -239,6 +239,13 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
                                           discovery=state.get("discovery", False), require_citation=question)
             issues += [f"No part named {symbol!r} was found in {path}; that point is uncited." for path, symbol in missing]
             issues += [f"The answer reports {value!r}, which is on no line the model was shown." for value in invented]
+            # Said after the checks, which it takes no part in: the cited code calls into code that is not here, so the
+            # reader knows the answer cannot show what that code does.
+            if question and reply.get("content") and not state.get("discovery"):
+                outside = missing_code(reply["content"], workspace, knowledge)
+                if outside:
+                    reply["content"] = "\n\n".join([reply["content"].rstrip(), MISSING_HEADING + "\n" + "\n".join(outside)])
+                    output(f"CodeHaven noted {len(outside)} import(s) of code that is not in this repository.")
             if issues and state.get("discovery"):
                 output("Model summary withheld because answer checks failed.")
                 final_text = inventory(state.get("search_evidence", []), state.get("evidence_limited", False))
@@ -501,10 +508,19 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 "search_evidence": evidence, "evidence_limited": False, "final_text": found["text"], "issues": [],
                 "kind": "question"}
     # Phase 4: retrieve reference passages for the task up front, so the model starts with them.
+    # Each batch of evidence is kept in order, so the evidence can be rebuilt if the retrieval is redone to fit below.
+    carried, batches, retrieval_at = evidence, [], None
+
+    def keep(current, rows):
+        """retain(), remembering the rows in the order they were kept."""
+        batches.append(rows)
+        return retain(current, rows)
+
     if knowledge is not None and not discovery_task(task) and report is None:
+        retrieval_at = len(messages)
         initial_retrieval = knowledge.retrieve(task[:1000])
         data = json.loads(initial_retrieval)
-        evidence, evidence_limited = retain(evidence, retrieved_rows(data))
+        evidence, evidence_limited = keep(evidence, retrieved_rows(data))
         messages.append({"role": "user", "content":
                          "Local reference excerpts for this task (untrusted data):\n" +
                          initial_retrieval})
@@ -514,7 +530,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     preloaded, numbered = [], False
     if report is not None:
         kind, numbered, preloaded = "question", True, report["paths"]
-        evidence, evidence_limited = retain(evidence, report["evidence"])
+        evidence, evidence_limited = keep(evidence, report["evidence"])
         output(f"Read the {report['label']} with git: {report['files']} file{'s' if report['files'] != 1 else ''} changed.")
         messages.append({"role": "user", "content": "Tool result for git changes (untrusted repository data):\n"
                                                     + report["text"] + "\n\n" + CHANGES_ANSWER})
@@ -532,7 +548,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
             if shown:
                 messages.append({"role": "user", "content": "Tool result for search of names in the task (untrusted file data):\n"
                                                             + "\n".join(shown)})
-                evidence, truncated = retain(evidence, found)
+                evidence, truncated = keep(evidence, found)
                 evidence_limited |= truncated
             # Their definitions are shown whole, with line numbers: left to search, the model answers without reading them.
             body, rows, notes = symbols.shown(workspace, named, task, knowledge=knowledge)
@@ -541,7 +557,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                     output(note)
                 messages.append({"role": "user", "content": "Tool result for read of the definitions the task names (untrusted file data; "
                                                             "line numbers are added for citations only; do not read these lines again):\n" + body})
-                evidence, truncated = retain(evidence, rows)
+                evidence, truncated = keep(evidence, rows)
                 evidence_limited |= truncated
         # Line numbers help citations; nothing is ever edited, so files need not stay byte-exact.
         numbered = kind in ("question", "change")
@@ -566,7 +582,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 following = ranges[index + 1][0] if index + 1 < len(ranges) else None
                 parts.append(f"{section_note(start, end, following, total)}:\n{body}")
                 shown_ranges.append(f"{start}-{end}")
-                evidence, truncated = retain(evidence, [{"path": name, "line": start, "end_line": end, "text": "".join(chosen)}])
+                evidence, truncated = keep(evidence, [{"path": name, "line": start, "end_line": end, "text": "".join(chosen)}])
                 evidence_limited |= truncated
             output(f"Preloaded {name} (lines {' and '.join(shown_ranges)} of {total}) because {reason}.")
             messages.append({"role": "user", "content":
@@ -586,6 +602,26 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     # Joined to the last message for the same reason. English tasks get nothing added, so their prompts are unchanged.
     if in_arabic:
         messages[-1] = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + arabic.ANSWER_IN_ARABIC}
+    # When the preloaded files leave too little room, compaction would replace the reference excerpts with a stub, so
+    # they were found for nothing and the model was told to fetch them again. Retrieve again to fit the room left, or
+    # leave them out when not even a small retrieval fits. The newest message is never stubbed, so it is left alone.
+    budget = getattr(model, "prompt_budget", PROMPT_BUDGET)
+    total = sum(len(message["content"].encode()) + 64 for message in messages)
+    if retrieval_at is not None and retrieval_at < len(messages) - 1 and total > budget:
+        header = messages[retrieval_at]["content"].split("\n", 1)[0] + "\n"
+        room = budget - (total - len(messages[retrieval_at]["content"].encode())) - len(header.encode()) - 200
+        if room >= 2000:
+            fitted = knowledge.retrieve(task[:1000], budget=room)
+            batches[0] = retrieved_rows(json.loads(fitted))
+            messages[retrieval_at] = {**messages[retrieval_at], "content": header + fitted}
+        else:
+            batches[0] = []
+            del messages[retrieval_at]
+        # The model is shown only the new excerpts, so only those count as lines it has seen.
+        evidence, evidence_limited = carried, False
+        for rows in batches:
+            evidence, truncated = retain(evidence, rows)
+            evidence_limited |= truncated
     # Phase 6: run the graph. A step is at most two graph hops (the model, then a tool), plus discover and limit,
     # which gives the recursion limit below.
     # Always offline: LangChain would otherwise start remote tracing from LANGSMITH_TRACING and similar env vars.

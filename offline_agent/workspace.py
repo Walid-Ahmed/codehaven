@@ -3,7 +3,8 @@ import ast
 import json
 import os
 import re
-from pathlib import Path
+import stat
+from pathlib import Path, PurePath
 from .exclusions import Exclusions, IgnoreConfigurationError
 
 # Directory names that are never listed or read: version control, environments, build output, and credential folders.
@@ -185,6 +186,10 @@ class Workspace:
         self.root = Path(root).resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Workspace must be a directory")
+        # The root as a string, and its case-folded form with a trailing separator: path() works on strings, because
+        # pathlib's own symlink, resolve, and relative_to checks cost seconds per listing on a large project.
+        self.root_text = str(self.root)
+        self.root_key = os.path.normcase(self.root_text)
         self.excludes = tuple(excludes)
         self.exclusions = Exclusions(self.root, self.excludes)
 
@@ -194,24 +199,25 @@ class Workspace:
         Raises ValueError when the name would leave the root, or is hidden, excluded, reached through a symlink,
         or ignored by the ignore rules. This is the one gate every file access goes through.
         """
-        rel = Path(name)
+        rel = PurePath(name) if name else None
         # Path traversal: no absolute paths and no .. components.
-        if not name or rel.is_absolute() or ".." in rel.parts:
+        if not name or rel.is_absolute() or rel.anchor or ".." in rel.parts:
             raise ValueError("Use a relative path inside the workspace")
         if any(p in EXCLUDED or p.startswith(".") for p in rel.parts):
             raise ValueError("Hidden and excluded paths are unavailable")
-        target = self.root / rel
         # A symlink at any level could point outside the workspace, so each component is checked, not only the last.
-        current = self.root
+        current = self.root_text
         for part in rel.parts:
-            current = current / part
-            if current.is_symlink():
+            current = os.path.join(current, part)
+            if os.path.islink(current):
                 raise ValueError("Symlink paths are unavailable")
-        # Final guard: the fully resolved path must still be inside the root (relative_to raises ValueError if not).
-        target.resolve().relative_to(self.root)
-        if self.exclusions.ignored(rel, directory=target.is_dir()):
+        # Final guard: the fully resolved path must still be inside the root.
+        real = os.path.normcase(os.path.realpath(current))
+        if real != self.root_key and not real.startswith(self.root_key.rstrip(os.sep) + os.sep):
+            raise ValueError("Use a relative path inside the workspace")
+        if self.exclusions.ignored(rel, directory=os.path.isdir(current)):
             raise ValueError(f"Path is excluded by ignore rules: {name}")
-        return target
+        return self.root / rel
 
     def files(self, scope=""):
         """Relative paths of the readable files under scope, in sorted walk order, at most MAX_FILES of them.
@@ -223,10 +229,15 @@ class Workspace:
             raise ValueError("File listing scope must be a directory")
         found = []
 
-        def visible_directory(path):
+        def relative(base, name):
+            """The workspace-relative POSIX name of name inside the walked directory base."""
+            inside = base[len(self.root_text):].strip(os.sep)
+            return (inside.replace(os.sep, "/") + "/" + name) if inside else name
+
+        def visible_directory(base, name):
             """Whether a directory passes path(). A broken ignore file is an error to report, not a reason to hide it."""
             try:
-                self.path(path.relative_to(self.root).as_posix())
+                self.path(relative(base, name))
                 return True
             except IgnoreConfigurationError:
                 raise
@@ -235,14 +246,14 @@ class Workspace:
 
         for base, dirs, files in os.walk(start, followlinks=False):
             # Assigning in place prunes the walk, so an excluded directory is never entered.
-            dirs[:] = sorted(d for d in dirs if visible_directory(Path(base) / d))
+            dirs[:] = sorted(d for d in dirs if visible_directory(base, d))
             for name in sorted(files):
                 if name.startswith("."):
                     continue
-                rel = (Path(base) / name).relative_to(self.root).as_posix()
+                rel = relative(base, name)
                 try:
-                    path = self.path(rel)
-                    if path.is_file() and path.stat().st_size <= READ_BYTES:
+                    status = os.stat(self.path(rel))
+                    if stat.S_ISREG(status.st_mode) and status.st_size <= READ_BYTES:
                         found.append(rel)
                 except IgnoreConfigurationError:
                     raise

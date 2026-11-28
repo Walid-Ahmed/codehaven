@@ -1,10 +1,12 @@
 """The codehaven command: one task, an interactive session, or the browser GUI."""
 import argparse
+import contextlib
 import sys
+import time
 from functools import partial
 from pathlib import Path
 
-from . import doctor, ocr
+from . import doctor, errors, index_cache, ocr
 from .agent import Session, run
 from .chats import Chats
 from .knowledge import KnowledgeBase
@@ -26,6 +28,8 @@ def write_stream(text):
 
 def interactive(session, first_task=None, prompt=input):
     """Read tasks until exit. One failed or interrupted task does not end the session."""
+    with contextlib.suppress(ImportError):
+        import readline  # noqa: F401  (gives input() line editing and arrow-key history, where Python has it)
     print("Interactive session. Type a task, /reset to forget earlier answers, or exit to quit.", flush=True)
     task = first_task
     while True:
@@ -47,6 +51,9 @@ def interactive(session, first_task=None, prompt=input):
                 print(f"Error: {exc}", file=sys.stderr, flush=True)
             except KeyboardInterrupt:
                 print("\nStopped this task.", file=sys.stderr, flush=True)
+            except Exception as exc:  # An unexpected problem ends this task, not the session.
+                errors.report(exc)
+                print(f"Error: {errors.friendly(exc)}", file=sys.stderr, flush=True)
         task = None
 
 
@@ -135,7 +142,7 @@ def main(argv=None):
                         help="Installed local embedding model for --semantic (default: the first found of "
                              "nomic-embed-text, embeddinggemma, mxbai-embed-large, ...)")
     parser.add_argument("--index-dir", metavar="FOLDER",
-                        help="Where meaning-search vectors are kept (default ~/CodeHaven/index; nothing is kept "
+                        help="Where the keyword index and meaning-search vectors are kept (default ~/CodeHaven/index; nothing is kept "
                              "with --no-remember)")
     parser.add_argument("--ocr", metavar="PICTURE",
                         help="Read the code in a PNG or JPEG picture, such as a screenshot, into a new file beside it, "
@@ -153,6 +160,7 @@ def main(argv=None):
             chats = Chats(memory.workspace, args.chats_dir)
             saved_chats = len(chats.chats)
             chats.forget()
+            index_cache.forget(index_cache.path(memory.workspace, args.index_dir))
         except (ValueError, OSError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
@@ -162,7 +170,10 @@ def main(argv=None):
     if not 2000 <= args.retrieval_budget <= 16000:
         parser.error("--retrieval-budget must be between 2000 and 16000 bytes")
     if not args.doctor and not args.interactive and not args.gui and not args.task:
-        parser.error("a task is required unless --doctor, --interactive, --gui, or --forget is used")
+        # Typed at a terminal with nothing to ask yet, the likely wish is to start asking.
+        if not sys.stdin.isatty():
+            parser.error("a task is required unless --doctor, --interactive, --gui, or --forget is used")
+        args.interactive = True
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
     server = model = None
@@ -217,8 +228,13 @@ def main(argv=None):
         if embed_model:
             semantic = Semantic(model, embed_model, output=partial(print, flush=True),
                                 cache=Semantic.cache_path(workspace, embed_model, args.index_dir) if args.remember else None)
+        print(f"Indexing {workspace.root} ...", flush=True)
+        started = time.monotonic()
         knowledge = KnowledgeBase(references if args.knowledge_base or references.exists() else None,
-                                  workspace=workspace, context_budget=args.retrieval_budget, semantic=semantic)
+                                  workspace=workspace, context_budget=args.retrieval_budget, semantic=semantic,
+                                  cache=index_cache.path(workspace, args.index_dir) if args.remember else None)
+        reused = f", {knowledge.reused} unchanged since last time" if knowledge.reused else ""
+        print(f"Indexed {knowledge.documents} files in {time.monotonic() - started:.1f}s{reused}.", flush=True)
         if semantic is not None:
             # A first run embeds every passage; later runs only the changed ones. Never hold a question up for long.
             complete = semantic.wait(SEMANTIC_WAIT, partial(print, flush=True))
@@ -256,5 +272,9 @@ def main(argv=None):
         print("\nStopped.", file=sys.stderr)
         # The usual exit code for a program stopped by Ctrl+C (128 + SIGINT's number, 2).
         return 130
+    except Exception as exc:  # Anything unexpected: a plain sentence, not a traceback.
+        errors.report(exc)
+        print(f"Error: {errors.friendly(exc)}", file=sys.stderr)
+        return 1
     finally:
         doctor.stop_ollama(server)

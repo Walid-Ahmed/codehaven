@@ -120,9 +120,17 @@ function setSuggestions(items) {
 }
 
 // ---- Talking to the server.
+// fetch, with a plain message when the local server cannot be reached instead of the browser's "Failed to fetch".
+async function reach(path, options) {
+  try { return await fetch(path, options); }
+  catch (error) {
+    if (error.name === "AbortError") throw error;
+    throw new Error(t("CodeHaven's local server is not answering. Check that the terminal running codehaven --gui is still open, then reload this page."));
+  }
+}
 // One JSON request. A refused one throws the server's own error message.
 async function api(path, options = {}) {
-  const response = await fetch(path, {...options, headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN}});
+  const response = await reach(path, {...options, headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN}});
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || response.statusText);
   return data;
@@ -131,7 +139,7 @@ async function api(path, options = {}) {
 // ---- Streaming answers from the server.
 // Events of a streamed reply: the server sends one JSON object per line.
 async function* streamEvents(path, body) {
-  const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN},
+  const response = await reach(path, {method: "POST", headers: {"Content-Type": "application/json", "X-CodeHaven-Token": TOKEN},
                                       body: JSON.stringify(body)});
   if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || response.statusText); }
   const reader = response.body.getReader();
@@ -494,7 +502,7 @@ async function uploadFile(file, fromChat = false) {
   busy = true; updateComposer();
   report(t(isDocument(file) ? "Reading {name} into text…" : picture ? "Reading the code in {name}… this takes a few seconds." : "Reading {name}…", {name: file.name}));
   try {
-    const response = await fetch("/api/upload?name=" + encodeURIComponent(file.name),
+    const response = await reach("/api/upload?name=" + encodeURIComponent(file.name),
                                  {method: "POST", headers: {"Content-Type": "application/octet-stream", "X-CodeHaven-Token": TOKEN}, body: file});
     const summary = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(summary.error || response.statusText);
@@ -1100,6 +1108,7 @@ async function makeCards() {
     for await (const event of streamEvents("/api/flashcards", {paths: selected, count: Number($("cards-count").value), language: LANG})) {
       if (event.type === "file") { phase = t("Writing cards for {path} (file {index} of {of})…", event); tick(); }
       else if (event.type === "cards") { cards.push(...event.cards); showCard(); }
+      else if (event.type === "error" && event.fatal) throw new Error(event.message);
       else if (event.type === "error") failed.push(`${event.path}: ${event.message}`);
       else if (event.type === "done") finished = true;
       else if (event.type === "stopped") stopped = true;

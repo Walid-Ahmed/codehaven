@@ -8,6 +8,10 @@ from tree_sitter import Language, Parser
 import tree_sitter_javascript as javascript
 import tree_sitter_typescript as typescript
 
+# Node's own modules, which need no source to be understood.
+NODE_BUILTINS = {'assert', 'buffer', 'child_process', 'cluster', 'crypto', 'dgram', 'dns', 'events', 'fs', 'http', 'http2',
+                 'https', 'net', 'os', 'path', 'perf_hooks', 'process', 'querystring', 'readline', 'stream', 'string_decoder',
+                 'timers', 'tls', 'tty', 'url', 'util', 'v8', 'vm', 'worker_threads', 'zlib'}
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts'}
 
 
@@ -22,9 +26,15 @@ def walk(root):
 
 class JavaScriptDependencies:
     """Imports, definitions, and symbol spans of JavaScript and TypeScript files, shaped like the Python analyser's."""
-    def __init__(self, files):
-        """Parse each JS/TS file in files (path -> text) with Tree-sitter. Only relative imports of indexed files become edges."""
+    def __init__(self, files, reuse=None):
+        """Parse each JS/TS file in files (path -> text) with Tree-sitter. Only relative imports of indexed files become edges.
+
+        reuse maps a path to its (definitions, spans, edges, missing) from an earlier analysis of the same text and the same
+        set of paths; those files are not parsed again.
+        """
         self.edges, self.definitions, self.spans = {}, {}, {}
+        # missing: file -> imports of code not in the repository, shaped like the Python analyser's.
+        self.missing = {}
         self.parse_failures = 0
         parsers = {
             'js': Parser(Language(javascript.language())),
@@ -35,6 +45,9 @@ class JavaScriptDependencies:
             suffix = PurePosixPath(name).suffix
             if suffix not in JS_EXTENSIONS:
                 continue
+            if name in (reuse or {}):
+                self.definitions[name], self.spans[name], self.edges[name], self.missing[name] = reuse[name]
+                continue
             # TypeScript and TSX have their own grammars; everything else, JSX included, is parsed as JavaScript.
             parser = parsers['tsx' if suffix == '.tsx' else 'ts' if suffix in {'.ts', '.mts', '.cts'} else 'js']
             raw = text.encode('utf-8')
@@ -42,7 +55,7 @@ class JavaScriptDependencies:
             if root.has_error:
                 self.parse_failures += 1
                 continue
-            found, definitions, spans, exported_aliases = defaultdict(set), {}, [], []
+            found, definitions, spans, exported_aliases, missing = defaultdict(set), {}, [], [], []
             for node in walk(root):
                 # Both import ... from "x" and a re-export (export ... from "x") carry a source string.
                 if node.type in {'import_statement', 'export_statement'}:
@@ -56,6 +69,14 @@ class JavaScriptDependencies:
                         if clause and any(n.type == 'identifier' for n in clause.named_children):
                             symbols.append('default')
                         found[target].update(symbols or [''])
+                    elif source is not None and node.type == 'import_statement':
+                        clause = next((n for n in node.named_children if n.type == 'import_clause'), None)
+                        # What the import binds: a default import, a namespace import, or each named import's local name.
+                        bound = [self.text(n) for n in walk(clause) if n.type == 'identifier'
+                                 and n.parent.type in {'import_clause', 'namespace_import'}] if clause else []
+                        bound += [self.text(n.child_by_field_name('alias') or n.child_by_field_name('name'))
+                                  for n in walk(clause) if n.type == 'import_specifier'] if clause else []
+                        self.add_missing(missing, self.string(source), bound, node.start_point.row + 1)
                     # A local export. "export { local as alias }" and "export default ..." are remembered, so the exported name
                     # can be given the line of its local definition.
                     if node.type == 'export_statement' and source is None:
@@ -80,6 +101,11 @@ class JavaScriptDependencies:
                             target = self.resolve(name, self.string(values[0]), files)
                             if target:
                                 found[target].add('')
+                            elif node.parent is not None and node.parent.type == 'variable_declarator':
+                                # const jwt = require("jsonwebtoken") binds jwt.
+                                own = node.parent.child_by_field_name('name')
+                                if own is not None and own.type == 'identifier':
+                                    self.add_missing(missing, self.string(values[0]), [self.text(own)], node.start_point.row + 1)
                 if node.type in {'function_declaration', 'generator_function_declaration',
                                   'class_declaration', 'method_definition', 'variable_declarator',
                                   'interface_declaration', 'type_alias_declaration'}:
@@ -127,7 +153,18 @@ class JavaScriptDependencies:
                 if exported and local in definitions:
                     definitions[exported] = definitions[local]
             self.edges[name] = {target: sorted(symbols) for target, symbols in sorted(found.items()) if target != name}
-            self.definitions[name], self.spans[name] = definitions, spans
+            self.definitions[name], self.spans[name], self.missing[name] = definitions, spans, missing
+
+    @staticmethod
+    def add_missing(missing, specifier, bound, line):
+        """Record an import of code that is not here: a package, or a relative file that is not in the repository.
+        Node's built-in modules are known code, so left out."""
+        if not specifier or specifier.startswith('node:') or specifier.split('/')[0] in NODE_BUILTINS:
+            return
+        local = specifier.startswith(('./', '../'))
+        for name in bound:
+            if name:
+                missing.append({"module": specifier, "name": name, "line": line, "local": local})
 
     @staticmethod
     def text(node):

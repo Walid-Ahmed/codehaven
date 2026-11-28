@@ -154,10 +154,26 @@ class GuiServerTests(unittest.TestCase):
     def test_model_errors_are_reported_and_the_server_keeps_going(self):
         self.open_repo()
         self.model.replies = []  # pop from an empty list raises inside the agent
-        _, data = self.request("POST", "/api/ask", {"question": "What is in pkg?"})
-        self.assertEqual(json.loads(data.decode().splitlines()[-1])["type"], "error")
+        with contextlib.redirect_stderr(io.StringIO()) as log:
+            _, data = self.request("POST", "/api/ask", {"question": "What is in pkg?"})
+        last = json.loads(data.decode().splitlines()[-1])
+        self.assertEqual(last["type"], "error")
+        # An unexpected problem is put in plain words on the page; its traceback goes to the server's terminal.
+        self.assertIn("did not expect (IndexError", last["message"])
+        self.assertIn("Your files were not changed", last["message"])
+        self.assertIn("Traceback", log.getvalue())
         self.assertFalse(self.app.busy)
         self.assertEqual(self.json("GET", "/api/status")[0], 200)
+
+    def test_an_unexpected_problem_gets_a_plain_message_not_a_dropped_connection(self):
+        with patch.object(self.app, "open", side_effect=KeyError("pkg")), contextlib.redirect_stderr(io.StringIO()):
+            status, data = self.json("POST", "/api/open", {"path": str(self.repo)})
+        self.assertEqual(status, 500)
+        self.assertIn("did not expect (KeyError", data["error"])
+        with patch.object(self.app, "summary", side_effect=RuntimeError("boom")), contextlib.redirect_stderr(io.StringIO()):
+            status, data = self.json("GET", "/api/status")
+        self.assertEqual((status, "RuntimeError: boom" in data["error"]), (500, True))
+        self.assertIn("error", self.json("GET", "/api/files")[1])  # The server keeps going.
 
     def test_questions_need_a_repository_and_text(self):
         self.assertEqual(self.json("POST", "/api/ask", {"question": "Hi?"})[1]["error"], "Choose a repository or upload a file first.")

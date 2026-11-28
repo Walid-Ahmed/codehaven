@@ -42,7 +42,7 @@ In the browser page you can also draw a **structure map** of your files, make **
 - [Chat in your browser](#chat-in-your-browser)
 - [Use it from the terminal](#use-it-from-the-terminal)
 - Features: [Git changes](#explain-your-git-changes) · [File review](#review-a-file) · [Test gaps and project tour](#test-gaps-and-a-project-tour) · [Call trace](#trace-a-function) · [Notebooks and PDFs](#notebooks-and-pdfs) · [Pictures of code](#read-code-from-a-picture) · [Long-term memory](#long-term-memory) · [Saved chats](#saved-chats) · [Search by meaning](#search-by-meaning) · [Arabic](#ask-in-arabic) · [VS Code](#use-it-from-vs-code)
-- Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.11 does](#what-v011-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
+- Reference: [Choosing a model](#choosing-a-model) · [Ollama and offline use](#ollama-and-offline-use) · [What v0.14 does](#what-v014-does) · [File exclusions](#file-exclusions) · [RAG](#local-reference-knowledge-base-rag) · [Speed](#local-inference-speed) · [Search](#search-file-contents) · [Isolated tests](#run-isolated-project-tests) · [Limits](#current-limits)
 - [Development](#development)
 - [Technical report](docs/TECHNICAL_REPORT.md)
 
@@ -329,6 +329,7 @@ codehaven --doctor               # prints "Meaning search: nomic-embed-text:late
 - **Automatic.** It is on when an embedding model is installed and off otherwise. `--no-semantic` turns it off, and `--embed-model NAME` picks one; without it, the first installed of `nomic-embed-text`, `embeddinggemma`, `mxbai-embed-large`, `bge-m3`, `snowflake-arctic-embed`, and `all-minilm` is used.
 - **First run.** Every passage is embedded once, at roughly 20 passages a second on a laptop, so a mid-sized project takes under a minute. The command waits up to 60 seconds and the page up to 15; the rest is prepared in the background while you ask questions, which use what is ready.
 - **Saved vectors.** Vectors are kept in `~/CodeHaven/index` (change it with `--index-dir`), one file per repository, readable by your user only, so later runs embed only changed passages. The file holds numbers and hashes, never code text. With `--no-remember` nothing is written and vectors live in memory only.
+- **Saved keyword index.** The keyword index is kept beside the vectors, one `.keywords` file per repository, readable by your user only. It holds each file's size, modification time, and text hash, the word counts of its passages, and its parsed outline (names, line numbers, imports), never a passage's text. Each file is read again and its hash compared, so a changed file is always indexed afresh. `--no-remember` writes nothing, and `--forget` or **Forget this project** deletes it.
 - **Failure is harmless.** If the embedding model stops answering, a one-line note says so and search goes back to key words for the session.
 - **Memory.** A small embedding model (about 300 MB) normally fits beside the chat model. On a machine short of memory Ollama may swap the two, which slows every step; use `--no-semantic` there. See [Local inference speed](#local-inference-speed).
 
@@ -377,6 +378,10 @@ For several questions in a row, start an interactive session. Follow-ups remembe
 codehaven --workspace /absolute/path/to/project --interactive
 ```
 
+Typed at a terminal with no question, plain `codehaven` starts the same session in the current folder. The up and down arrows bring back earlier questions.
+
+If something goes wrong that CodeHaven did not expect, it says so in one sentence and the session carries on. Set `CODEHAVEN_DEBUG=1` to also print the full traceback, for a bug report.
+
 Answers stream to the terminal as the model writes them; add `--no-stream` to print each answer only once it is complete. `codehaven`, `offline-agent`, and `python -m offline_agent` are the same command (on Windows, use `python -m offline_agent`). Reinstall the package after updating to register the commands.
 
 ## Use it from VS Code
@@ -412,7 +417,9 @@ If Ollama is already running, the script checks its local API, prints a friendly
 
 After downloading a model, disconnect from the internet to use it offline. Disabling cloud features does not block model downloads or all network traffic. CodeHaven checks that the model is installed and rejects remote-backed and cloud models; a loopback URL alone cannot guarantee how a separately configured server performs inference. Installation downloads LangGraph and its dependencies; runtime does not require internet access. Reading code from a picture runs Tesseract, a separate program installed once; it works offline and makes no network connection.
 
-## What v0.13 does
+## What v0.14 does
+
+New in 0.14: faster on large projects and clearer when something goes wrong. The keyword index is saved between runs, so a large repository reopens in about a quarter of the time (FastAPI, 2,400 files: 8.5 s on 0.13, 2.0 s), and after you edit a file only that file is indexed again (8.5 s to 2.8 s). Listing, searching, and checking for changed files are two to three times faster. An answer whose cited lines use code that is not in the repository, such as a library or a file that was never checked in, says so under its own heading. When preloaded files leave too little room in the prompt, the reference excerpts are retrieved again to fit, instead of being gathered and then compacted away. Plain `codehaven` at a terminal starts an interactive session with arrow-key history. An unexpected problem is explained in a sentence in the terminal and on the page, never as a traceback or a bare "Failed to fetch".
 
 New in 0.13: looks for each value an answer reports (a quoted string or a number) in the code the model was shown. A value on the lines the answer cites needs nothing; a value shown on another line gets a citation of that line; a value on no shown line was not read from the code, and the answer is marked **Unverified**. On the seven real repositories this flags two wrong answers the citation checks passed, including an OpenAPI version of `3.0.2` (it is `3.1.0`), and one correct answer whose quoted code the model made up. No correct answer was lost. See [the eval results](docs/EVALS.md).
 
@@ -456,6 +463,10 @@ codehaven --workspace /path/to/repo \
 
 Hidden/built-in paths stay blocked. User exclusions add restrictions; they cannot undo Git ignores. Rules apply to tracked files too. [Exclusion details](docs/EXCLUSIONS.md) cover precedence, negation, root scope, and reference libraries.
 
+## Code that is not in the repository
+
+When the lines an answer cites use code the repository does not hold, the answer says so under the heading "Code these lines use that is not in this repository". It lists each import: a library, such as `requests` or `jsonwebtoken`, or a relative import of a file that is not there, with the line that imports it. Only imports whose name appears on the cited lines are listed, and Python's standard library and Node's built-in modules are left out, because the model already knows them. Imports are found by parsing Python, JavaScript, and TypeScript; nothing is run. The note is not a citation, so it never makes an answer unverified; it tells you where the answer stops being able to show you the code.
+
 ## Local reference knowledge base (RAG)
 
 The repository selected by `--workspace` is automatically indexed for RAG. CodeHaven retrieves relevant source code, README/documentation, and common configuration/build files before answering, with citations such as `repo/src/orders.py:1-25`. No separate indexing command is needed. For Python and JavaScript/TypeScript, retrieval also follows local imports up to two hops and adds relevant dependency passages, even when they do not match the question keywords.
@@ -496,7 +507,7 @@ codehaven --workspace /path/to/repo --retrieval-budget 8000 \
 
 Model requests wait up to 10 minutes for a response, so a slow reload does not fail the task.
 
-CodeHaven sends a task-ranked sample of at most 40 paths / 2,000 bytes instead of the entire file list. Ollama requests keep the model loaded for 30 minutes and preserve the conversation prefix until compaction is necessary, allowing server prompt-cache reuse when available. There is no persistent application cache, and only sessions (`--interactive` or the browser page) carry recent answers between questions. Another client or model unloading can prevent reuse.
+CodeHaven sends a task-ranked sample of at most 40 paths / 2,000 bytes instead of the entire file list. Ollama requests keep the model loaded for 30 minutes and preserve the conversation prefix until compaction is necessary, allowing server prompt-cache reuse when available. The keyword index is kept on disk, so a repository reopens quickly (see [Search by meaning](#search-by-meaning) for what it holds), and only sessions (`--interactive` or the browser page) carry recent answers between questions. Another client or model unloading can prevent reuse.
 
 `--prompt-budget` bounds message content plus a small per-message allowance (default 12,000 UTF-8 bytes). Older evidence is omitted when necessary; oversized recent evidence is marked incomplete. System rules and the original task stay. This is a byte budget, not an exact token count. Full graph history stays in RAM. Requests reserve a context window of at least 8,192 tokens, increasing with the configured budgets; larger settings consume more memory and may run slower.
 

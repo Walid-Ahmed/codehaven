@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import documents, ocr, study
+from . import documents, errors, index_cache, ocr, study
 from .agent import Session
 from .chats import Chats, new_id
 from .knowledge import KnowledgeBase
@@ -272,8 +272,10 @@ class App:
             keep = self.remember and upload is None
             semantic = Semantic(self.model, self.embed_model, output=lambda line: self.emit({"type": "log", "text": str(line)}),
                                 cache=Semantic.cache_path(workspace, self.embed_model, self.index_folder) if keep else None)
+        # The keyword index of a repository is kept so it reopens quickly; an uploaded file's is not.
+        cache = index_cache.path(workspace, self.index_folder) if self.remember and upload is None else None
         knowledge = KnowledgeBase(references, workspace=workspace, context_budget=self.retrieval_budget, semantic=semantic,
-                                  cancel=self.cancel if self.cancellable else None)
+                                  cancel=self.cancel if self.cancellable else None, cache=cache)
         if semantic is not None:
             semantic.wait(SEMANTIC_WAIT)
         self.semantic = semantic
@@ -359,6 +361,8 @@ class App:
                 self.chats.forget()
             if self.semantic is not None:
                 self.semantic.forget()  # The saved vectors go too; they are rebuilt when the repository is indexed again.
+            if self.knowledge is not None:
+                self.knowledge.forget()
             return self.summary()
         finally:
             self.release()
@@ -431,8 +435,10 @@ class App:
             except Stopped:
                 # Nothing was recorded: a stopped question is not remembered by follow-ups, saved, or kept in a chat.
                 events.put({"type": "stopped", "remembered": len(session.turns), "memory": session.TURNS})
-            except Exception as exc:  # Reported to the page; the server keeps running.
-                events.put({"type": "error", "message": str(exc) or type(exc).__name__})
+            except Exception as exc:  # Reported to the page in plain words; the server keeps running.
+                if not isinstance(exc, (ValueError, OSError, UnicodeError)):
+                    errors.report(exc, always=True)
+                events.put({"type": "error", "message": errors.friendly(exc)})
             finally:
                 # Always sent, even after an error: None tells the loop below that the answer is over.
                 events.put(None)
@@ -666,6 +672,7 @@ def make_handler(app, token, port_holder):
 
         server_version = "CodeHaven"
         sys_version = ""
+        replying = False  # A streamed reply has begun, so a later problem cannot be sent as its own response.
 
         def log_message(self, *_args):
             """Log nothing."""
@@ -734,6 +741,7 @@ def make_handler(app, token, port_holder):
             """Serve the page itself and the routes that only read."""
             url = urlsplit(self.path)
             query = parse_qs(url.query)
+            self.replying = False
             if not self.authorized(query):
                 return
             try:
@@ -759,6 +767,14 @@ def make_handler(app, token, port_holder):
                     self.refuse(404, "Not found.")
             except (ValueError, OSError, UnicodeError) as exc:
                 self.refuse(400, str(exc))
+            except Exception as exc:  # Shown on the page in plain words; the traceback goes to this terminal.
+                self.unexpected(exc)
+
+        def unexpected(self, exc):
+            """Answer an unexpected problem with a plain message, unless a reply is already under way."""
+            errors.report(exc, always=True)
+            if not self.replying:
+                self.refuse(500, errors.friendly(exc))
 
         def upload(self):
             """The raw bytes of an uploaded file. Bodies over the picture limit are refused without being read."""
@@ -773,6 +789,7 @@ def make_handler(app, token, port_holder):
             """Handle an upload, and the JSON routes that open something, change state, or start an answer."""
             url = urlsplit(self.path)
             query = parse_qs(url.query)
+            self.replying = False
             # The empty query means a POST must carry the token in its header; one in the address is not accepted.
             if not self.authorized({}):
                 return
@@ -811,11 +828,14 @@ def make_handler(app, token, port_holder):
                 self.refuse(409, str(exc))
             except (ValueError, OSError, UnicodeError) as exc:
                 self.refuse(400, str(exc))
+            except Exception as exc:
+                self.unexpected(exc)
 
         def stream(self, events, drain=True):
             """Send events as lines of JSON. If the page goes away, an answer is drained so its worker thread
             can finish; work done by the generator itself, such as flashcards, is stopped instead."""
             first = next(events)  # Raises Busy or ValueError before any response is sent.
+            self.replying = True  # From here on, a problem is reported as an event, not as a second response.
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
             self.security_headers()
@@ -830,6 +850,13 @@ def make_handler(app, token, port_holder):
                 if drain:
                     for _ in events:  # The page closed; let the answer finish so the next question can start.
                         pass
+            except Exception as exc:  # Work such as flashcards failed part way: the page gets a plain error event.
+                if not isinstance(exc, (ValueError, OSError, UnicodeError)):
+                    errors.report(exc, always=True)
+                with contextlib.suppress(OSError):
+                    self.wfile.write(json.dumps({"type": "error", "fatal": True, "message": errors.friendly(exc)}).encode()
+                                     + b"\n")
+                    self.wfile.flush()
             finally:
                 events.close()  # Releases the model if the generator was left unfinished.
 

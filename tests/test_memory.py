@@ -12,6 +12,7 @@ from offline_agent.agent import Session
 from offline_agent.cli import main
 from offline_agent.memory import NOTES, Memory
 from offline_agent.workspace import Workspace
+from index_isolation import setUpModule, tearDownModule  # noqa: F401  (keeps the keyword index out of ~/CodeHaven)
 
 PRICING = "RATE = 0.1\n\n\ndef apply_discount(price):\n    return price * (1 - RATE)\n"
 

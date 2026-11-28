@@ -163,6 +163,7 @@ const ARABIC = {
   "{seconds}s": "{seconds} ث",
   "Writing the answer…": "جارٍ كتابة الإجابة…",
   "The connection closed before the answer finished.": "انقطع الاتصال قبل اكتمال الإجابة.",
+  "CodeHaven's local server is not answering. Check that the terminal running codehaven --gui is still open, then reload this page.": "خادم CodeHaven المحلي لا يستجيب. تأكد من أن الطرفية التي تشغّل codehaven --gui ما زالت مفتوحة، ثم أعد تحميل الصفحة.",
   "No final answer: the step limit was reached before CodeHaven finished.": "لا توجد إجابة نهائية: بلغ CodeHaven حد الخطوات قبل أن ينتهي.",
   "Follow-ups remember {remembered} of the last {memory} questions. Start a new chat when you change topic.": "أسئلة المتابعة تتذكر {remembered} من آخر {memory} أسئلة. ابدأ محادثة جديدة عند تغيير الموضوع.",
   "{steps} · {seconds}s · show what CodeHaven did": "{steps} · {seconds} ث · اعرض ما فعله CodeHaven",

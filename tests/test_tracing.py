@@ -14,6 +14,7 @@ import offline_agent
 from offline_agent.agent import run
 from offline_agent.cli import main
 from offline_agent.workspace import Workspace
+from index_isolation import setUpModule, tearDownModule  # noqa: F401  (keeps the keyword index out of ~/CodeHaven)
 
 TRACING_ENV = {"LANGSMITH_TRACING": "true", "LANGCHAIN_TRACING_V2": "true",
                "LANGSMITH_API_KEY": "test-key", "LANGCHAIN_API_KEY": "test-key"}

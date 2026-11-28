@@ -6,7 +6,7 @@ import time
 from functools import partial
 from pathlib import Path
 
-from . import coder, doctor, edits, errors, export, index_cache, ocr
+from . import coder, doctor, edits, errors, export, index_cache, ocr, slash
 from .agent import Session, run
 from .chats import Chats
 from .knowledge import KnowledgeBase
@@ -68,6 +68,18 @@ def interactive(session, first_task=None, prompt=input):
                     print("That file already exists; CodeHaven does not overwrite it. Give another name.", file=sys.stderr, flush=True)
                 except OSError as exc:
                     print(f"Error: could not save the answers ({exc}).", file=sys.stderr, flush=True)
+        elif task.startswith("/") and task.split()[0] not in ("/reset", "/undo", "/export"):
+            try:
+                expanded = slash.expand(task)
+            except ValueError as exc:
+                print(exc, file=sys.stderr, flush=True)
+            else:
+                if expanded is None:
+                    print(slash.help_text(["/reset: forget earlier answers", "/export [file]: save the answers as Markdown",
+                                           "/undo: undo the last change (with --allow-edits)", "exit: quit"]), flush=True)
+                else:
+                    task = expanded
+                    continue  # Asked below, as if it had been typed in full.
         elif task:
             try:
                 session.ask(task)

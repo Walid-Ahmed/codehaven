@@ -775,6 +775,12 @@ async function stopNow() {
 async function ask(question) {
   question = question.trim();
   if (!question || busy || !indexed) return;
+  // Two slash commands act on the page itself; the others are written out in full by the server (/help lists them).
+  if (question === "/undo" || question === "/export") {
+    $("question").value = ""; resize();
+    $(question === "/undo" ? "undo-change" : "save-chat").click();
+    return;
+  }
   busy = stoppable = true;
   $("question").value = ""; resize(); updateComposer();
   addMessage("user").textContent = question;

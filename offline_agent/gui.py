@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import coder, documents, edits, errors, index_cache, ocr, study
+from . import coder, documents, edits, errors, index_cache, ocr, slash, study
 from .agent import Session
 from .chats import Chats, new_id
 from .knowledge import KnowledgeBase
@@ -450,6 +450,15 @@ class App:
             raise ValueError("Choose a repository or upload a file first.")
         if not isinstance(question, str) or not question.strip():
             raise ValueError("Type a question first.")
+        expanded = slash.expand(question)  # /trace name and the like; raises ValueError for an unknown command.
+        if expanded is None:
+            yield {"type": "done", "exit_code": 0, "steps": 0, "answer": slash.help_text(
+                       ["/undo: undo the last change (with --allow-edits)", "/export: save this chat as Markdown"]),
+                   "complete": True, "issues": [], "remembered": len(session.turns), "memory": session.TURNS,
+                   "kept": False, "saved": len(session.memory.notes) if session.memory else 0,
+                   "chats": chats.listing() if chats is not None else []}
+            return
+        question = expanded
         self.claim_model()
         # The answer runs on a worker thread; its events reach this request thread, which writes them out, through a queue.
         events = queue.Queue()

@@ -558,3 +558,17 @@ class GuiCliTests(unittest.TestCase):
         self.assertIn('"use strict";', page.split("<script", 1)[1][:60])  # Still the script's first statement.
         self.assertNotIn("<script src", page)
         self.assertNotIn("<link", page)
+
+
+class SlashOnThePageTests(unittest.TestCase):
+    # The server set-up and helpers of GuiServerTests, without running its tests a second time.
+    setUp, request, json, open_repo = (GuiServerTests.setUp, GuiServerTests.request, GuiServerTests.json,
+                                       GuiServerTests.open_repo)
+
+    def test_help_needs_no_model_and_a_command_is_written_out(self):
+        self.open_repo()
+        _, data = self.request("POST", "/api/ask", {"question": "/help"})
+        last = json.loads(data.decode().splitlines()[-1])
+        self.assertEqual(last["type"], "done")
+        self.assertIn("/trace <name>", last["answer"])
+        self.assertIn("Unknown command", self.json("POST", "/api/ask", {"question": "/oops"})[1]["error"])

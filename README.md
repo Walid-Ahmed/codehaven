@@ -581,7 +581,7 @@ python3 -m unittest discover -s tests -v
 python3 -m compileall -q offline_agent tests
 ```
 
-Tests include a simulated agent workflow, a real loopback HTTP fixture, and the browser page's server, without downloading a model.
+Tests include a simulated agent workflow, a real loopback HTTP fixture, and the browser page's server, without downloading a model. With the dev extras installed (`python -m pip install -e '.[dev]'`), `tests/test_browser.py` also drives the page in your installed Google Chrome with Playwright: it opens a repository, asks a question, follows a citation, and checks that the page shows no script errors. It downloads no browser and is skipped when Playwright or Chrome is missing.
 
 ### Evaluate the local model
 

@@ -6,7 +6,7 @@ import time
 from functools import partial
 from pathlib import Path
 
-from . import doctor, errors, index_cache, ocr
+from . import doctor, errors, export, index_cache, ocr
 from .agent import Session, run
 from .chats import Chats
 from .knowledge import KnowledgeBase
@@ -30,8 +30,10 @@ def interactive(session, first_task=None, prompt=input):
     """Read tasks until exit. One failed or interrupted task does not end the session."""
     with contextlib.suppress(ImportError):
         import readline  # noqa: F401  (gives input() line editing and arrow-key history, where Python has it)
-    print("Interactive session. Type a task, /reset to forget earlier answers, or exit to quit.", flush=True)
+    print("Interactive session. Type a task, /reset to forget earlier answers, /export [file] to save the answers as "
+          "Markdown, or exit to quit.", flush=True)
     task = first_task
+    answered = []  # (question, answer, issues) of this session, for /export.
     while True:
         if task is None:
             try:
@@ -44,9 +46,25 @@ def interactive(session, first_task=None, prompt=input):
         if task == "/reset":
             session.reset()
             print("Session history cleared.", flush=True)
+        elif task == "/export" or task.startswith("/export "):
+            if not answered:
+                print("Nothing to export yet: ask a question first.", flush=True)
+            else:
+                try:
+                    written = export.write(task[len("/export"):].strip() or ".",
+                                           export.markdown(answered, str(getattr(session.workspace, "root", "")),
+                                                           getattr(session.model, "model", "")))
+                    print(f"Saved {len(answered)} answer{'s' if len(answered) != 1 else ''} to {written}.", flush=True)
+                except FileExistsError:
+                    print("That file already exists; CodeHaven does not overwrite it. Give another name.", file=sys.stderr, flush=True)
+                except OSError as exc:
+                    print(f"Error: could not save the answers ({exc}).", file=sys.stderr, flush=True)
         elif task:
             try:
                 session.ask(task)
+                state = getattr(session, "last_state", None) or {}
+                if state.get("final_text"):
+                    answered.append((task, state["final_text"], state.get("issues", [])))
             except (ValueError, OSError) as exc:
                 print(f"Error: {exc}", file=sys.stderr, flush=True)
             except KeyboardInterrupt:
@@ -120,6 +138,9 @@ def main(argv=None):
                         help="Ask several tasks in one session; follow-ups see earlier answers")
     parser.add_argument("--no-retry", action="store_true",
                         help="Do not ask the model to correct an answer that fails its checks (one extra step, on by default)")
+    parser.add_argument("--export", metavar="FILE",
+                        help="Also save the question and its answer, with citations, as Markdown to FILE (a new file; "
+                             "an existing one is never replaced). In --interactive, type /export [FILE] instead")
     parser.add_argument("--no-stream", action="store_true", help="Print the final answer only once it is complete")
     parser.add_argument("--gui", action="store_true", help="Open a local page in your browser to pick a repository and chat")
     parser.add_argument("--port", type=int, default=0, help="Port for --gui on 127.0.0.1 (default: any free port)")
@@ -272,6 +293,18 @@ def main(argv=None):
                   "or --forget to delete them.")
         if args.interactive:
             return interactive(Session(model, workspace, memory=memory, **options), args.task)
+        if args.export:
+            session = Session(model, workspace, memory=memory, **options)
+            code = session.ask(args.task)
+            state = session.last_state
+            try:
+                written = export.write(args.export, export.markdown([(args.task, state.get("final_text") or "", state.get("issues", []))],
+                                                                    str(workspace.root), model.model))
+                print(f"Saved the answer to {written}.")
+            except FileExistsError:
+                print(f"Error: {args.export} already exists; CodeHaven does not overwrite it.", file=sys.stderr)
+                return 1
+            return code
         return run(model, workspace, args.task, memory=memory, **options)
     except (ValueError, OSError, EOFError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

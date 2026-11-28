@@ -672,10 +672,12 @@ function keepTurn(question, answer, issues, stopped) {
   $("save-chat").disabled = false;
 }
 // The chat as Markdown: a heading per question, the answer under it, and any warning as a quotation.
-function chatMarkdown() {
+function chatMarkdown() { return turnsMarkdown(transcript); }
+// Some questions and answers as Markdown; citations stay as path:line, so they can be checked in the repository.
+function turnsMarkdown(turns) {
   const about = $("repo-label").textContent.trim();
   const parts = [`# CodeHaven: ${about}`, `${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC · ${$("model").value}`];
-  for (const turn of transcript) {
+  for (const turn of turns) {
     parts.push(`## ${turn.question.replace(/\s+/g, " ")}`, turn.answer || "—");
     if (turn.stopped) parts.push(`> ${t("Stopped before it finished.")}`);
     if (turn.issues.length) parts.push(`> **${t("Unverified")}**\n` + turn.issues.map((issue) => `> - ${issue}`).join("\n"));
@@ -815,8 +817,15 @@ async function ask(question) {
       try { await navigator.clipboard.writeText(done.answer || streamed); copy.textContent = t("Copied"); setTimeout(() => { copy.textContent = t("Copy"); }, 1500); }
       catch { toast(t("This browser did not allow copying. Select the text and copy it instead.")); }
     });
+    const save = document.createElement("button"); save.className = "copy"; save.textContent = t("Save .md");
+    save.title = t("Save this answer as a Markdown file, through your browser. Nothing leaves this computer.");
+    save.addEventListener("click", () => {
+      const turn = {question, answer: done.complete ? done.answer : streamed, issues: done.issues, stopped: false};
+      const name = (question.replace(/[^\wء-ي]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "answer") + ".md";
+      saveFile(name, turnsMarkdown([turn]), "text/markdown");
+    });
     const foot = document.createElement("div"); foot.className = "msg-foot";
-    foot.append(details, copy); card.append(foot);
+    foot.append(details, copy, save); card.append(foot);
   } catch (error) {
     status.remove();
     const box = document.createElement("div"); box.className = "error-box"; box.dir = "auto"; box.textContent = error.message;

@@ -142,6 +142,21 @@ All seven real repositories and the two small sets were run again on v0.13.0. Th
 
 On the first three repositories and FastAPI the trade-off table above now reads 39 of 41 and 2 of 5. On the held-out three, correct answers that pass the checks went from 25 of 29 to 24 (the Flask port), and wrong answers marked unverified stayed at 2 of 5, one caught by a value and one, `CheckErr`, no longer caught. The small sets did not change: their values are on the cited lines.
 
+### Fitting the reference excerpts to the prompt (v0.14)
+
+Before v0.14, CodeHaven retrieved reference excerpts for every question, then preloaded the files and definitions the question names. When those filled the 12 KB prompt, compaction replaced the excerpts, the oldest message, with a one-line stub, so they were found for nothing and the model was told to fetch them again. That happened on 22 of the 80 real-repository questions. v0.14 retrieves again with the room that is left, or leaves the excerpts out when not even 2 KB is left (2 of the 80).
+
+The 22 affected questions, on `qwen2.5-coder:7b`, one run each, before and after, on 2026-11-27 and 2026-11-28:
+
+| Code | Correct | Correct and verified | Time for the 22 |
+|---|---|---|---|
+| v0.13 (excerpts compacted away) | 19/22 | 18/22 | 2,524 s |
+| v0.14 (excerpts fitted) | 20/22 | 19/22 | 1,601 s |
+
+- **One more answer right.** "Which functions in routing.py call solve_dependencies?" on FastAPI is now answered right and verified.
+- **No answer lost.** The two FastAPI questions still wrong (the default OpenAPI version, and the default title and version) were wrong before too. One Flask answer changed from verified to unverified and one the other way round, so the verified count moved by one.
+- **Faster, with a caveat.** The prompt is smaller, so Ollama processes less of it, but the first run shared the machine with other work, so read the time difference as a trend, not a measurement.
+
 ### Other models
 
 The same 34 real-repository questions, the same code (v0.11.0), one run each on 2026-11-22. Per suite, in the order requests, click, express: the 14B model 12, 10, 9; llama3 10, 7, 8; the 0.5B model 5, 2, 6.

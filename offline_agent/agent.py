@@ -8,7 +8,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from . import arabic, changes, coder, insights, scans, symbols, trace, tracebacks
+from . import arabic, changes, coder, insights, messages as commit_messages, scans, symbols, trace, tracebacks
 from . import history as blame  # history is also run_state's name for the session's earlier turns.
 from .review import CHANGES as REVIEW_CHANGES, review, review_changes
 from .test_runner import DEFAULT_IMAGE, command, run_snippet, run_tests
@@ -522,7 +522,10 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     # Phase 2: a task about git changes gets them read with git up front.
     asked_changes = changes.requested(task)
     report = found = None
-    if asked_changes and REVIEW_CHANGES.search(task):
+    if (written := commit_messages.requested(task)):
+        # "Write a commit message": the diff goes to the model with a prompt of its own, and nothing is committed.
+        found = commit_messages.write(model, workspace, task, written, read_limit(model) - 600, output)
+    elif asked_changes and REVIEW_CHANGES.search(task):
         # "Review my changes": only the functions the diff touched are reviewed, one model call each.
         try:
             found = review_changes(model, workspace, asked_changes, spans=knowledge.dependencies.spans if knowledge else None,
@@ -779,7 +782,7 @@ class Session:
             self.knowledge.refresh()  # Pick up files changed between questions.
         # "My last commit" means something else tomorrow, so answers about changes are neither recalled nor saved.
         # Test gaps and tours are rebuilt from the whole project each time, which a saved copy would not notice changing.
-        memory = (None if changes.requested(task) or insights.requested(task) or scans.requested(task) or blame.requested(task)
+        memory = (None if changes.requested(task) or insights.requested(task) or commit_messages.requested(task) or scans.requested(task) or blame.requested(task)
                   or (self.options.get("editor") is not None and coder.requested(task)) else self.memory)
         notes = memory.recall(task, skip=[question for question, _ in self.turns]) if memory else []
         evidence = self.evidence

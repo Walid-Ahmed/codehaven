@@ -94,3 +94,33 @@ class ReviewChangesTests(unittest.TestCase):
             self.assertEqual(reviewed, ["Review tax"])
             self.assertIn("pricing.py:5-6 `tax` Bug", state["final_text"])
             self.assertIn("uncommitted changes", state["final_text"])
+
+
+@unittest.skipUnless(shutil.which("git"), "git is not installed")
+class CommitMessageTests(unittest.TestCase):
+    def test_a_commit_message_is_written_from_the_diff_and_nothing_is_committed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            git(root, "init", "-q")
+            (root / "pricing.py").write_text("def tax(p):\n    return p * 0.2\n")
+            git(root, "add", "pricing.py")
+            git(root, "commit", "-q", "-m", "Add pricing")
+            (root / "pricing.py").write_text("def tax(p):\n    return round(p * 0.2, 2)\n")
+            seen = []
+
+            class Writer:
+                prompt_budget = 12_000
+
+                def chat(self, messages, schema):
+                    seen.append(messages)
+                    return {"subject": "Round tax to cents", "body": "Totals showed fractions of a cent."}
+
+            state = run_state(Writer(), Workspace(root), "Write a commit message for my changes", output=lambda _: None)
+            self.assertIn("Round tax to cents", state["final_text"])
+            self.assertIn("- pricing.py", state["final_text"])
+            self.assertIn("round(p * 0.2, 2)", seen[0][1]["content"])
+            self.assertIn("a Git commit message", seen[0][0]["content"])
+            log = subprocess.run(["git", "-C", folder, "log", "--oneline"], capture_output=True, text=True).stdout
+            self.assertEqual(len(log.splitlines()), 1)  # Nothing was committed.
+            state = run_state(Writer(), Workspace(root), "Write a PR description", output=lambda _: None)
+            self.assertIn("Pull request description", state["final_text"])

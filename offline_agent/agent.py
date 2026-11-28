@@ -10,7 +10,7 @@ from langsmith import tracing_context
 
 from . import arabic, changes, insights, scans, symbols, trace
 from . import history as blame  # history is also run_state's name for the session's earlier turns.
-from .review import review
+from .review import CHANGES as REVIEW_CHANGES, review, review_changes
 from .test_runner import DEFAULT_IMAGE, command, run_snippet, run_tests
 from .evidence import retain, discovery_task, check_answer, inventory
 from .model import PROMPT_BUDGET, InvalidReply, RepeatedAnswer, compact_messages, read_limit
@@ -519,8 +519,17 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     evidence, evidence_limited = [dict(row) for row in carried_evidence], False
     # Phase 2: a task about git changes gets them read with git up front.
     asked_changes = changes.requested(task)
-    report = None
-    if asked_changes:
+    report = found = None
+    if asked_changes and REVIEW_CHANGES.search(task):
+        # "Review my changes": only the functions the diff touched are reviewed, one model call each.
+        try:
+            found = review_changes(model, workspace, asked_changes, spans=knowledge.dependencies.spans if knowledge else None,
+                                   output=output, in_arabic=arabic.written_in(task))
+        except changes.NoChanges as exc:
+            found = {"text": str(exc), "evidence": []}
+        except (ValueError, OSError) as exc:
+            found = {"text": f"Could not read the changes with git ({exc}).", "evidence": []}
+    elif asked_changes:
         try:
             report = changes.describe(workspace, asked_changes, read_limit(model) - len(CHANGES_ANSWER.encode()) - 200,
                                       named_files(task, files))
@@ -534,13 +543,14 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
             output(f"Could not read the changes with git ({exc}); answering from the files instead.")
     # Phase 3: shortcuts that return without running the graph: a file review, a call trace, test gaps, or a project tour.
     # Some requests have a purpose-built answer that does not go through the general workflow.
-    found = None
     reviewed = named_files(task, files)[:1] or ([focus_file] if focus_file in files else [])
     wanted = insights.requested(task) if report is None and not asked_changes else None
     in_arabic = arabic.written_in(task)
     scan = scans.requested(task) if report is None and not asked_changes else None
     why = report is None and not asked_changes and blame.requested(task)
-    if scan:
+    if found is not None:
+        pass  # The changes were reviewed above.
+    elif scan:
         found = scans.run(*scan, workspace, knowledge)
     elif why and (explained := blame.explain(model, workspace, knowledge, task, output)) is not None:
         found = explained

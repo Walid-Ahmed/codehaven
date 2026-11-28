@@ -44,7 +44,7 @@ SCHEMA = {"type": "object", "additionalProperties": False, "required": ["promise
                          "finding": {"type": "string", "maxLength": FINDING_CHARS}}}
 
 
-def reviewable(path, text, spans=None):
+def reviewable(path, text, spans=None, only=None):
     """The parts of a file to check, in order: functions and methods, not the classes that only hold them.
 
     A file with no named parts, such as a script or a configuration file, is checked as one part.
@@ -56,7 +56,42 @@ def reviewable(path, text, spans=None):
               if not any(other is not part and part["start"] <= other["start"] and other["end"] <= part["end"] for other in found)]
     if not leaves and text.strip():
         leaves = [{"name": path.rsplit("/", 1)[-1], "kind": "file", "start": 1, "end": max(1, len(text.splitlines()))}]
+    if only is not None:
+        # Reviewing changes: only the parts that hold a changed line.
+        leaves = [part for part in leaves if any(part["start"] <= end and start <= part["end"] for start, end in only)]
     return leaves[:REVIEW_PARTS], len(leaves)
+
+
+CHANGES = re.compile(r"\b(?:review|check|audit|critique)\b.*\b(?:changes|diff|commit|edits|what\s+i\s+changed)\b"
+                     r"|\bpre[- ]?commit\s+(?:check|review)\b", re.I)
+CHANGED_FILES = 6  # Files reviewed in one review of changes.
+
+
+def review_changes(model, workspace, request, *, spans=None, output=print, in_arabic=False):
+    """Review only the functions a set of changes touched, file by file. request is what changes.requested returns.
+
+    Returns the same shape as review(), joined over the changed files; raises changes.NoChanges when nothing changed."""
+    from . import changes  # Imported here: changes is only needed for this kind of review.
+    report = changes.describe(workspace, request, 400_000)
+    ranges = {}
+    for row in report["evidence"]:
+        ranges.setdefault(row["path"], []).append((row["line"], row["end_line"]))
+    texts, evidence, problems, checked = [f"Reviewing the functions changed in the {report['label']}."], [], 0, 0
+    for path in [name for name in report["paths"] if name in ranges][:CHANGED_FILES]:
+        try:
+            found = review(model, workspace, path, spans=(spans or {}).get(path), output=output, in_arabic=in_arabic,
+                           only=ranges[path])
+        except (ValueError, OSError, UnicodeError) as exc:
+            texts.append(f"{path} could not be reviewed: {exc}")
+            continue
+        texts.append(found["text"])
+        evidence += found["evidence"]
+        problems, checked = problems + found["problems"], checked + found["checked"]
+    if len(report["paths"]) > CHANGED_FILES:
+        texts.append(f"Only the first {CHANGED_FILES} changed files were reviewed; ask about another one by name.")
+    if checked == 0 and len(texts) == 1:
+        texts.append("No changed function could be reviewed: the changed files have no code CodeHaven can check.")
+    return {"text": "\n\n".join(texts), "evidence": evidence, "problems": problems, "checked": checked}
 
 
 def shown_code(part, lines):
@@ -101,13 +136,16 @@ def called_lines(part, found, lines):
     return "\n".join(shown)
 
 
-def review(model, workspace, path, *, spans=None, output=print, in_arabic=False):
-    """Check one file part by part. Returns {"text", "evidence", "problems", "checked"}; raises ValueError for a file that cannot be read."""
+def review(model, workspace, path, *, spans=None, output=print, in_arabic=False, only=None):
+    """Check one file part by part. Returns {"text", "evidence", "problems", "checked"}; raises ValueError for a file that cannot be read.
+
+    only, a list of (start, end) line ranges, limits the review to the parts that hold those lines, such as the lines
+    a change touched."""
     text = workspace.read(path)
     if not text.strip():
         raise ValueError(f"{path} is empty, so there is nothing to review.")
     lines = text.splitlines()
-    chosen, total = reviewable(path, text, spans)
+    chosen, total = reviewable(path, text, spans, only)
     every, _ = parts(path, text, spans)
     problems, fine, failed, evidence = [], [], [], []
     for index, part in enumerate(chosen, 1):

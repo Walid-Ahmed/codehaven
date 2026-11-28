@@ -68,3 +68,29 @@ class HistoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(shutil.which("git"), "git is not installed")
+class ReviewChangesTests(unittest.TestCase):
+    def test_only_the_functions_a_change_touched_are_reviewed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            git(root, "init", "-q")
+            (root / "pricing.py").write_text("def total(p):\n    return p\n\n\ndef tax(p):\n    return p * 0.2\n")
+            git(root, "add", "pricing.py")
+            git(root, "commit", "-q", "-m", "Add pricing")
+            (root / "pricing.py").write_text("def total(p):\n    return p\n\n\ndef tax(p):\n    return p * 2\n")
+            reviewed = []
+
+            class Reviewer:
+                prompt_budget = 12_000
+
+                def chat(self, messages, schema):
+                    reviewed.append(messages[-1]["content"].split(" from ")[0])
+                    return {"promise": "tax", "does": "doubles", "edge": "none", "verdict": "bug",
+                            "finding": "Doubles the price instead of adding 20%."}
+
+            state = run_state(Reviewer(), Workspace(root), "Review my changes", output=lambda _: None)
+            self.assertEqual(reviewed, ["Review tax"])
+            self.assertIn("pricing.py:5-6 `tax` Bug", state["final_text"])
+            self.assertIn("uncommitted changes", state["final_text"])

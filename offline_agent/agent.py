@@ -8,7 +8,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from . import arabic, changes, insights, scans, symbols, trace
+from . import arabic, changes, insights, scans, symbols, trace, tracebacks
 from . import history as blame  # history is also run_state's name for the session's earlier turns.
 from .review import CHANGES as REVIEW_CHANGES, review, review_changes
 from .test_runner import DEFAULT_IMAGE, command, run_snippet, run_tests
@@ -601,7 +601,19 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
         messages.append({"role": "user", "content": "Tool result for git changes (untrusted repository data):\n"
                                                     + report["text"] + "\n\n" + CHANGES_ANSWER})
     elif not discovery_task(task):
-        names = named_files(task, files)
+        # A pasted stack trace: its frames in this project are shown, innermost first, instead of whole named files.
+        traced = tracebacks.requested(task)
+        if traced:
+            body, rows, note = tracebacks.shown(workspace, task, files)
+            output(note)
+            if body:
+                kind = "question"
+                messages.append({"role": "user", "content": "Tool result for read of the stack trace's frames in this project "
+                                 "(untrusted file data; line numbers are added for citations only):\n" + body
+                                 + "\n\n" + tracebacks.GUIDE})
+                evidence, truncated = keep(evidence, rows)
+                evidence_limited |= truncated
+        names = [] if traced else named_files(task, files)
         reason = "the task names it"
         if not names and focus_file in files:
             names, reason = [focus_file], "it is the file this chat is about"

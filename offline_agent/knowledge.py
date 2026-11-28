@@ -14,12 +14,13 @@ from .workspace import MAX_FILES, Workspace
 from .dependencies import PythonDependencies
 from .javascript import JS_EXTENSIONS, JavaScriptDependencies
 from .languages import OtherDependencies
+from .more_languages import MoreDependencies
 from .exclusions import IgnoreConfigurationError
 
 EXTENSIONS = {".md", ".txt", ".rst"}
 CODE_EXTENSIONS = EXTENSIONS | JS_EXTENSIONS | {
     ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs",
-    ".c", ".h", ".cpp", ".hpp", ".cs", ".rb", ".php", ".swift", ".kt",
+    ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hh", ".hxx", ".cs", ".rb", ".php", ".swift", ".kt",
     ".kts", ".scala", ".sh", ".bash", ".zsh", ".ps1", ".sql", ".html",
     ".css", ".scss", ".vue", ".svelte", ".json", ".yaml", ".yml", ".toml",
     ".ini", ".cfg", ".xml", ".graphql", ".gql", ".proto", ".r", ".lua",
@@ -231,6 +232,12 @@ class KnowledgeBase:
         self.dependencies.edges.update(other.edges)
         self.dependencies.definitions.update(other.definitions)
         self.dependencies.spans.update(other.spans)
+        more = MoreDependencies(code_files)  # C, C++, C#, Ruby, PHP, Swift, and Kotlin.
+        self.dependencies.edges.update(more.edges)
+        self.dependencies.definitions.update(more.definitions)
+        self.dependencies.spans.update(more.spans)
+        self.dependencies.missing.update(more.missing)
+        self.dependencies.parse_failures += more.parse_failures
         self.passages_by_source = {}
         for entry in self.entries:
             self.passages_by_source.setdefault(entry["source"], []).append(entry)

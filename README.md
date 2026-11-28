@@ -136,7 +136,7 @@ No tool writes files. `edit` and `write` do not exist, and the model is correcte
 
 ### Local knowledge
 
-Passages reach the model four ways: keyword ranking (BM25), definition lookup for names in the question, import following across Python, JavaScript, TypeScript, Go, Java, and Rust, and optional [search by meaning](#search-by-meaning) with a local embedding model.
+Passages reach the model four ways: keyword ranking (BM25), definition lookup for names in the question, import following across Python, JavaScript, TypeScript, Go, Java, Rust, C, C++, C#, Ruby, PHP, Kotlin, and Swift, and optional [search by meaning](#search-by-meaning) with a local embedding model.
 
 ### The agent loop in detail
 
@@ -177,7 +177,7 @@ Implementation follows the [LangGraph graph API](https://docs.langchain.com/oss/
 4. **Check the code.** Click a citation such as `inventory/store.py:27-29` to open those lines, highlighted, beside the chat. **Open in VS Code** above the code opens the same file at that line in VS Code, if it is installed; it is a link to a program on this computer, and nothing is sent anywhere.
 5. **See how it got there.** Each answer can show the steps CodeHaven took. If a citation could not be checked against what was actually read, a yellow **Unverified** box says so.
 6. **Study one file or a group of files.** The tabs above the chat add two study aids. Click **Choose files…** to tick the files they are about; with an uploaded file, that file is used.
-   - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust; up to 40 files per map. Functions, methods, and types in Go, Java, and Rust are found with the same kind of parser as JavaScript; their imports are still read with line patterns, so unusual import layouts and macros can be missed.
+   - **Map** draws the structure. For one file it shows its functions, classes, and methods as boxes, with an arrow from each caller to what it calls; for several files it shows which file imports which, with files you did not choose as dashed boxes, and clicking a file opens its inside view. Click a box to see its code. The map comes from parsing the code (never running it) and uses no model, so it appears at once. Imports are followed for Python, JavaScript, TypeScript, Go, Java, Rust, C, C++, C#, Ruby, PHP, Kotlin, and Swift; up to 40 files per map. Functions, methods, and types in Go, Java, Rust, C, C++, C#, Ruby, PHP, Kotlin, and Swift are found with the same kind of parser as JavaScript; their imports are read with line patterns (Swift files of one module need no imports, so none are drawn), so unusual import layouts and macros can be missed.
    - **Flashcards** asks the local model for question-and-answer cards, 3 to 6 per file for up to 8 files, one file at a time. Click a card or press Space to turn it over, use the arrow keys to move, and **Shuffle** or **Copy all as text** when you want. **Save for Anki…** saves the cards as a text file with one card per line, which Anki and most flashcard apps import. Each answer links to the lines it is about; those line numbers are looked up in the file from the name the model gave, so they are never invented. A card whose named part cannot be found says so.
 
 7. **Come back to a chat.** Chats about a repository are saved on this computer and listed under **Saved chats** in the sidebar. Click one to reopen it: the page shows it again and follow-up questions remember it. See [Saved chats](#saved-chats).
@@ -227,7 +227,7 @@ Shown a whole file, a small model tends to answer "looks fine". Shown one functi
 Two answers come from parsing the whole project rather than from searching it:
 
 - **Test gaps.** "Which functions have no tests?" lists every public function and method whose name appears in no test file, grouped so the files with the most gaps come first. No model is used, so it is instant. It is a name check, not coverage measurement: a function reached only through another function is still listed.
-- **Project tour.** "Give me a project tour" returns an ordered reading list of up to 8 files: the README, then the entry point (the file that reaches the most of the project through its imports), then what it imports, most widely used first. The order and the reason for each step come from the import graph; the local model adds one sentence per file. Tests are left out. Imports are followed for Python, JavaScript, TypeScript, Go, Java, and Rust.
+- **Project tour.** "Give me a project tour" returns an ordered reading list of up to 8 files: the README, then the entry point (the file that reaches the most of the project through its imports), then what it imports, most widely used first. The order and the reason for each step come from the import graph; the local model adds one sentence per file. Tests are left out. Imports are followed for Python, JavaScript, TypeScript, Go, Java, Rust, C, C++, C#, Ruby, PHP, Kotlin, and Swift.
 
 Both have buttons on the empty chat in the browser page, and neither is saved to long-term memory, because a saved copy would not notice a new test or file.
 
@@ -252,7 +252,7 @@ Called from: app/main.py:21 in checkout
 - **Limits.** Up to 3 calls deep and 8 functions; the answer says how many calls were left out, and you can trace one of them by name.
 - **What is followed.** A call to a function in the same file, in a file it imports, or to the only function of that name in the project. `self.add()` means the same class. A call on another object, such as `file.flush()`, is not followed, and neither are calls through a variable, a decorator, or inheritance. A name inside a string or a comment is not a call.
 - **Same name twice.** Name the method with its class (`Store.add`); otherwise the first match is traced and the others are listed.
-- Works for Python, JavaScript, TypeScript, Go, Java, and Rust. A question with a condition, such as "what happens when `add` is called with a negative price?", is answered by the normal workflow instead.
+- Works for Python, JavaScript, TypeScript, Go, Java, Rust, C, C++, C#, Ruby, PHP, Kotlin, and Swift. A question with a condition, such as "what happens when `add` is called with a negative price?", is answered by the normal workflow instead.
 
 ## Notebooks and PDFs
 

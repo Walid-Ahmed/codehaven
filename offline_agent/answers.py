@@ -32,8 +32,8 @@ CORRECTION = ("Your previous reply was invalid: {}. No tool ran. Reply again wit
               "action, path, content, and message as strings, where action is one of " + ", ".join(ACTIONS) + ".")
 
 
-def reply_problem(reply):
-    """Describe why a model reply is not a usable action, or return None."""
+def reply_problem(reply, actions=ACTIONS):
+    """Describe why a model reply is not a usable action, or return None. actions are the ones on offer."""
     if not isinstance(reply, dict):
         return "the reply is not a JSON object"
     missing = [key for key in SCHEMA["required"] if key not in reply]
@@ -45,9 +45,14 @@ def reply_problem(reply):
     wrong = [key for key in SCHEMA["required"] if not isinstance(reply[key], str)]
     if wrong:
         return "fields must be strings: " + ", ".join(wrong)
-    if reply["action"] not in ACTIONS:
+    if reply["action"] not in actions:
         return f"unknown action {reply['action'][:40]!r}"
     return None
+
+
+def with_actions(schema, actions):
+    """A schema whose action field allows exactly actions; schema itself is left as it is."""
+    return {**schema, "properties": {**schema["properties"], "action": {"type": "string", "enum": list(actions)}}}
 
 
 def cited_schema(paths=(), brief=False):

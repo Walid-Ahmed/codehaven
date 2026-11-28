@@ -104,6 +104,9 @@ def main(argv=None):
                         help="Conversation content budget (8000..64000 UTF-8 bytes; default 12000)")
     parser.add_argument("--test-runner", choices=("unittest", "pytest"), default="unittest")
     parser.add_argument("--test-image", default=DEFAULT_IMAGE, help="Prepared local Docker image for isolated tests")
+    parser.add_argument("--allow-python", action="store_true",
+                        help="Let the agent ask to run a short Python snippet, shown to you for approval first, in the same "
+                             "Docker sandbox as the tests (no network, read-only copy of the project)")
     parser.add_argument("--test-docker-socket", help="Absolute local Unix Docker socket; remote daemons are unsupported")
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
     parser.add_argument("--model", default=MODEL, help=f"Installed local Ollama model (default {MODEL}, the tested one)")
@@ -256,7 +259,10 @@ def main(argv=None):
                                      "docker_socket": args.test_docker_socket},
                        confirm_tests=lambda: input(
                            f"Run {args.test_runner} in Docker with network disabled and project read-only? [y/N] "
-                       ).strip().lower() == "y")
+                       ).strip().lower() == "y",
+                       confirm_code=(lambda _code: input("Run this snippet in Docker with network disabled and the project "
+                                                         "read-only? [y/N] ").strip().lower() == "y")
+                       if args.allow_python else None)
         memory = Memory(workspace, args.memory_dir) if args.remember else None
         if memory is not None:
             print(f"Long-term memory: {len(memory.notes)} saved answer{'s' if len(memory.notes) != 1 else ''} for this "

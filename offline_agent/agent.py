@@ -10,12 +10,12 @@ from langsmith import tracing_context
 
 from . import arabic, changes, insights, symbols, trace
 from .review import review
-from .test_runner import DEFAULT_IMAGE, command, run_tests
+from .test_runner import DEFAULT_IMAGE, command, run_snippet, run_tests
 from .evidence import retain, discovery_task, check_answer, inventory
 from .model import PROMPT_BUDGET, InvalidReply, RepeatedAnswer, compact_messages, read_limit
 from .workspace import line_range, sections
 from .prompts import (  # noqa: F401  (also imported from here by the tests and other modules)
-    ACTIONS, ANSWER_FROM_PRELOAD, ANSWER_WITH_POINTS, BRIEF_ANSWER, CHANGES_ANSWER, CHANGE_ADVICE, DISCOVERY_SYSTEM, EDIT_REQUEST,
+    ACTIONS, CODE_ACTION, PYTHON_GUIDE, ANSWER_FROM_PRELOAD, ANSWER_WITH_POINTS, BRIEF_ANSWER, CHANGES_ANSWER, CHANGE_ADVICE, DISCOVERY_SYSTEM, EDIT_REQUEST,
     ENTRY_POINT_GUIDANCE, FINAL_ANSWER_CHARS, FINISH_NOW, POLITE, PRELOAD_FILES, QUESTION, RELOAD_SECONDS, REVIEW,
     SCHEMA, SYSTEM, POINTS, POINT_CHARS, OVERVIEW_CHARS,
 )
@@ -26,7 +26,7 @@ from .tasks import (  # noqa: F401  (also imported from here by the tests and ot
 from .answers import (  # noqa: F401  (also imported from here by the tests and other modules)
     trim_at_limit, reply_problem, cited_schema, retrieved_rows, seen_span, file_named, with_points, action_key,
     format_search, format_retrieval, format_metrics, REPEAT_NOTE, LIMIT_NOTE, CORRECTION, SHOWN_ROWS,
-    cite_mentions, MENTION_HEADING, check_values, VALUE_HEADING, missing_code, MISSING_HEADING,
+    cite_mentions, MENTION_HEADING, check_values, VALUE_HEADING, missing_code, MISSING_HEADING, with_actions,
 )
 
 
@@ -62,10 +62,15 @@ class AgentState(TypedDict):
     issues: list[str]
 
 
-def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge=None, test_options=None, output=print, stream=None):
-    """Compile a per-task graph. Read-only: no node writes files. No remote services or persistent checkpoint store."""
+def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge=None, test_options=None, output=print, stream=None,
+                confirm_code=None):
+    """Compile a per-task graph. Read-only: no node writes files. No remote services or persistent checkpoint store.
+
+    confirm_code, a function shown the code, offers the run_python action; without it the action does not exist.
+    """
     if not 1 <= max_steps <= 30:
         raise ValueError("max_steps must be between 1 and 30")
+    actions = ACTIONS + ((CODE_ACTION,) if confirm_code else ())
     write_stream = stream or (lambda _text: None)
     # A one-item list so call_model can set it: the reload warning is printed once per task.
     reload_warned = [False]
@@ -102,6 +107,8 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
         # Change requests are answered like questions: CodeHaven explains the change, with citations, and never makes it.
         question = kind in ("question", "change") and not state.get("discovery")
         schema = cited_schema(cite_files, brief=kind == "question") if question else SCHEMA
+        if confirm_code:
+            schema = with_actions(schema, actions)
         messages = state["messages"]
         if finishing:
             # A forced answer is capped so even rambling ends in a complete, valid reply.
@@ -166,7 +173,7 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
                     overview = reply["content"]
                 if question:
                     reply, missing = with_points(reply, workspace, state.get("search_evidence", []))
-                problem = reply_problem(reply)
+                problem = reply_problem(reply, actions)
             except RepeatedAnswer as exc:
                 # Keep the useful text before the loop; a retry at temperature 0 tends to loop again.
                 reply, problem, cut = (dict(action="finish", path="", content=exc.answer, message="Answer stopped while repeating"),
@@ -363,6 +370,23 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
         output(result)
         return tool_result(state, result)
 
+    def execute_code(state: AgentState):
+        """Code node: run the model's Python snippet in the test sandbox, only after the user approves the code shown."""
+        reply = state["reply"]
+        if reply["path"]:
+            return tool_result(state, "Tool error: run_python takes the code in content and an empty path")
+        code = reply["content"]
+        output("Requested Python snippet (runs in Docker with network disabled and a read-only copy of the project):\n"
+               + code.rstrip())
+        if not confirm_code(code):
+            return tool_result(state, "The snippet was NOT run: the user did not approve it. Answer from the code instead.")
+        try:
+            result = run_snippet(workspace, code, **dict(test_options or {}))
+        except (ValueError, OSError) as exc:
+            result = f"Snippet error: {exc}"
+        output(result)
+        return tool_result(state, result)
+
     def route_action(state: AgentState):
         """Edge after the model node: choose the next node from the reply."""
         # An invalid reply was just sent back for correction: call the model again, unless the steps ran out.
@@ -407,6 +431,7 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
     graph.add_node("search", search_files)
     graph.add_node("retrieve", retrieve_references)
     graph.add_node("run_tests", execute_tests)
+    graph.add_node(CODE_ACTION, execute_code)
     graph.add_node("limit", limit)
     graph.add_node("repeat", repeated_lookup)
     graph.add_node("discover", discover)
@@ -416,10 +441,10 @@ def build_graph(model, workspace, *, max_steps=12, confirm_tests=None, knowledge
     # After the model: run the chosen tool, end on finish, or return to the model after a corrected reply.
     graph.add_conditional_edges("model", route_action,
                                 {"read": "read", "search": "search", "retrieve": "retrieve",
-                                 "run_tests": "run_tests", "repeat": "repeat", "finish": END,
+                                 "run_tests": "run_tests", CODE_ACTION: CODE_ACTION, "repeat": "repeat", "finish": END,
                                  "model": "model", "limit": "limit"})
     # After a tool: its result goes back to the model, or to limit when no steps remain.
-    for tool in ("read", "search", "retrieve", "run_tests", "repeat"):
+    for tool in ("read", "search", "retrieve", "run_tests", CODE_ACTION, "repeat"):
         graph.add_conditional_edges(tool, after_tool, {"model": "model", "limit": "limit"})
     graph.add_edge("limit", END)
     return graph.compile()
@@ -436,7 +461,8 @@ def run(model, workspace, task, *, memory=None, **options):
 
 
 def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowledge=None,
-              test_options=None, output=print, stream=None, history="", carried_evidence=(), focus_file=None, notes=""):
+              test_options=None, output=print, stream=None, history="", carried_evidence=(), focus_file=None, notes="",
+              confirm_code=None):
     """Run one task and return the final graph state. history and carried_evidence come from a Session.
 
     notes are answers recalled from long-term memory, shown before the session's own history.
@@ -463,7 +489,7 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
                 f"use them only where they help with the current task):\n{notes}\n\n" if notes else "")
                + (f"Earlier in this session (answers may be outdated if files changed since):\n{history}\n\n" if history else ""))
     earlier += "Current task: " if earlier else ""
-    messages = [{"role": "system", "content": SYSTEM},
+    messages = [{"role": "system", "content": SYSTEM + ("\n" + PYTHON_GUIDE if confirm_code else "")},
                 {"role": "user", "content": earlier + task + f"\nWorkspace path sample ({len(selected)} of {len(files)} listed files; use search/read/retrieve for more):\n" +
                  "\n".join(selected)}]
     evidence, evidence_limited = [dict(row) for row in carried_evidence], False
@@ -627,7 +653,8 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     # Always offline: LangChain would otherwise start remote tracing from LANGSMITH_TRACING and similar env vars.
     with tracing_context(enabled=False):
         graph = build_graph(model, workspace, max_steps=max_steps, confirm_tests=confirm_tests,
-                            knowledge=knowledge, test_options=test_options, output=output, stream=stream)
+                            knowledge=knowledge, test_options=test_options, output=output, stream=stream,
+                            confirm_code=confirm_code)
         return graph.invoke({"messages": messages, "reply": {}, "steps": 0, "exit_code": 0, "task": task,
                              "search_evidence": evidence, "evidence_limited": evidence_limited, "invalid_replies": 0,
                              "cite_files": preloaded if numbered else [], "kind": kind},

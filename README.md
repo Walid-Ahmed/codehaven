@@ -116,6 +116,7 @@ There is one agent, not several. It is a [LangGraph](https://docs.langchain.com/
 | `search` | Finds exact text and names the function each match is in |
 | `retrieve` | Fetches ranked passages from the local index |
 | `run_tests` | Runs unittest or pytest in a Docker container with networking off, after you approve |
+| `run_python` | Off unless you start with `--allow-python`. Runs a short Python snippet the model writes, after you approve the code it shows you, in the same Docker sandbox as `run_tests` |
 | `finish` | Returns the answer and the code parts it relies on |
 
 No tool writes files. `edit` and `write` do not exist, and the model is corrected if it asks for them.
@@ -379,6 +380,8 @@ codehaven --workspace /absolute/path/to/project --interactive
 ```
 
 Typed at a terminal with no question, plain `codehaven` starts the same session in the current folder. The up and down arrows bring back earlier questions.
+
+To let the model check something by running it, such as what a function returns for a sample input, add `--allow-python`. The model can then ask to run a short Python snippet (up to 8,000 bytes). CodeHaven prints the code and runs it only if you answer `y`, in the same Docker container as [isolated tests](#run-isolated-project-tests): no network, a read-only copy of the project as its working directory, 30 seconds, and only the packages in the test image. It cannot change your files. Without the flag the action does not exist and the prompts are exactly as before. The browser page does not offer it yet, because it has no way to ask you to approve the code.
 
 If something goes wrong that CodeHaven did not expect, it says so in one sentence and the session carries on. Set `CODEHAVEN_DEBUG=1` to also print the full traceback, for a bug report.
 

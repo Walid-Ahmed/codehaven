@@ -1,5 +1,6 @@
 """Bounded, read-only UTF-8 workspace access: listing, reading, paging, and literal search. Nothing here writes files."""
 import ast
+import errno
 import json
 import os
 import re
@@ -16,7 +17,9 @@ MAX_BYTES = 64_000  # The largest file uploaded, read from a picture or document
 # modules (FastAPI's routing.py and applications.py, about 176 KB each) were invisible to search and reads.
 READ_BYTES = 1_000_000
 MAX_FILES = 5000  # The most files one listing returns; callers report the listing as limited at this size.
-MAX_MATCHES, SEARCH_BYTES = 50, 15_800  # Bounds on one search result, so it always fits in a prompt.
+MAX_MATCHES, SEARCH_BYTES = 50, 15_800
+# Opening a file one directory at a time, refusing symlinks at each step, needs these; Windows lacks them.
+SAFE_OPEN = all(hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK")) and os.open in os.supports_dir_fd  # Bounds on one search result, so it always fits in a prompt.
 
 
 def line_range(spec):
@@ -263,14 +266,46 @@ class Workspace:
                     return found
         return found
 
+    def read_bytes(self, name, limit=READ_BYTES):
+        """Return (the first limit + 1 bytes of a file, its mode), opened so that no symlink is ever followed.
+
+        path() checks the name first. The checks and the open are separate steps, so a directory swapped for a
+        symlink in between could otherwise lead the open out of the workspace. On macOS and Linux the file is
+        therefore opened one component at a time from the root with O_NOFOLLOW, which refuses a symlink at any
+        level at the moment of opening. Windows has no such open, and uses the checks alone.
+        """
+        self.path(name)
+        parts = PurePath(name).parts
+        if SAFE_OPEN:
+            parent = os.open(self.root_text, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                for part in parts[:-1]:
+                    child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                    os.close(parent)
+                    parent = child
+                # O_NONBLOCK stops a named pipe from hanging the open; fstat below rejects anything but a regular file.
+                descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                    raise ValueError("Symlink paths are unavailable") from None
+                raise
+            finally:
+                os.close(parent)
+        else:
+            target = self.root / name
+            if not target.is_file():
+                raise ValueError("Only regular files can be read")
+            descriptor = os.open(target, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        with os.fdopen(descriptor, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("Only regular files can be read")
+            # One byte past the limit is enough to know the file is too large, without reading all of it.
+            return handle.read(limit + 1), info.st_mode
+
     def read(self, name):
         """Return a file's text. Raises ValueError for anything but a UTF-8 text file of at most READ_BYTES."""
-        target = self.path(name)
-        if not target.is_file():
-            raise ValueError("Only regular files can be read")
-        with target.open("rb") as handle:
-            # One byte past the limit is enough to know the file is too large, without reading all of it.
-            raw = handle.read(READ_BYTES + 1)
+        raw, _ = self.read_bytes(name)
         if len(raw) > READ_BYTES or b"\0" in raw:
             raise ValueError(f"Only UTF-8 text files up to {READ_BYTES // 1_000_000} MB can be read")
         # Windows line endings become plain ones, so a stray carriage return never reaches the model or a citation.

@@ -64,7 +64,7 @@ Automated tests exercise simulated model actions and a local HTTP server. See th
 
 Local validation on November 1, 2026: all 9 automated tests passed on Python 3.13.3. The installed `qwen2.5-coder:14b` model passed the doctor check, proposed `hello.py` in preview mode, and completed a separate confirmed-write run in a temporary directory. The generated addition function passed two manually executed assertions. This is a small smoke test, not a general coding-quality benchmark. Python 3.10 and Linux checks are configured in CI but were not run locally.
 
-Current model policy: use only `qwen2.5-coder:7b`. The earlier 14b smoke test above is historical and does not validate the current 7b configuration. The CLI no longer accepts a model-selection option.
+Current model policy: use only `qwen2.5-coder:7b`. The earlier 14b smoke test above is historical and does not validate the current 7b configuration. The CLI no longer accepts a model-selection option. (Superseded in v0.11: `--model` and the page's model picker choose any installed local model; `qwen2.5-coder:7b` stays the default.)
 
 Version 0.2 validation on November 1, 2026: all 21 tests passed on Python 3.13.3 with LangGraph 1.2.19, and `pip check` reported no broken requirements. A real `qwen2.5-coder:7b` run read a disposable Python file and finished with an explanation in two model actions. Tests also cover the 30-action boundary, approved writes at the limit, and disabled tracing with inherited tracing environment flags. Other Python versions remain covered by the CI configuration rather than local verification.
 

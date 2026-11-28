@@ -78,3 +78,22 @@ class MoreLanguagesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotebookTests(unittest.TestCase):
+    def test_notebooks_in_the_repository_are_indexed_without_their_outputs(self):
+        notebook = {"cells": [{"cell_type": "code", "execution_count": 1, "metadata": {},
+                               "outputs": [{"name": "stdout", "output_type": "stream", "text": ["zqxoutputonly\n"]}],
+                               "source": ["def zqxcellcode(n):\n", "    return n + 1\n"]},
+                              {"cell_type": "markdown", "metadata": {}, "source": ["# zqxheading\n"]}],
+                    "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, "analysis.ipynb").write_text(json.dumps(notebook, indent=1) + "\n")
+            kb = KnowledgeBase(workspace=Workspace(folder))
+            found = json.loads(kb.retrieve("zqxcellcode zqxheading"))["results"]
+            self.assertEqual({row["source"] for row in found}, {"repo/analysis.ipynb"})
+            self.assertNotIn("zqxoutputonly", kb.retrieve("zqxoutputonly"))
+            # Line numbers are those of the real file, so a citation of the code cell can be checked.
+            lines = Path(folder, "analysis.ipynb").read_text().splitlines()
+            row = found[0]
+            self.assertIn("zqxcellcode", "\n".join(lines[row["start_line"] - 1:row["end_line"]]))

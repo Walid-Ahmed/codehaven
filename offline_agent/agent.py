@@ -8,7 +8,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from . import arabic, changes, insights, symbols, trace
+from . import arabic, changes, insights, scans, symbols, trace
 from .review import review
 from .test_runner import DEFAULT_IMAGE, command, run_snippet, run_tests
 from .evidence import retain, discovery_task, check_answer, inventory
@@ -537,7 +537,10 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     reviewed = named_files(task, files)[:1] or ([focus_file] if focus_file in files else [])
     wanted = insights.requested(task) if report is None and not asked_changes else None
     in_arabic = arabic.written_in(task)
-    if report is None and (REVIEW.search(task) or arabic.REVIEW.search(arabic.normalise(task))) and reviewed:
+    scan = scans.requested(task) if report is None and not asked_changes else None
+    if scan:
+        found = scans.run(*scan, workspace, knowledge)
+    elif report is None and (REVIEW.search(task) or arabic.REVIEW.search(arabic.normalise(task))) and reviewed:
         spans = knowledge.dependencies.spans.get(reviewed[0]) if knowledge is not None else None
         try:
             found = review(model, workspace, reviewed[0], spans=spans, output=output, in_arabic=in_arabic)
@@ -745,7 +748,7 @@ class Session:
             self.knowledge.refresh()  # Pick up files changed between questions.
         # "My last commit" means something else tomorrow, so answers about changes are neither recalled nor saved.
         # Test gaps and tours are rebuilt from the whole project each time, which a saved copy would not notice changing.
-        memory = None if changes.requested(task) or insights.requested(task) else self.memory
+        memory = None if changes.requested(task) or insights.requested(task) or scans.requested(task) else self.memory
         notes = memory.recall(task, skip=[question for question, _ in self.turns]) if memory else []
         evidence = self.evidence
         if notes:

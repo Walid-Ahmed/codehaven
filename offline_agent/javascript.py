@@ -161,7 +161,7 @@ class JavaScriptDependencies:
         Node's built-in modules are known code, so left out."""
         if not specifier or specifier.startswith('node:') or specifier.split('/')[0] in NODE_BUILTINS:
             return
-        local = specifier.startswith(('./', '../'))
+        local = specifier in ('.', '..') or specifier.startswith(('./', '../'))
         for name in bound:
             if name:
                 missing.append({"module": specifier, "name": name, "line": line, "local": local})

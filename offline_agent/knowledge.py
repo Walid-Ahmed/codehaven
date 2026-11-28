@@ -24,7 +24,7 @@ CODE_EXTENSIONS = EXTENSIONS | JS_EXTENSIONS | {
     ".kts", ".scala", ".sh", ".bash", ".zsh", ".ps1", ".sql", ".html",
     ".css", ".scss", ".vue", ".svelte", ".json", ".yaml", ".yml", ".toml",
     ".ini", ".cfg", ".xml", ".graphql", ".gql", ".proto", ".r", ".lua",
-    ".ex", ".exs", ".erl", ".hs", ".clj", ".dart",
+    ".ex", ".exs", ".erl", ".hs", ".clj", ".dart", ".ipynb",
 }
 MAX_DOCUMENTS = MAX_FILES  # The same bound as Workspace.files, so a mid-sized repository is indexed in full.
 # The most passages and bytes of text one index holds. Building the index for a project at these limits takes
@@ -50,6 +50,26 @@ def tokens(text):
     """Lowercase word stems, split at underscores and camelCase, so applyDiscount and apply_discount match "apply discount"."""
     text = arabic.normalise(text)  # Arabic short vowels are not word characters, so they would split a word in two.
     return [stem(word) for word in re.findall(r"[^\W_]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text).lower(), flags=re.UNICODE)]
+
+
+def notebook_text(text):
+    """A Jupyter notebook's JSON with its cell outputs blanked, line for line, so its code and Markdown are indexed and
+    every citation still points at the same line of the real file. Outputs hold results and pictures, not code.
+
+    Relies on the layout Jupyter writes, with "outputs": [ on a line of its own; anything else is left as it is.
+    """
+    lines, kept, closing = text.split("\n"), [], None
+    for line in lines:
+        if closing is not None:
+            kept.append("")
+            if line.rstrip().rstrip(",") == closing:
+                closing = None
+            continue
+        opened = re.match(r'^(\s*)"outputs":\s*\[\s*$', line)
+        kept.append(line)
+        if opened:
+            closing = opened[1] + "]"
+    return "\n".join(kept)
 
 
 def chunks(text):
@@ -196,7 +216,7 @@ class KnowledgeBase:
                     self.source_texts["repo/" + name] = text
                     code_files[name] = text
                 self.reused += old is not None
-                passages = self._passages(key, text, old)
+                passages = self._passages(key, notebook_text(text) if name.endswith(".ipynb") else text, old)
                 self.records[key] = {"size": status.st_size, "mtime": status.st_mtime_ns, "sha": digest, "text": text,
                                      "passages": passages}
                 for entry in passages:

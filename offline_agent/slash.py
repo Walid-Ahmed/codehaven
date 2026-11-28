@@ -10,6 +10,7 @@ COMMANDS = {
     "impact": ("What breaks if I change {}?", "a function: its callers, importers, and tests", True),
     "explain": ("Explain {}", "a file, function, or anything else", True),
     "tour": ("Give me a project tour", "a reading order for the project", False),
+    "report": ("Write a project report", "reading order, structure, libraries, test gaps, and security, in one", False),
     "onboard": ("Write an onboarding guide for a new developer", "how to run, test, and read the project", False),
     "diagram": ("Draw an architecture diagram", "a Mermaid diagram of the imports (or /diagram name for calls)", False),
     "deps": ("Which libraries does this project use?", "the libraries it declares and imports", False),

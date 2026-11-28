@@ -30,6 +30,15 @@ Watch the [narrated demo video on YouTube](https://youtu.be/d18wHCz8LFs) (or the
 | "Review `inventory/store.py`" | [Likely bugs](#review-a-file), one function at a time, most serious first |
 | "Which functions have no tests?" | [A list of test gaps](#test-gaps-and-a-project-tour), instantly, with no model |
 | "Give me a project tour" | An ordered reading list of up to 8 files |
+| "Write a project report" | One Markdown report: reading order, a Mermaid diagram of the imports, libraries, untested functions, and a security scan |
+| "Which libraries does this project use?" | What the manifests declare and what the code imports, with what no manifest declares |
+| "Scan for secrets" | Hard-coded keys and passwords (masked), eval, shell and SQL built from strings, each cited |
+| "What breaks if I change `apply_discount`?" | Its callers, the files that import it, and the tests that mention it |
+| "Why is `pricing.py:2` here?" | The commits that last changed the lines, from git blame, and what their messages say |
+| "Review my changes" | Only the functions your diff touched, reviewed one at a time |
+| A pasted stack trace | Its frames matched to your files, innermost first, and the likely cause |
+| "Write a commit message for my changes" | A message (or a PR description) to copy; nothing is committed |
+| "I'm new to this project" | An onboarding guide: how to run and test it, what it uses, and what to read first |
 | "Trace `checkout_total`" | [The calls below it](#trace-a-function), step by step, and who calls it |
 | "اشرح الدالة `checkout_total`" | [The answer in Arabic](#ask-in-arabic), with the same checked citations |
 

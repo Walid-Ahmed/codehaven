@@ -67,3 +67,14 @@ class GuideTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportTests(unittest.TestCase):
+    setUp, ask = GuideTests.setUp, GuideTests.ask
+
+    def test_one_report_holds_every_part(self):
+        text = self.ask("Write a project report")
+        for heading in ("## Reading order", "## How the parts connect", "## Libraries", "## Functions no test mentions",
+                        "## Security and secrets"):
+            self.assertIn(heading, text)
+        self.assertIn("```mermaid", text)

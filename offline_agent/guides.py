@@ -14,6 +14,8 @@ from pathlib import PurePosixPath
 
 from . import insights, scans, trace
 
+REPORT = re.compile(r"\b(?:project|repo(?:sitory)?|codebase|full|architecture)\s+report\b|\breport\s+(?:on|about|for)\s+"
+                    r"(?:this|the)\s+(?:project|repo(?:sitory)?|codebase)\b", re.I)
 ONBOARDING = re.compile(r"\bonboard(?:ing)?\b|\b(?:i'?m|i\s+am)\s+new\s+(?:to|on)\b|\bnew\s+(?:developer|contributor|team\s+member)\b"
                         r"|\bgetting[- ]started\s+guide\b|\bhow\s+do\s+i\s+get\s+started\b", re.I)
 DIAGRAM = re.compile(r"\b(?:mermaid|diagram|flowchart|draw\s+(?:the\s+)?(?:architecture|structure|modules?|imports?|call))\b", re.I)
@@ -24,6 +26,8 @@ NODES = 24  # The most boxes one diagram draws, so it stays readable.
 
 def requested(task):
     """("onboarding", None), ("diagram", function name or None), or None."""
+    if REPORT.search(task):
+        return "report", None
     if ONBOARDING.search(task):
         return "onboarding", None
     if DIAGRAM.search(task):
@@ -36,6 +40,8 @@ def run(kind, name, model, workspace, knowledge, output=print):
     """The answer for one kind: {"text", "evidence"}."""
     if kind == "onboarding":
         return onboarding(model, workspace, knowledge, output)
+    if kind == "report":
+        return report(model, workspace, knowledge, output)
     return call_diagram(knowledge, name) if name else import_diagram(knowledge)
 
 
@@ -175,3 +181,23 @@ def onboarding(model, workspace, knowledge, output=print):
     evidence += tour["evidence"]
     parts += ["", "For a picture of how the parts connect, ask for an architecture diagram."]
     return {"text": "\n".join(parts), "evidence": evidence}
+
+
+def report(model, workspace, knowledge, output=print):
+    """One Markdown report on the project: what to read first, how the parts connect, what it depends on, what is
+    untested, and what looks risky. Each part is the answer CodeHaven gives on its own, so each is cited the same way.
+    Save it with the page's Save .md, /export in a session, or --export on the command line."""
+    sections = [("Reading order", insights.tour(model, workspace, knowledge, output)),
+                ("How the parts connect", import_diagram(knowledge)),
+                ("Libraries", scans.dependencies(workspace, knowledge)),
+                ("Functions no test mentions", insights.test_gaps(workspace, knowledge)),
+                ("Security and secrets", scans.security(workspace))]
+    parts = [f"# Project report: {workspace.root.name}",
+             "Made by CodeHaven from this project's files, on this computer. Only the one-line descriptions in the "
+             "reading order come from the local model; everything else is read or parsed from the code, and every "
+             "path:line can be opened to check it."]
+    evidence = []
+    for title, found in sections:
+        parts += [f"## {title}", found["text"]]
+        evidence += found.get("evidence", [])
+    return {"text": "\n\n".join(parts), "evidence": evidence}

@@ -7,7 +7,9 @@
 const vscode = require("vscode");
 const childProcess = require("child_process");
 const path = require("path");
+const crypto = require("crypto");
 const {findCitations, parseCitation, shellQuote, pageLink} = require("./citations");
+const chat = require("./chat");
 
 let pageProcess = null;  // The running `codehaven --gui`, when the chat page was opened from here.
 let pageUrl = null;      // Its link, kept so a second "Open" shows the same page again.
@@ -65,45 +67,100 @@ async function openCitation(citation) {
   vscode.window.showWarningMessage(`CodeHaven: ${citation.path} is not in an open folder.`);
 }
 
-// Start the local chat page for the project, or show it again if it is already running.
-function openPage() {
-  if (pageProcess && pageUrl) {
-    vscode.env.openExternal(vscode.Uri.parse(pageUrl));
-    return;
-  }
+// Start the local chat page server for the project, once; resolves with its link (which holds its token).
+let pageReady = null;
+function ensureServer() {
+  if (pageProcess && pageUrl) return Promise.resolve(pageUrl);
+  if (pageReady) return pageReady;
   const folder = projectFolder();
-  if (!folder) return;
+  if (!folder) return Promise.reject(new Error("open a folder first"));
   const {command, extra} = baseCommand();
-  let output = "";
-  const started = childProcess.spawn(command, ["--gui", "--no-browser", "--workspace", folder, ...extra], {cwd: folder});
-  pageProcess = started;
-  const read = (chunk) => {
-    output = (output + chunk).slice(-8000);
-    const link = !pageUrl && pageLink(output);
-    if (link) {
-      pageUrl = link;
-      vscode.env.openExternal(vscode.Uri.parse(link));  // The link stays on this computer: it is a 127.0.0.1 address.
-    }
-  };
-  started.stdout.on("data", read);
-  started.stderr.on("data", read);
-  started.on("error", (error) => {
-    pageProcess = pageUrl = null;
-    vscode.window.showErrorMessage(`CodeHaven could not be started (${error.message}). Set "codehaven.command" to the full path of the codehaven command.`);
+  pageReady = new Promise((resolve, reject) => {
+    let output = "";
+    const started = childProcess.spawn(command, ["--gui", "--no-browser", "--workspace", folder, ...extra], {cwd: folder});
+    pageProcess = started;
+    const read = (chunk) => {
+      // A server stopped meanwhile can still print; only the current one may set the link.
+      if (started !== pageProcess) return;
+      output = (output + chunk).slice(-8000);
+      const link = !pageUrl && pageLink(output);
+      if (link) { pageUrl = link; resolve(link); }  // The link stays on this computer: it is a 127.0.0.1 address.
+    };
+    started.stdout.on("data", read);
+    started.stderr.on("data", read);
+    started.on("error", (error) => {
+      pageProcess = pageUrl = pageReady = null;
+      reject(new Error(`CodeHaven could not be started (${error.message}). Set "codehaven.command" to the full path of the codehaven command.`));
+    });
+    started.on("exit", (code) => {
+      // Only when it stopped before its page was ready is there something to explain; CodeHaven's own last lines say what.
+      if (started === pageProcess && !pageUrl) {
+        reject(new Error("CodeHaven stopped before its page was ready: " + output.trim().split("\n").slice(-3).join(" ")));
+      }
+      if (started === pageProcess) pageProcess = pageUrl = pageReady = null;
+    });
   });
-  started.on("exit", (code) => {
-    // Only when it stopped before its page was ready is there something to explain; CodeHaven's own last lines say what.
-    if (started === pageProcess && !pageUrl && code) {
-      vscode.window.showErrorMessage("CodeHaven stopped before its page was ready: " + output.trim().split("\n").slice(-3).join(" "));
-    }
-    if (started === pageProcess) pageProcess = pageUrl = null;
-  });
+  return pageReady;
+}
+
+// Open the chat page in the browser, starting its server first if needed.
+function openPage() {
+  ensureServer().then((link) => vscode.env.openExternal(vscode.Uri.parse(link)),
+                      (error) => vscode.window.showErrorMessage(error.message));
+}
+
+// The chat panel: one per window, shown again when it already exists. Messages wait until its page has loaded.
+let panel = null, ready = false, waiting = [];
+function show(message) {
+  if (!panel) return;
+  if (ready) panel.webview.postMessage(message);
+  else waiting.push(message);
+}
+
+// Ask one question from the panel: the question appears in it, then the answer as it streams from the local server.
+async function askInPanel(question) {
+  show({type: "question", question});
+  try {
+    const link = await ensureServer();
+    await chat.request(link, "/api/ask", {question}, (event, status) => {
+      show(status >= 400 ? {type: "error", message: event.error || "The request was refused."} : event);
+    });
+  } catch (error) {
+    show({type: "error", message: error.message});
+  }
+}
+
+function openChat(question) {
+  if (panel) {
+    panel.reveal(vscode.ViewColumn.Beside, true);
+  } else {
+    panel = vscode.window.createWebviewPanel("codehaven.chat", "CodeHaven", {viewColumn: vscode.ViewColumn.Beside, preserveFocus: true},
+                                             {enableScripts: true, retainContextWhenHidden: true});
+    ready = false;
+    const nonce = crypto.randomBytes(16).toString("base64");
+    panel.webview.html = chat.html(nonce, panel.webview.cspSource);
+    panel.onDidDispose(() => { panel = null; ready = false; waiting = []; });
+    panel.webview.onDidReceiveMessage((message) => {
+      if (message.type === "ready") {
+        ready = true;
+        for (const queued of waiting.splice(0)) panel.webview.postMessage(queued);
+      } else if (message.type === "open") {
+        openCitation(message);
+      } else if (message.type === "decide") {
+        ensureServer().then((link) => chat.request(link, "/api/decide", {apply: message.apply === true}, () => {}));
+      } else if (message.type === "ask" && typeof message.question === "string") {
+        askInPanel(message.question);
+      }
+    });
+  }
+  const asked = typeof question === "string" && question.trim() ? askInPanel(question.trim()) : Promise.resolve();
+  return {panel, asked};
 }
 
 // Stop the chat page's server, if this window started one.
 function stopPage() {
   if (pageProcess) pageProcess.kill();
-  pageProcess = pageUrl = null;
+  pageProcess = pageUrl = pageReady = null;
 }
 
 // Called by VS Code when the extension starts: register the commands and the terminal links.
@@ -111,6 +168,14 @@ function activate(context) {
   const command = (name, run) => context.subscriptions.push(vscode.commands.registerCommand(name, run));
   command("codehaven.open", openPage);
   command("codehaven.stop", stopPage);
+  command("codehaven.chat", (question) => openChat(question));
+  command("codehaven.chatAboutSelection", () => {
+    const editor = vscode.window.activeTextEditor;
+    const file = editor && relativePath(editor.document.uri);
+    if (!file) return;
+    openChat(editor.selection.isEmpty ? `Explain ${file}`
+             : `Explain lines ${editor.selection.start.line + 1}-${editor.selection.end.line + 1} of ${file}`);
+  });
   command("codehaven.ask", async () => ask(await vscode.window.showInputBox({prompt: "Ask CodeHaven about this project", placeHolder: "Which function calls checkout_total?"})));
   command("codehaven.askAboutFile", () => {
     const editor = vscode.window.activeTextEditor;

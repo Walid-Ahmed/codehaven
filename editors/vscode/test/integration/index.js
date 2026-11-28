@@ -78,6 +78,23 @@ async function run() {
       vscode.window.showErrorMessage = originalError;
     }
   });
+  await step("the chat panel asks the local server and shows its answer", async () => {
+    // /help is answered by CodeHaven itself, so the check needs no model.
+    const {panel, asked} = await vscode.commands.executeCommand("codehaven.chat");
+    assert.ok(panel && panel.webview, "no chat panel");
+    const posted = [];
+    const original = panel.webview.postMessage.bind(panel.webview);
+    panel.webview.postMessage = (message) => { posted.push(message); return original(message); };
+    const second = await vscode.commands.executeCommand("codehaven.chat", "/help");
+    await Promise.race([second.asked, new Promise((resolve) => setTimeout(resolve, 60_000))]);
+    const done = await waitFor(() => posted.find((message) => message.type === "done" || message.type === "error"), 90,
+                               "the answer in the chat panel");
+    assert.strictEqual(done.type, "done", done.message);
+    assert.match(done.answer, /\/trace <name>/);
+    assert.ok(posted.some((message) => message.type === "question" && message.question === "/help"));
+    panel.dispose();
+    await vscode.commands.executeCommand("codehaven.stop");
+  });
   console.log(`${results.length} checks passed in VS Code ${vscode.version}`);
 }
 

@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import documents, errors, index_cache, ocr, study
+from . import coder, documents, edits, errors, index_cache, ocr, study
 from .agent import Session
 from .chats import Chats, new_id
 from .knowledge import KnowledgeBase
@@ -84,11 +84,13 @@ class App:
 
     def __init__(self, model, *, max_steps=12, retrieval_budget=4000, excludes=(), allow_clone=False, clone_folder=None,
                  remember=False, memory_folder=None, embed_model=None, index_folder=None, chats_folder=None,
-                 retry_unverified=False):
+                 retry_unverified=False, allow_edits=False):
         """Keep the settings. Nothing is indexed until open(), clone(), or open_file() is called.
 
         retry_unverified asks the model once to correct an answer that fails its checks (serve() turns it on)."""
         self.retry_unverified = bool(retry_unverified)
+        # Changing code (--allow-edits): a proposed change waits here for the user's Apply or Decline on the page.
+        self.allow_edits, self.decision = bool(allow_edits), None
         self.chats_folder, self.chats, self.chat_id = chats_folder, None, new_id()
         self.embed_model, self.index_folder, self.semantic = embed_model, index_folder, None
         self.remember, self.memory_folder, self.memory = bool(remember), memory_folder, None
@@ -144,6 +146,8 @@ class App:
 
         The lock makes this and the claims take turns, so a late stop can never end the next request.
         """
+        if self.decision is not None:  # A change waiting for an answer is declined.
+            self.decision["event"].set()
         with self.lock:
             stopped = self.stoppable and hasattr(self.model, "stop")
             if stopped:
@@ -152,6 +156,33 @@ class App:
                 self.cancel.set()
                 stopped = True
         return {"stopped": bool(stopped)}
+
+    def confirm(self, diff, summary):
+        """Show a proposed change's diff on the page and wait for Apply or Decline. Stop, or 15 minutes, declines it."""
+        decision = self.decision = {"event": threading.Event(), "apply": False}
+        self.emit({"type": "diff", "diff": diff, "summary": summary})
+        decision["event"].wait(900)
+        self.decision = None
+        return decision["apply"]
+
+    def decide(self, apply):
+        """The user's answer to the change shown on the page."""
+        decision = self.decision
+        if decision is None:
+            raise ValueError("There is no change waiting for an answer.")
+        decision["apply"] = bool(apply) is True
+        decision["event"].set()
+        return {"ok": True}
+
+    def undo(self):
+        """Undo the last change CodeHaven made in the open repository."""
+        if not self.allow_edits or self.workspace is None:
+            raise ValueError("Changing code is off. Start CodeHaven with --allow-edits to turn it on.")
+        self.claim()
+        try:
+            return {"undone": edits.undo(self.workspace, edits.journal_path(self.workspace))}
+        finally:
+            self.release()
 
     def stopped_summary(self):
         """What the page shows after a stopped index or download: whatever was open before, unchanged."""
@@ -294,6 +325,8 @@ class App:
             self.chat_id = new_id()  # A newly opened repository starts a new chat; an attached file continues one.
         self.session = Session(self.model, workspace, knowledge=knowledge, max_steps=self.max_steps, focus_file=upload,
                                memory=self.memory, retry_unverified=self.retry_unverified,
+                               editor=coder.Editor(confirm=self.confirm, journal=edits.journal_path(workspace))
+                               if self.allow_edits and upload is None else None,
                                output=lambda line: self.emit({"type": "log", "text": str(line)}),
                                stream=lambda text: self.emit({"type": "text", "text": text}))
         # Earlier questions and answers carry over; evidence does not, because it quotes files no longer open.
@@ -339,6 +372,7 @@ class App:
             ready, total = self.semantic.coverage()
             meaning = {"model": self.embed_model, "ready": ready, "total": total, "failed": bool(self.semantic.failed)}
         base = {"model": self.model_name(), "clone": self.allow_clone, "remember": self.remember, "meaning": meaning,
+                "edits": self.allow_edits,
                 "chats": self.chats.listing() if self.chats is not None else [],
                 "saved": len(self.memory.notes) if self.memory is not None else 0}
         workspace, knowledge = self.workspace, self.knowledge
@@ -817,6 +851,10 @@ def make_handler(app, token, port_holder):
                 elif url.path == "/api/reset":
                     app.reset()
                     self.send(200, {"ok": True})
+                elif url.path == "/api/decide":
+                    self.send(200, app.decide(data.get("apply") is True))
+                elif url.path == "/api/undo":
+                    self.send(200, app.undo())
                 elif url.path == "/api/stop":
                     self.send(200, app.stop())
                 elif url.path == "/api/ask":
@@ -881,11 +919,12 @@ def make_server(app, port=0):
 
 def serve(model, *, port=0, open_browser=True, repository=None, max_steps=12, retrieval_budget=4000, excludes=(),
           allow_clone=False, clone_folder=None, remember=False, memory_folder=None, embed_model=None, index_folder=None,
-          chats_folder=None):
+          chats_folder=None, allow_edits=False):
     """Run the GUI until Ctrl+C. Returns an exit code like the CLI's."""
     app = App(model, max_steps=max_steps, retrieval_budget=retrieval_budget, excludes=excludes,
               allow_clone=allow_clone, clone_folder=clone_folder, remember=remember, memory_folder=memory_folder,
-              embed_model=embed_model, index_folder=index_folder, chats_folder=chats_folder, retry_unverified=True)
+              embed_model=embed_model, index_folder=index_folder, chats_folder=chats_folder, retry_unverified=True,
+              allow_edits=allow_edits)
     if repository:
         summary = app.open(str(Path(repository).expanduser().resolve()))
         print(f"Indexed {summary['files']} files from {summary['repository']}.")

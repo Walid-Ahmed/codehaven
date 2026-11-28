@@ -6,6 +6,7 @@ skipped when either is missing. The model is scripted, so no Ollama is needed.
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from pathlib import Path
 
 try:
@@ -77,6 +78,56 @@ class BrowserTests(unittest.TestCase):
         self.server.server_close()
         message = page.evaluate("api('/api/status').then(() => 'no error', (error) => error.message)")
         self.assertIn("local server is not answering", message)
+
+
+class EditModel:
+    prompt_budget = 12_000
+
+    def chat(self, messages, schema, on_text=None):
+        return {"summary": "Include items at the threshold.",
+                "edits": [{"path": "pkg/pricing.py", "old": "return p * 0.9", "new": "return p * 0.8"}]}
+
+
+@unittest.skipUnless(sync_playwright, "Playwright is not installed (python -m pip install playwright)")
+class BrowserEditTests(BrowserTests):
+    """With --allow-edits, a change is shown as a diff on the page and applied only on Apply; Undo puts it back."""
+
+    def setUp(self):
+        super().setUp()
+        self.app.model = EditModel()
+        self.app.allow_edits = True
+        self.journal = tempfile.TemporaryDirectory()
+        self.addCleanup(self.journal.cleanup)
+        patcher = unittest.mock.patch("offline_agent.edits.UNDO_FOLDER", Path(self.journal.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_open_ask_and_follow_a_citation(self):
+        pass  # Covered by BrowserTests; this class tests changing code.
+
+    def test_a_stopped_server_gets_a_plain_message(self):
+        pass
+
+    def test_apply_then_undo_from_the_page(self):
+        page, source = self.page, self.repo / "pkg" / "pricing.py"
+        before = source.read_text()
+        page.goto(self.url)
+        page.fill("#path", str(self.repo))
+        page.click("#index")
+        page.wait_for_selector("#question:enabled", timeout=15_000)
+        page.wait_for_selector("#undo-change:visible", timeout=5_000)
+        page.fill("#question", "Fix apply_discount in pkg/pricing.py")
+        page.click("#send")
+        page.wait_for_selector(".diff-box .del:has-text('return p * 0.9')", timeout=15_000)
+        self.assertEqual(source.read_text(), before)  # Nothing is written before Apply.
+        page.click(".diff-actions button:has-text('Apply')")
+        page.wait_for_selector("#messages :text('Changed pkg/pricing.py')", timeout=15_000)
+        self.assertIn("return p * 0.8", source.read_text())
+        page.wait_for_selector("#question:enabled", timeout=15_000)
+        page.click("#undo-change")
+        page.wait_for_selector("#toast:has-text('Undid')", timeout=10_000)
+        self.assertEqual(source.read_text(), before)
+        self.assertEqual(self.errors, [])
 
 
 if __name__ == "__main__":

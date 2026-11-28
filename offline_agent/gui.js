@@ -244,6 +244,7 @@ function setIndexed(summary) {
   uploaded = Boolean(summary.upload);
   $("model-name").textContent = summary.model || t("a local model");
   setClone(Boolean(summary.clone));
+  $("undo-change").hidden = !summary.edits;
   setSaved(summary);
   setChats(summary.chats);
   if (!indexed) return;
@@ -652,6 +653,31 @@ $("model").addEventListener("change", async () => {
   }
 });
 
+// ---- Changing code (--allow-edits): a proposed change is shown as a diff, and applied only on Apply.
+function showDiff(card, event) {
+  const box = document.createElement("div"); box.className = "diff-box";
+  const title = document.createElement("strong"); title.dir = "auto"; title.textContent = t("Proposed change: ") + event.summary;
+  const pre = document.createElement("pre"); pre.className = "diff";
+  for (const line of event.diff.split("\n")) {
+    const row = document.createElement("span");
+    row.className = line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : "";
+    row.textContent = line + "\n"; pre.append(row);
+  }
+  const apply = document.createElement("button"); apply.textContent = t("Apply");
+  const decline = document.createElement("button"); decline.textContent = t("Decline");
+  const answer = async (yes) => {
+    apply.disabled = decline.disabled = true;
+    try { await api("/api/decide", {method: "POST", body: JSON.stringify({apply: yes})}); } catch (error) { toast(error.message); }
+  };
+  apply.addEventListener("click", () => answer(true)); decline.addEventListener("click", () => answer(false));
+  const row = document.createElement("div"); row.className = "diff-actions"; row.append(apply, decline);
+  box.append(title, pre, row); card.append(box); scrollDown();
+}
+$("undo-change").addEventListener("click", async () => {
+  if (busy) return;
+  try { toast(t("Undid: ") + (await api("/api/undo", {method: "POST", body: "{}"})).undone); } catch (error) { toast(error.message); }
+});
+
 // ---- Chat.
 function clearChat() {
   $("messages-inner").replaceChildren($("empty"));
@@ -777,6 +803,8 @@ async function ask(question) {
         answer.innerHTML = render(streamed);
         phase = t("Writing the answer…");
         scrollDown();
+      } else if (event.type === "diff") {
+        showDiff(card, event);
       } else if (event.type === "done" || event.type === "error" || event.type === "stopped") {
         done = event;
       }

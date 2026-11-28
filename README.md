@@ -468,7 +468,7 @@ Hidden/built-in paths stay blocked. User exclusions add restrictions; they canno
 
 ## Change code (opt-in)
 
-CodeHaven answers a change request by explaining the change, unless you start it with `--allow-edits`. Then it can make the change, always after showing you the diff:
+CodeHaven answers a change request by explaining the change, unless you start it with `--allow-edits` (in the terminal, or with `--gui`). Then it can make the change, always after showing you the diff: in the terminal you answer `y` or `n`, and on the page you click **Apply** or **Decline** under the diff. **Undo last change** in the page's sidebar does the same as `/undo`.
 
 | You ask | What happens |
 |---|---|

@@ -228,3 +228,10 @@ details.steps pre { white-space: pre-wrap; background: var(--panel-2); padding: 
   .tabs button { padding: 5px 9px; }
   .map-scroll, .cards-body { padding-left: 16px; padding-right: 16px; }
 }
+
+/* A proposed change (--allow-edits): its diff, with Apply and Decline. */
+.diff-box { margin-top: 10px; border: 1px solid var(--line, #d0d7de); border-radius: 8px; padding: 10px; }
+.diff-box pre.diff { max-height: 360px; overflow: auto; font-size: 12px; margin: 8px 0; white-space: pre; }
+.diff-box .add { background: rgba(46, 160, 67, 0.15); display: block; }
+.diff-box .del { background: rgba(248, 81, 73, 0.15); display: block; }
+.diff-actions { display: flex; gap: 8px; }

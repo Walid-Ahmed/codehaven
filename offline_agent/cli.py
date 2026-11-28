@@ -268,7 +268,8 @@ def main(argv=None):
                          max_steps=args.max_steps, retrieval_budget=args.retrieval_budget, excludes=args.exclude,
                          allow_clone=args.allow_clone, clone_folder=args.clone_dir,
                          remember=args.remember, memory_folder=args.memory_dir,
-                         embed_model=embed_model, index_folder=args.index_dir, chats_folder=args.chats_dir)
+                         embed_model=embed_model, index_folder=args.index_dir, chats_folder=args.chats_dir,
+                         allow_edits=args.allow_edits)
         workspace = Workspace(args.workspace or ".", excludes=args.exclude)
         references = Path(args.knowledge_base).expanduser() if args.knowledge_base else workspace.root / "knowledge"
         semantic = None

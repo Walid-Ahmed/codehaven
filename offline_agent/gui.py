@@ -47,7 +47,7 @@ from .knowledge import KnowledgeBase
 from .memory import Memory
 from .model import MODEL, Stopped
 from .semantic import Semantic
-from .workspace import MAX_BYTES, MAX_FILES, Workspace
+from .workspace import MAX_BYTES, MAX_FILES, Workspace, combined
 
 PAGE = Path(__file__).with_name("gui.html")
 # The page is kept as four files and served as one: each mark in the markup or the script is replaced by a file.
@@ -205,10 +205,12 @@ class App:
 
     def index(self, path, excludes=()):
         """Index the folder at path and return the page's summary. The caller already holds the busy claim."""
-        root = Path(path).expanduser()
-        if not root.is_absolute():
+        # Several repositories can be opened together, their full paths separated by ";" or new lines.
+        roots = [Path(part.strip()).expanduser() for part in re.split(r"[;\n]", path) if part.strip()] or [Path(path)]
+        if not all(root.is_absolute() for root in roots):
             raise ValueError("Use the full path of the repository folder, such as /Users/you/dev/project.")
-        workspace = Workspace(root, excludes=self.excludes + tuple(excludes))
+        workspace = (combined(roots, excludes=self.excludes + tuple(excludes)) if len(roots) > 1
+                     else Workspace(roots[0], excludes=self.excludes + tuple(excludes)))
         # A knowledge folder inside the repository holds the user's own reference notes; it is indexed when present.
         references = workspace.root / "knowledge"
         self.load(workspace, references if references.exists() else None)

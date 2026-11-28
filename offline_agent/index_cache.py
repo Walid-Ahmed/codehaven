@@ -30,7 +30,7 @@ def empty():
 def path(workspace, folder=None):
     """The index file for one repository: a readable name plus a hash of its full path."""
     name = re.sub(r"[^\w.-]", "_", workspace.root.name, flags=re.ASCII)[:40] or "repository"
-    mark = hashlib.sha256(str(workspace.root).encode()).hexdigest()[:12]
+    mark = hashlib.sha256("\0".join([str(workspace.root), *getattr(workspace, "scopes", ())]).encode()).hexdigest()[:12]
     return (Path(folder).expanduser() if folder else FOLDER) / f"{name}-{mark}.keywords"
 
 

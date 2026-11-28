@@ -14,7 +14,7 @@ from .memory import Memory
 from .model import MODEL, Ollama
 from .semantic import Semantic, choose_model
 from .test_runner import DEFAULT_IMAGE
-from .workspace import Workspace
+from .workspace import Workspace, combined
 
 SEMANTIC_WAIT = 60  # Seconds a command waits for meaning search before answering with what is ready.
 EXIT_WORDS = {"exit", "quit", "/exit", "/quit"}
@@ -132,6 +132,8 @@ def main(argv=None):
                                                  "It never changes your files.")
     parser.add_argument("task", nargs="?", help="Question about the code, in plain English or Arabic")
     parser.add_argument("--workspace", help="Project folder; defaults to the current folder (with --gui, none)")
+    parser.add_argument("--also", action="append", default=[], metavar="FOLDER",
+                        help="Another repository to open with --workspace, so questions are answered across both; repeatable")
     parser.add_argument("--exclude", action="append", default=[], metavar="PATTERN",
                         help="Additional Git-style exclusion; repeat for multiple patterns")
     parser.add_argument("--knowledge-base", help="Local reference directory; defaults to workspace/knowledge")
@@ -294,7 +296,10 @@ def main(argv=None):
                          remember=args.remember, memory_folder=args.memory_dir,
                          embed_model=embed_model, index_folder=args.index_dir, chats_folder=args.chats_dir,
                          allow_edits=args.allow_edits)
-        workspace = Workspace(args.workspace or ".", excludes=args.exclude)
+        workspace = (combined([args.workspace or ".", *args.also], excludes=args.exclude) if args.also
+                     else Workspace(args.workspace or ".", excludes=args.exclude))
+        if workspace.scopes:
+            print("Opened together: " + ", ".join(workspace.scopes) + f" (paths are shown from {workspace.root}).")
         references = Path(args.knowledge_base).expanduser() if args.knowledge_base else workspace.root / "knowledge"
         semantic = None
         if embed_model:

@@ -181,11 +181,26 @@ def enclosing_parts(name, text):
     return lookup
 
 
+def combined(roots, *, excludes=()):
+    """One workspace for several repository folders: their common parent, limited to them.
+
+    A single folder, or a folder that holds all the others, is opened as it is."""
+    paths = [Path(root).expanduser().resolve(strict=True) for root in roots]
+    common = Path(os.path.commonpath([str(path) for path in paths]))
+    if len(paths) == 1 or common in paths:
+        return Workspace(common, excludes=excludes)
+    return Workspace(common, excludes=excludes, scopes=[path.relative_to(common).as_posix() for path in paths])
+
+
 class Workspace:
     """Read-only view of one directory tree. Every name is checked by path() before it is listed, read, or searched."""
 
-    def __init__(self, root, *, excludes=()):
-        """Resolve the root once, so later checks compare against the real directory, and load the ignore rules."""
+    def __init__(self, root, *, excludes=(), scopes=()):
+        """Resolve the root once, so later checks compare against the real directory, and load the ignore rules.
+
+        scopes, folders under root such as ("api", "web"), limits the workspace to them: several repositories
+        are opened together as the folders of their common parent, and nothing else under that parent is seen.
+        """
         self.root = Path(root).resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Workspace must be a directory")
@@ -194,7 +209,11 @@ class Workspace:
         self.root_text = str(self.root)
         self.root_key = os.path.normcase(self.root_text)
         self.excludes = tuple(excludes)
+        self.scopes = tuple(sorted({PurePath(scope).as_posix().strip("/") for scope in scopes if str(scope).strip("/.")}))
         self.exclusions = Exclusions(self.root, self.excludes)
+        for scope in self.scopes:
+            if not self.path(scope).is_dir():
+                raise ValueError(f"{scope} is not a folder under {self.root}")
 
     def path(self, name):
         """Return the real path for a workspace-relative name.
@@ -208,6 +227,11 @@ class Workspace:
             raise ValueError("Use a relative path inside the workspace")
         if any(p in EXCLUDED or p.startswith(".") for p in rel.parts):
             raise ValueError("Hidden and excluded paths are unavailable")
+        if self.scopes:
+            posix = "/".join(rel.parts)
+            # Inside an opened repository, or a folder on the way to one; nothing else under the common parent.
+            if not any(posix == scope or posix.startswith(scope + "/") or scope.startswith(posix + "/") for scope in self.scopes):
+                raise ValueError(f"{name} is not in one of the opened repositories")
         # A symlink at any level could point outside the workspace, so each component is checked, not only the last.
         current = self.root_text
         for part in rel.parts:
@@ -227,6 +251,13 @@ class Workspace:
 
         Hidden, excluded, ignored, symlinked, and oversized files are left out.
         """
+        if self.scopes and (not scope or any(other.startswith(scope.strip("/") + "/") for other in self.scopes)):
+            # Several repositories: each one's files, in the order the repositories were given, within the one bound.
+            found = []
+            for other in self.scopes:
+                if not scope or other.startswith(scope.strip("/") + "/"):
+                    found += self.files(other)[:MAX_FILES - len(found)]
+            return found
         start = self.path(scope) if scope else self.root
         if not start.is_dir():
             raise ValueError("File listing scope must be a directory")

@@ -381,7 +381,11 @@ For several questions in a row, start an interactive session. Follow-ups remembe
 codehaven --workspace /absolute/path/to/project --interactive
 ```
 
-Typed at a terminal with no question, plain `codehaven` starts the same session in the current folder. The up and down arrows bring back earlier questions.
+Typed at a terminal with no question, plain `codehaven` starts the same session in the current folder.
+
+To ask across several repositories at once, such as a backend and its frontend, add each extra one with `--also`: `codehaven --workspace ~/dev/api --also ~/dev/web -i`. They are indexed together and paths are shown from their common parent (`api/server.py`, `web/src/client.js`); nothing else under that parent is read. On the page, put the full paths in the folder box separated by `;`.
+
+In a session, and in the page's question box, slash commands are short forms of the requests below: `/trace name`, `/review file`, `/why path:line`, `/impact name`, `/explain name`, `/tour`, `/onboard`, `/diagram [name]`, `/deps`, `/scan`, `/gaps`, `/changes`, `/review-changes`, `/commit`, `/pr`, `/export`, and `/undo`. `/help` lists them. The up and down arrows bring back earlier questions.
 
 To let the model check something by running it, such as what a function returns for a sample input, add `--allow-python`. The model can then ask to run a short Python snippet (up to 8,000 bytes). CodeHaven prints the code and runs it only if you answer `y`, in the same Docker container as [isolated tests](#run-isolated-project-tests): no network, a read-only copy of the project as its working directory, 30 seconds, and only the packages in the test image. It cannot change your files. Without the flag the action does not exist and the prompts are exactly as before. The browser page does not offer it yet, because it has no way to ask you to approve the code.
 

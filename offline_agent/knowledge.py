@@ -118,9 +118,11 @@ class KnowledgeBase:
         self.directory = directory
         self.workspace_root = workspace.root if isinstance(workspace, Workspace) else workspace
         self.excludes = workspace.excludes if isinstance(workspace, Workspace) else tuple(excludes)
+        self.scopes = workspace.scopes if isinstance(workspace, Workspace) else ()
         # Reuse a supplied workspace so its cached exclusion decisions are shared.
         repository = (workspace if isinstance(workspace, Workspace) else
-                      Workspace(self.workspace_root, excludes=self.excludes) if self.workspace_root is not None else None)
+                      Workspace(self.workspace_root, excludes=self.excludes, scopes=self.scopes)
+                      if self.workspace_root is not None else None)
         if repository is not None:
             self.workspace_root = repository.root
         self.excluded_reference_roots = 0
@@ -316,7 +318,7 @@ class KnowledgeBase:
         directory = Path(self.directory).expanduser() if self.directory is not None else None
         for label, root in (("user", directory), ("repo", self.workspace_root)):
             if root is not None and Path(root).exists():
-                workspace = Workspace(root, excludes=self.excludes)
+                workspace = Workspace(root, excludes=self.excludes, scopes=self.scopes if label == "repo" else ())
                 listings.append((label, workspace, workspace.files()))
         return self.stamp_of(listings)
 
@@ -332,7 +334,8 @@ class KnowledgeBase:
         except (ValueError, OSError):
             pass  # Whatever is wrong is reported by the rebuild below.
         previous = {"files": self.records, **self.analysed}
-        self.__init__(self.directory, workspace=self.workspace_root, context_budget=self.context_budget,
+        self.__init__(self.directory, workspace=Workspace(self.workspace_root, excludes=self.excludes, scopes=self.scopes),
+                      context_budget=self.context_budget,
                       excludes=self.excludes, semantic=self.semantic, cache=self.cache, previous=previous)
         return True
 

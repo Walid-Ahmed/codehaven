@@ -466,6 +466,22 @@ codehaven --workspace /path/to/repo \
 
 Hidden/built-in paths stay blocked. User exclusions add restrictions; they cannot undo Git ignores. Rules apply to tracked files too. [Exclusion details](docs/EXCLUSIONS.md) cover precedence, negation, root scope, and reference libraries.
 
+## Change code (opt-in)
+
+CodeHaven answers a change request by explaining the change, unless you start it with `--allow-edits`. Then it can make the change, always after showing you the diff:
+
+| You ask | What happens |
+|---|---|
+| "Fix `low_stock` in store.py so items at the threshold count" | The model proposes exact replacements; you see the diff and answer `y` or `n` |
+| "Fix the code until the tests pass" | The tests run in the Docker sandbox; a failure goes back to the model, up to 3 rounds, each diff approved by you |
+| "Write tests for `low_stock`" | New tests in a new or existing test file, in the style of your other tests |
+| "Add docstrings to store.py" | Docstrings for the functions and classes that have none, and no other change |
+| "Rename `low_stock` to `below_threshold`" | Done by plain code, not the model: whole-word replacement in every code file that uses the name |
+| "Write a README" / "Write architecture notes" | Written from the project tour and the libraries list |
+| "Apply the review findings in store.py" | The file is reviewed function by function, and the model fixes what the review found |
+
+An edit must copy the text it replaces exactly, and that text must occur once, in a file CodeHaven may read: hidden, excluded, linked, and outside files are never changed. A file that changed while you were reading the diff is not overwritten. Every applied change is recorded outside the repository, in `~/CodeHaven/undo`, so `/undo` in a session, or `codehaven --undo`, puts the files back, unless you changed them again since. Everything stays offline.
+
 ## Code that is not in the repository
 
 When the lines an answer cites use code the repository does not hold, the answer says so under the heading "Code these lines use that is not in this repository". It lists each import: a library, such as `requests` or `jsonwebtoken`, or a relative import of a file that is not there, with the line that imports it. Only imports whose name appears on the cited lines are listed, and Python's standard library and Node's built-in modules are left out, because the model already knows them. Imports are found by parsing Python, JavaScript, and TypeScript; nothing is run. The note is not a citation, so it never makes an answer unverified; it tells you where the answer stops being able to show you the code.

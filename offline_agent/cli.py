@@ -6,7 +6,7 @@ import time
 from functools import partial
 from pathlib import Path
 
-from . import doctor, errors, export, index_cache, ocr
+from . import coder, doctor, edits, errors, export, index_cache, ocr
 from .agent import Session, run
 from .chats import Chats
 from .knowledge import KnowledgeBase
@@ -46,6 +46,15 @@ def interactive(session, first_task=None, prompt=input):
         if task == "/reset":
             session.reset()
             print("Session history cleared.", flush=True)
+        elif task == "/undo":
+            editor = getattr(session, "options", {}).get("editor")
+            if editor is None:
+                print("Nothing to undo: changing code is off. Start with --allow-edits to turn it on.", flush=True)
+            else:
+                try:
+                    print(f"Undid: {edits.undo(session.workspace, editor.journal)}", flush=True)
+                except (edits.EditError, OSError) as exc:
+                    print(f"Error: {exc}", file=sys.stderr, flush=True)
         elif task == "/export" or task.startswith("/export "):
             if not answered:
                 print("Nothing to export yet: ask a question first.", flush=True)
@@ -138,6 +147,10 @@ def main(argv=None):
                         help="Ask several tasks in one session; follow-ups see earlier answers")
     parser.add_argument("--no-retry", action="store_true",
                         help="Do not ask the model to correct an answer that fails its checks (one extra step, on by default)")
+    parser.add_argument("--allow-edits", action="store_true",
+                        help="Let CodeHaven change code when you ask it to (fix, write tests, add docstrings, rename, write "
+                             "docs). Each change is shown as a diff and applied only if you answer y; --undo puts it back")
+    parser.add_argument("--undo", action="store_true", help="Undo the last change CodeHaven made in this workspace, then exit")
     parser.add_argument("--export", metavar="FILE",
                         help="Also save the question and its answer, with citations, as Markdown to FILE (a new file; "
                              "an existing one is never replaced). In --interactive, type /export [FILE] instead")
@@ -178,6 +191,14 @@ def main(argv=None):
     # --ocr and --forget do not use the model, so they are handled before Ollama is contacted.
     if args.ocr:
         return read_picture(args.ocr, args.out)
+    if args.undo:
+        try:
+            workspace = Workspace(args.workspace or ".", excludes=args.exclude)
+            print(f"Undid: {edits.undo(workspace, edits.journal_path(workspace))}")
+            return 0
+        except (ValueError, OSError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
     if args.forget:
         try:
             memory = Memory(Workspace(args.workspace or ".", excludes=args.exclude), args.memory_dir)
@@ -195,7 +216,7 @@ def main(argv=None):
         return 0
     if not 2000 <= args.retrieval_budget <= 16000:
         parser.error("--retrieval-budget must be between 2000 and 16000 bytes")
-    if not args.doctor and not args.interactive and not args.gui and not args.task:
+    if not args.doctor and not args.interactive and not args.gui and not args.task:  # --undo returned above.
         # Typed at a terminal with nothing to ask yet, the likely wish is to start asking.
         if not sys.stdin.isatty():
             parser.error("a task is required unless --doctor, --interactive, --gui, or --forget is used")
@@ -286,6 +307,13 @@ def main(argv=None):
                        confirm_code=(lambda _code: input("Run this snippet in Docker with network disabled and the project "
                                                          "read-only? [y/N] ").strip().lower() == "y")
                        if args.allow_python else None)
+        if args.allow_edits:
+            options["editor"] = coder.Editor(
+                confirm=lambda _diff, _summary: input("Apply this change? [y/N] ").strip().lower() == "y",
+                journal=edits.journal_path(workspace), test_options=options["test_options"],
+                confirm_tests=options["confirm_tests"])
+            print("Changing code is on: each change is shown as a diff and applied only if you answer y. "
+                  "Undo the last one with /undo or codehaven --undo.")
         memory = Memory(workspace, args.memory_dir) if args.remember else None
         if memory is not None:
             print(f"Long-term memory: {len(memory.notes)} saved answer{'s' if len(memory.notes) != 1 else ''} for this "

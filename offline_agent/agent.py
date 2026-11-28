@@ -8,7 +8,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from . import arabic, changes, insights, scans, symbols, trace, tracebacks
+from . import arabic, changes, coder, insights, scans, symbols, trace, tracebacks
 from . import history as blame  # history is also run_state's name for the session's earlier turns.
 from .review import CHANGES as REVIEW_CHANGES, review, review_changes
 from .test_runner import DEFAULT_IMAGE, command, run_snippet, run_tests
@@ -486,8 +486,10 @@ def run(model, workspace, task, *, memory=None, **options):
 
 def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowledge=None,
               test_options=None, output=print, stream=None, history="", carried_evidence=(), focus_file=None, notes="",
-              confirm_code=None, retry_unverified=False):
-    """Run one task and return the final graph state. history and carried_evidence come from a Session.
+              confirm_code=None, retry_unverified=False, editor=None):
+    """Run one task and return the final graph state.
+
+    editor, a coder.Editor, turns on changing code: a change request is then made, after the user approves its diff. history and carried_evidence come from a Session.
 
     notes are answers recalled from long-term memory, shown before the session's own history.
 
@@ -548,8 +550,11 @@ def run_state(model, workspace, task, *, max_steps=12, confirm_tests=None, knowl
     in_arabic = arabic.written_in(task)
     scan = scans.requested(task) if report is None and not asked_changes else None
     why = report is None and not asked_changes and blame.requested(task)
+    edit = coder.requested(task) if editor is not None and report is None and found is None else None
     if found is not None:
         pass  # The changes were reviewed above.
+    elif edit:
+        found = coder.run(edit, model, workspace, knowledge, task, editor, output)
     elif scan:
         found = scans.run(*scan, workspace, knowledge)
     elif why and (explained := blame.explain(model, workspace, knowledge, task, output)) is not None:
@@ -775,7 +780,7 @@ class Session:
         # "My last commit" means something else tomorrow, so answers about changes are neither recalled nor saved.
         # Test gaps and tours are rebuilt from the whole project each time, which a saved copy would not notice changing.
         memory = (None if changes.requested(task) or insights.requested(task) or scans.requested(task) or blame.requested(task)
-                  else self.memory)
+                  or (self.options.get("editor") is not None and coder.requested(task)) else self.memory)
         notes = memory.recall(task, skip=[question for question, _ in self.turns]) if memory else []
         evidence = self.evidence
         if notes:

@@ -74,6 +74,8 @@ python -m pip install pypdf      # or: brew install poppler
 
 Step 4 is needed only for [pictures of code](#read-code-from-a-picture). Ollama runs the chat model; Tesseract is a second, separate local program that reads the text in a picture. It is not an Ollama model, so `ollama pull` does not install it. On Windows, use an installer from the [Tesseract installation page](https://tesseract-ocr.github.io/tessdoc/Installation.html) and make sure `tesseract --version` works in a new terminal.
 
+**Or let CodeHaven do steps 1, 2, and 5 for you.** After installing Ollama and CodeHaven, run `codehaven --setup`. It starts Ollama if needed, suggests a model for this computer's memory (`qwen2.5-coder:3b` under 12 GB, the tested `qwen2.5-coder:7b` up to 32 GB, `qwen2.5:14b` above), and downloads it with `ollama pull` only if you answer `y`. That download is the only time CodeHaven uses the internet. `codehaven --doctor` also names the suggested model.
+
 After that, everything works offline. Each time, activate the environment and open the browser page:
 
 ```sh

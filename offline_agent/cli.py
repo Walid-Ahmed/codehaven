@@ -140,6 +140,9 @@ def main(argv=None):
     parser.add_argument("--max-steps", type=int, default=12, choices=range(1, 31), metavar="1..30")
     parser.add_argument("--doctor", action="store_true",
                         help="Check the local server, the model, and the optional tools, and say how to get what is missing")
+    parser.add_argument("--setup", action="store_true",
+                        help="Guided first run: check Ollama, suggest a model for this computer's memory, and download it "
+                             "with ollama pull only if you say yes (the only step that uses the internet)")
     parser.add_argument("--start-ollama", action="store_true",
                         help="If no Ollama server is running, start one for this run on 127.0.0.1 with cloud features "
                              "off, and stop it on exit")
@@ -216,6 +219,12 @@ def main(argv=None):
         return 0
     if not 2000 <= args.retrieval_budget <= 16000:
         parser.error("--retrieval-budget must be between 2000 and 16000 bytes")
+    if args.setup:
+        try:
+            return doctor.setup(Ollama(model=args.model, endpoint=args.endpoint), output=partial(print, flush=True))
+        except (ValueError, OSError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
     if not args.doctor and not args.interactive and not args.gui and not args.task:  # --undo returned above.
         # Typed at a terminal with nothing to ask yet, the likely wish is to start asking.
         if not sys.stdin.isatty():
@@ -257,6 +266,9 @@ def main(argv=None):
             print(f"Meaning search: {embed_model}" if embed_model else "Meaning search: off (--no-semantic)" if not args.semantic
                   else "Meaning search: off, no embedding model is installed. To turn it on, run once while online: "
                        "ollama pull nomic-embed-text")
+            suggestion, why = doctor.suggested_model()
+            print(f"Suggested model for this computer: {suggestion} ({why})." if suggestion != model.model else
+                  f"The model in use is the one suggested for this computer ({why}).")
             for line in doctor.extras(args.test_image) + [doctor.default_model_hint(model)]:
                 if line:
                     print(line)

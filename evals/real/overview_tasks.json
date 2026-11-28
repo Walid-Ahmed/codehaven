@@ -1,0 +1,118 @@
+[
+ {
+  "id": "requests-overview",
+  "repo": "requests",
+  "task": "Explain this project",
+  "checks": {
+   "answer": [
+    "\\bSession\\b",
+    "\\b(HTTPAdapter|adapters?)\\b",
+    "\\bResponse\\b"
+   ]
+  }
+ },
+ {
+  "id": "click-overview",
+  "repo": "click",
+  "task": "Explain this project",
+  "checks": {
+   "answer": [
+    "\\bcommands?\\b",
+    "\\b(options?|decorators?)\\b",
+    "\\b[Cc]ontext\\b"
+   ]
+  }
+ },
+ {
+  "id": "express-overview",
+  "repo": "express",
+  "task": "Explain this project",
+  "checks": {
+   "answer": [
+    "\\bmiddleware\\b",
+    "\\b[Rr]outer|routing\\b",
+    "\\b(req|res|request|response)\\b"
+   ]
+  }
+ },
+ {
+  "id": "flask-overview",
+  "repo": "flask",
+  "task": "Explain this project",
+  "checks": {
+   "answer": [
+    "\\bFlask\\b",
+    "\\b(route|routing|[Bb]lueprints?)\\b",
+    "\\b(Werkzeug|WSGI)\\b"
+   ]
+  }
+ },
+ {
+  "id": "cobra-overview",
+  "repo": "cobra",
+  "task": "Explain this project",
+  "checks": {
+   "answer": [
+    "\\bCommand\\b",
+    "\\bflags?\\b",
+    "\\b(CLI|command[- ]line)\\b"
+   ]
+  }
+ },
+ {
+  "id": "axios-overview",
+  "repo": "axios",
+  "task": "Explain this project",
+  "checks": {
+   "answer": [
+    "\\bHTTP\\b",
+    "\\binterceptors?\\b",
+    "\\b(adapters?|XMLHttpRequest|xhr)\\b"
+   ]
+  }
+ },
+ {
+  "id": "fastapi-overview",
+  "repo": "fastapi",
+  "task": "Explain this project",
+  "checks": {
+   "answer": [
+    "\\bFastAPI\\b",
+    "\\b(APIRouter|routes?|routing)\\b",
+    "\\b(Pydantic|Starlette|dependenc(y|ies))\\b"
+   ]
+  }
+ },
+ {
+  "id": "fastapi-tour",
+  "repo": "fastapi",
+  "task": "Give me a project tour",
+  "checks": {
+   "answer": [
+    "fastapi/(applications|routing|__init__)\\.py"
+   ]
+  }
+ },
+ {
+  "id": "fastapi-libraries",
+  "repo": "fastapi",
+  "task": "Which libraries does this project use?",
+  "checks": {
+   "answer": [
+    "\\bstarlette\\b",
+    "\\bpydantic\\b"
+   ]
+  }
+ },
+ {
+  "id": "fastapi-impact",
+  "repo": "fastapi",
+  "task": "What breaks if I change solve_dependencies?",
+  "checks": {
+   "answer": [
+    "fastapi/routing\\.py",
+    "tests/"
+   ]
+  }
+ }
+]

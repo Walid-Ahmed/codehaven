@@ -90,6 +90,9 @@ def load_tasks(path):
     return tasks
 
 
+MULTI_REPO = {"overview"}  # Suites whose tasks each name one of the pinned repositories.
+
+
 def suites():
     """Names of the real-repository suites: every evals/real/NAME_tasks.json."""
     return sorted(path.name.removesuffix("_tasks.json") for path in REAL.glob("*_tasks.json"))
@@ -100,6 +103,9 @@ def suite_paths(name):
     if name not in suites():
         raise ValueError(f"Unknown suite {name!r}. Choose from: {', '.join(suites())}")
     repo = REAL / "repos" / name
+    # A suite whose tasks each name their repository, such as overview, runs over several of them.
+    if not repo.is_dir() and name in MULTI_REPO:
+        return REAL / f"{name}_tasks.json", REAL / "repos", EVALS / "results" / f"{name}.json"
     if not repo.is_dir():
         raise ValueError(f"The {name} repository is not on this computer. Download it once, while online: "
                          f"python3 scripts/fetch_eval_repos.py {name}")
@@ -126,6 +132,9 @@ def evaluate_task(task, model, repo, retry=False):
 
     retry turns on the one correction of an answer that fails its checks, as the terminal and the page do; it is
     off by default so that results stay comparable with runs made before it existed."""
+    repo = Path(repo) / task["repo"] if task.get("repo") else repo
+    if not Path(repo).is_dir():
+        raise ValueError(f"The {task.get('repo')} repository is not on this computer: python3 scripts/fetch_eval_repos.py {task.get('repo')}")
     with tempfile.TemporaryDirectory(prefix="codehaven-eval-") as temporary:
         root = Path(temporary) / "repo"
         shutil.copytree(repo, root)
